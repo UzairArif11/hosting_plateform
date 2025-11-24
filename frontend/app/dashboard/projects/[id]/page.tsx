@@ -1,0 +1,334 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { useDispatch, useSelector } from 'react-redux';
+import { AppDispatch, RootState } from '@/lib/store';
+import { fetchProject, deleteProject } from '@/lib/slices/projectsSlice';
+import { fetchDeployments, createDeployment } from '@/lib/slices/deploymentsSlice';
+import Link from 'next/link';
+import toast from 'react-hot-toast';
+import {
+    RocketLaunchIcon,
+    Cog6ToothIcon,
+    TrashIcon,
+    ClockIcon,
+    CheckCircleIcon,
+    XCircleIcon,
+    ArrowPathIcon,
+} from '@heroicons/react/24/outline';
+
+export default function ProjectDetailPage() {
+    const params = useParams();
+    const router = useRouter();
+    const dispatch = useDispatch<AppDispatch>();
+    const { currentProject, loading: projectLoading } = useSelector((state: RootState) => state.projects);
+    const { deployments, loading: deploymentsLoading } = useSelector((state: RootState) => state.deployments);
+    const [activeTab, setActiveTab] = useState('deployments');
+    const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>([]);
+
+    useEffect(() => {
+        if (params.id) {
+            dispatch(fetchProject(params.id as string));
+            dispatch(fetchDeployments({ projectId: params.id as string }));
+        }
+    }, [params.id, dispatch]);
+
+    useEffect(() => {
+        if (currentProject?.environmentVariables) {
+            setEnvVars(
+                Object.entries(currentProject.environmentVariables).map(([key, value]) => ({
+                    key,
+                    value: value as string,
+                }))
+            );
+        }
+    }, [currentProject]);
+
+    const handleDeploy = async () => {
+        try {
+            await dispatch(createDeployment({
+                projectId: params.id as string,
+                branch: currentProject?.repository?.branch || 'main',
+            })).unwrap();
+            toast.success('Deployment started!');
+        } catch (error: any) {
+            toast.error(error || 'Failed to start deployment');
+        }
+    };
+
+    const handleDeleteProject = async () => {
+        if (!confirm(`Are you sure you want to delete "${currentProject?.name}"?`)) {
+            return;
+        }
+
+        try {
+            await dispatch(deleteProject(params.id as string)).unwrap();
+            toast.success('Project deleted successfully');
+            router.push('/dashboard/projects');
+        } catch (error: any) {
+            toast.error(error || 'Failed to delete project');
+        }
+    };
+
+    const getStatusIcon = (status: string) => {
+        switch (status) {
+            case 'success':
+                return <CheckCircleIcon className="h-5 w-5 text-green-500" />;
+            case 'failed':
+                return <XCircleIcon className="h-5 w-5 text-red-500" />;
+            case 'building':
+                return <ArrowPathIcon className="h-5 w-5 text-blue-500 animate-spin" />;
+            default:
+                return <ClockIcon className="h-5 w-5 text-gray-500" />;
+        }
+    };
+
+    if (projectLoading) {
+        return (
+            <div className="flex items-center justify-center h-64">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
+            </div>
+        );
+    }
+
+    if (!currentProject) {
+        return (
+            <div className="text-center py-12">
+                <h3 className="text-xl font-semibold text-white mb-2">Project not found</h3>
+                <Link href="/dashboard/projects" className="text-purple-400 hover:text-purple-300">
+                    ← Back to projects
+                </Link>
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-6">
+            {/* Header */}
+            <div className="flex items-start justify-between">
+                <div>
+                    <Link
+                        href="/dashboard/projects"
+                        className="text-sm text-purple-400 hover:text-purple-300 mb-2 inline-block"
+                    >
+                        ← Back to projects
+                    </Link>
+                    <h1 className="text-3xl font-bold text-white">{currentProject.name}</h1>
+                    <p className="text-gray-400 mt-1">
+                        {currentProject.repository?.owner}/{currentProject.repository?.name}
+                    </p>
+                </div>
+                <div className="flex items-center space-x-3">
+                    <button
+                        onClick={handleDeploy}
+                        className="flex items-center space-x-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition-colors"
+                    >
+                        <RocketLaunchIcon className="h-5 w-5" />
+                        <span>Deploy Now</span>
+                    </button>
+                    <button
+                        onClick={handleDeleteProject}
+                        className="flex items-center space-x-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
+                    >
+                        <TrashIcon className="h-5 w-5" />
+                        <span>Delete</span>
+                    </button>
+                </div>
+            </div>
+
+            {/* Project Info Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+                    <p className="text-sm text-gray-400">Status</p>
+                    <p className="text-lg font-semibold text-white mt-1 capitalize">{currentProject.status}</p>
+                </div>
+                <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+                    <p className="text-sm text-gray-400">Framework</p>
+                    <p className="text-lg font-semibold text-white mt-1">{currentProject.framework || 'Auto-detect'}</p>
+                </div>
+                <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+                    <p className="text-sm text-gray-400">Branch</p>
+                    <p className="text-lg font-semibold text-white mt-1">{currentProject.repository?.branch}</p>
+                </div>
+                <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+                    <p className="text-sm text-gray-400">Deployments</p>
+                    <p className="text-lg font-semibold text-white mt-1">{deployments.length}</p>
+                </div>
+            </div>
+
+            {/* Tabs */}
+            <div className="border-b border-gray-800">
+                <div className="flex space-x-8">
+                    <button
+                        onClick={() => setActiveTab('deployments')}
+                        className={`pb-4 px-1 border-b-2 transition-colors ${activeTab === 'deployments'
+                                ? 'border-purple-500 text-white'
+                                : 'border-transparent text-gray-400 hover:text-white'
+                            }`}
+                    >
+                        Deployments
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('settings')}
+                        className={`pb-4 px-1 border-b-2 transition-colors ${activeTab === 'settings'
+                                ? 'border-purple-500 text-white'
+                                : 'border-transparent text-gray-400 hover:text-white'
+                            }`}
+                    >
+                        Settings
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('env')}
+                        className={`pb-4 px-1 border-b-2 transition-colors ${activeTab === 'env'
+                                ? 'border-purple-500 text-white'
+                                : 'border-transparent text-gray-400 hover:text-white'
+                            }`}
+                    >
+                        Environment Variables
+                    </button>
+                </div>
+            </div>
+
+            {/* Tab Content */}
+            <div>
+                {activeTab === 'deployments' && (
+                    <div className="space-y-4">
+                        {deploymentsLoading ? (
+                            <div className="text-center py-12">
+                                <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-purple-500 mx-auto"></div>
+                            </div>
+                        ) : deployments.length === 0 ? (
+                            <div className="bg-gray-900 border border-gray-800 rounded-xl p-12 text-center">
+                                <RocketLaunchIcon className="h-12 w-12 text-gray-600 mx-auto mb-4" />
+                                <h3 className="text-lg font-medium text-white mb-2">No deployments yet</h3>
+                                <p className="text-gray-400 mb-6">Deploy your project to see it live</p>
+                                <button
+                                    onClick={handleDeploy}
+                                    className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg transition-colors"
+                                >
+                                    Deploy Now
+                                </button>
+                            </div>
+                        ) : (
+                            deployments.map((deployment: any) => (
+                                <Link
+                                    key={deployment._id}
+                                    href={`/dashboard/deployments/${deployment._id}`}
+                                    className="block bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-lg p-6 transition-colors"
+                                >
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center space-x-4">
+                                            {getStatusIcon(deployment.status)}
+                                            <div>
+                                                <h3 className="text-white font-medium">
+                                                    {deployment.commitMessage || 'Manual deployment'}
+                                                </h3>
+                                                <p className="text-sm text-gray-400">
+                                                    {deployment.branch} • {deployment.commitSha?.substring(0, 7)}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-sm text-gray-400">
+                                                {new Date(deployment.createdAt).toLocaleString()}
+                                            </p>
+                                            <p className="text-xs text-gray-500">
+                                                {deployment.buildTime ? `${deployment.buildTime}ms` : 'Building...'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </Link>
+                            ))
+                        )}
+                    </div>
+                )}
+
+                {activeTab === 'settings' && (
+                    <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                        <h3 className="text-lg font-semibold text-white mb-4">Project Settings</h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-300 mb-2">
+                                    Project Name
+                                </label>
+                                <input
+                                    type="text"
+                                    value={currentProject.name}
+                                    disabled
+                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-300 mb-2">
+                                    Repository URL
+                                </label>
+                                <input
+                                    type="text"
+                                    value={currentProject.repository?.url}
+                                    disabled
+                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-300 mb-2">
+                                    Production Branch
+                                </label>
+                                <input
+                                    type="text"
+                                    value={currentProject.repository?.branch}
+                                    disabled
+                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-300 mb-2">
+                                    Framework
+                                </label>
+                                <input
+                                    type="text"
+                                    value={currentProject.framework || 'Auto-detect'}
+                                    disabled
+                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {activeTab === 'env' && (
+                    <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                        <h3 className="text-lg font-semibold text-white mb-4">Environment Variables</h3>
+                        <p className="text-gray-400 text-sm mb-6">
+                            Add environment variables for your project. These will be available during build and runtime.
+                        </p>
+                        <div className="space-y-3">
+                            {envVars.length === 0 ? (
+                                <p className="text-gray-500 text-center py-8">No environment variables set</p>
+                            ) : (
+                                envVars.map((env, index) => (
+                                    <div key={index} className="flex items-center space-x-3">
+                                        <input
+                                            type="text"
+                                            value={env.key}
+                                            disabled
+                                            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white"
+                                            placeholder="KEY"
+                                        />
+                                        <input
+                                            type="password"
+                                            value={env.value}
+                                            disabled
+                                            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white"
+                                            placeholder="VALUE"
+                                        />
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}

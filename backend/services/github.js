@@ -13,7 +13,7 @@ const config = {
 const createGitHubHeaders = (token = null) => ({
   'Accept': 'application/vnd.github.v3+json',
   'User-Agent': 'Vercel-Clone-Platform',
-  ...(token && { 'Authorization': `token ${token}` })
+  ...(token && { 'Authorization': `Bearer ${token}` })
 });
 
 const createSuccessResponse = (data, additionalProps = {}) => ({
@@ -37,20 +37,20 @@ const getRepositoryInfo = async (repoFullName, userToken = null) => {
   try {
     const token = userToken || config.token;
     const headers = createGitHubHeaders(token);
-    
+
     const response = await axios.get(
       `${config.apiUrl}/repos/${repoFullName}`,
       { headers }
     );
-    
+
     const repo = response.data;
-    
+
     logGitHubOperation('Repository info retrieved', {
       repoFullName,
       isPrivate: repo.private,
       defaultBranch: repo.default_branch
     });
-    
+
     return createSuccessResponse({
       name: repo.name,
       fullName: repo.full_name,
@@ -84,7 +84,7 @@ const getRepositoryInfo = async (repoFullName, userToken = null) => {
 const listUserRepositories = async (userToken, page = 1, perPage = 30) => {
   try {
     const headers = createGitHubHeaders(userToken);
-    
+
     const response = await axios.get(`${config.apiUrl}/user/repos`, {
       headers,
       params: {
@@ -95,7 +95,7 @@ const listUserRepositories = async (userToken, page = 1, perPage = 30) => {
         type: 'all'
       }
     });
-    
+
     const repos = response.data.map(repo => ({
       id: repo.id,
       name: repo.name,
@@ -111,13 +111,13 @@ const listUserRepositories = async (userToken, page = 1, perPage = 30) => {
         avatarUrl: repo.owner.avatar_url
       }
     }));
-    
+
     logGitHubOperation('User repositories listed', {
       count: repos.length,
       page,
       perPage
     });
-    
+
     return createSuccessResponse(repos, {
       pagination: {
         page,
@@ -137,12 +137,12 @@ const getRepositoryBranches = async (repoFullName, userToken = null) => {
   try {
     const token = userToken || config.token;
     const headers = createGitHubHeaders(token);
-    
+
     const response = await axios.get(
       `${config.apiUrl}/repos/${repoFullName}/branches`,
       { headers }
     );
-    
+
     const branches = response.data.map(branch => ({
       name: branch.name,
       commit: {
@@ -151,12 +151,12 @@ const getRepositoryBranches = async (repoFullName, userToken = null) => {
       },
       protected: branch.protected
     }));
-    
+
     logGitHubOperation('Repository branches retrieved', {
       repoFullName,
       branchCount: branches.length
     });
-    
+
     return createSuccessResponse(branches);
   } catch (error) {
     logGitHubOperation('Failed to get repository branches', {
@@ -172,7 +172,7 @@ const detectFrameworkFromPackageJson = (packageJson) => {
   try {
     const pkg = JSON.parse(packageJson);
     const dependencies = { ...pkg.dependencies, ...pkg.devDependencies };
-    
+
     // Framework detection based on dependencies
     if (dependencies['next']) return 'nextjs';
     if (dependencies['react'] && !dependencies['next']) return 'react';
@@ -185,7 +185,7 @@ const detectFrameworkFromPackageJson = (packageJson) => {
     if (dependencies['@nestjs/core']) return 'nestjs';
     if (dependencies['koa']) return 'koa';
     if (dependencies['gatsby']) return 'gatsby';
-    
+
     return 'static';
   } catch (error) {
     return 'static';
@@ -194,49 +194,49 @@ const detectFrameworkFromPackageJson = (packageJson) => {
 
 const detectFrameworkFromFiles = (files) => {
   const fileNames = files.map(f => f.name.toLowerCase());
-  
+
   // Check for specific framework files
   if (fileNames.includes('next.config.js') || fileNames.includes('next.config.mjs')) {
     return 'nextjs';
   }
-  
+
   if (fileNames.includes('nuxt.config.js') || fileNames.includes('nuxt.config.ts')) {
     return 'nuxt';
   }
-  
+
   if (fileNames.includes('vue.config.js') || fileNames.includes('vite.config.js')) {
     return 'vue';
   }
-  
+
   if (fileNames.includes('svelte.config.js')) {
     return 'svelte';
   }
-  
+
   if (fileNames.includes('angular.json')) {
     return 'angular';
   }
-  
+
   if (fileNames.includes('gatsby-config.js')) {
     return 'gatsby';
   }
-  
+
   if (fileNames.includes('hugo.toml') || fileNames.includes('config.toml')) {
     return 'hugo';
   }
-  
+
   if (fileNames.includes('_config.yml')) {
     return 'jekyll';
   }
-  
+
   if (fileNames.includes('composer.json')) {
     return 'laravel'; // Could be improved to detect Laravel specifically
   }
-  
+
   if (fileNames.includes('requirements.txt') || fileNames.includes('pyproject.toml')) {
     if (fileNames.some(f => f.includes('django'))) return 'django';
     if (fileNames.some(f => f.includes('flask'))) return 'flask';
   }
-  
+
   return null;
 };
 
@@ -244,18 +244,18 @@ const detectFramework = async (repoFullName, branch = 'main', userToken = null) 
   try {
     const token = userToken || config.token;
     const headers = createGitHubHeaders(token);
-    
+
     // First, try to get package.json
     try {
       const packageResponse = await axios.get(
         `${config.apiUrl}/repos/${repoFullName}/contents/package.json?ref=${branch}`,
         { headers }
       );
-      
+
       if (packageResponse.data.content) {
         const packageJson = Buffer.from(packageResponse.data.content, 'base64').toString();
         const framework = detectFrameworkFromPackageJson(packageJson);
-        
+
         if (framework !== 'static') {
           logGitHubOperation('Framework detected from package.json', {
             repoFullName,
@@ -268,22 +268,22 @@ const detectFramework = async (repoFullName, branch = 'main', userToken = null) 
     } catch (error) {
       // package.json might not exist, continue with file-based detection
     }
-    
+
     // Get repository contents to detect framework from files
     const contentsResponse = await axios.get(
       `${config.apiUrl}/repos/${repoFullName}/contents?ref=${branch}`,
       { headers }
     );
-    
+
     const framework = detectFrameworkFromFiles(contentsResponse.data) || 'static';
-    
+
     logGitHubOperation('Framework detected from files', {
       repoFullName,
       branch,
       framework,
       fileCount: contentsResponse.data.length
     });
-    
+
     return createSuccessResponse({ framework, detectionMethod: 'files' });
   } catch (error) {
     logGitHubOperation('Framework detection failed', {
@@ -291,7 +291,7 @@ const detectFramework = async (repoFullName, branch = 'main', userToken = null) 
       branch,
       error: error.response?.data || error.message
     }, true);
-    
+
     // Default to static if detection fails
     return createSuccessResponse({ framework: 'static', detectionMethod: 'fallback' });
   }
@@ -304,14 +304,14 @@ const verifyWebhookSignature = (payload, signature) => {
       logger.warn('Webhook secret not configured');
       return false;
     }
-    
+
     const expectedSignature = crypto
       .createHmac('sha256', config.webhookSecret)
       .update(payload)
       .digest('hex');
-    
+
     const actualSignature = signature.replace('sha256=', '');
-    
+
     return crypto.timingSafeEqual(
       Buffer.from(expectedSignature, 'hex'),
       Buffer.from(actualSignature, 'hex')
@@ -329,14 +329,14 @@ const handlePushEvent = async (payload) => {
     const repoFullName = payload.repository.full_name;
     const branch = payload.ref.replace('refs/heads/', '');
     const commits = payload.commits;
-    
+
     logGitHubOperation('Push event received', {
       repoFullName,
       branch,
       commitCount: commits.length,
       headCommit: payload.head_commit?.id
     });
-    
+
     // Find projects that should be deployed
     const Project = require('../models/Project');
     const projects = await Project.find({
@@ -345,7 +345,7 @@ const handlePushEvent = async (payload) => {
       autoDeployEnabled: true,
       status: 'active'
     }).populate('owner');
-    
+
     if (projects.length === 0) {
       logGitHubOperation('No projects found for push event', {
         repoFullName,
@@ -353,7 +353,7 @@ const handlePushEvent = async (payload) => {
       });
       return { success: true, message: 'No projects to deploy' };
     }
-    
+
     // Trigger deployments
     const deploymentService = require('./builder');
     const deploymentPromises = projects.map(project => {
@@ -367,9 +367,9 @@ const handlePushEvent = async (payload) => {
         triggerBy: payload.head_commit.author.username
       });
     });
-    
+
     const deployments = await Promise.allSettled(deploymentPromises);
-    
+
     logGitHubOperation('Deployments triggered from push', {
       repoFullName,
       branch,
@@ -379,7 +379,7 @@ const handlePushEvent = async (payload) => {
         success: d.status === 'fulfilled' ? d.value.success : false
       }))
     });
-    
+
     return {
       success: true,
       projectsTriggered: projects.length,
@@ -398,30 +398,30 @@ const handlePullRequestEvent = async (payload) => {
     const action = payload.action;
     const pr = payload.pull_request;
     const repoFullName = payload.repository.full_name;
-    
+
     logGitHubOperation('Pull request event received', {
       repoFullName,
       action,
       prNumber: pr.number,
       branch: pr.head.ref
     });
-    
+
     // Only handle opened and synchronize actions for preview deployments
     if (!['opened', 'synchronize'].includes(action)) {
       return { success: true, message: 'PR action not handled' };
     }
-    
+
     // Find projects that should create preview deployments
     const Project = require('../models/Project');
     const projects = await Project.find({
       'repository.fullName': repoFullName,
       status: 'active'
     }).populate('owner');
-    
+
     if (projects.length === 0) {
       return { success: true, message: 'No projects found for PR' };
     }
-    
+
     // Create preview deployments
     const deploymentService = require('./builder');
     const deploymentPromises = projects.map(project => {
@@ -441,15 +441,15 @@ const handlePullRequestEvent = async (payload) => {
         }
       });
     });
-    
+
     const deployments = await Promise.allSettled(deploymentPromises);
-    
+
     logGitHubOperation('Preview deployments triggered from PR', {
       repoFullName,
       prNumber: pr.number,
       projectCount: projects.length
     });
-    
+
     return {
       success: true,
       projectsTriggered: projects.length,
@@ -469,7 +469,7 @@ const handleWebhookEvent = async (eventType, payload) => {
       eventType,
       repository: payload.repository?.full_name
     });
-    
+
     switch (eventType) {
       case 'push':
         return await handlePushEvent(payload);
@@ -492,14 +492,14 @@ const handleWebhookEvent = async (eventType, payload) => {
 const checkRepositoryAccess = async (repoFullName, userToken) => {
   try {
     const headers = createGitHubHeaders(userToken);
-    
+
     const response = await axios.get(
       `${config.apiUrl}/repos/${repoFullName}`,
       { headers }
     );
-    
+
     const permissions = response.data.permissions || {};
-    
+
     return createSuccessResponse({
       hasAccess: true,
       permissions: {
@@ -516,12 +516,12 @@ const checkRepositoryAccess = async (repoFullName, userToken) => {
         reason: 'Repository not found or no access'
       });
     }
-    
+
     logGitHubOperation('Repository access check failed', {
       repoFullName,
       error: error.response?.data || error.message
     }, true);
-    
+
     return createErrorResponse(error, 'Failed to check repository access');
   }
 };
@@ -532,23 +532,23 @@ module.exports = {
   listUserRepositories,
   getRepositoryBranches,
   checkRepositoryAccess,
-  
+
   // Framework detection
   detectFramework,
   detectFrameworkFromPackageJson,
   detectFrameworkFromFiles,
-  
+
   // Webhook handling
   verifyWebhookSignature,
   handleWebhookEvent,
   handlePushEvent,
   handlePullRequestEvent,
-  
+
   // Utility functions
   createGitHubHeaders,
   createSuccessResponse,
   createErrorResponse,
-  
+
   // Config access (for testing)
   getConfig: () => ({ ...config })
 };

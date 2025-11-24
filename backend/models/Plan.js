@@ -14,7 +14,7 @@ const planSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  
+
   // Pricing in different currencies
   pricing: {
     usd: {
@@ -34,7 +34,7 @@ const planSchema = new mongoose.Schema({
       default: 0
     }
   },
-  
+
   // Resource allocations
   resources: {
     cpu: {
@@ -68,7 +68,7 @@ const planSchema = new mongoose.Schema({
       default: 10
     }
   },
-  
+
   // Features included in this plan
   features: [{
     name: {
@@ -84,7 +84,7 @@ const planSchema = new mongoose.Schema({
       default: true
     }
   }],
-  
+
   // Plan configuration
   isActive: {
     type: Boolean,
@@ -102,7 +102,7 @@ const planSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
-  
+
   // Oracle Cloud configuration
   oracleConfig: {
     accountType: {
@@ -119,7 +119,7 @@ const planSchema = new mongoose.Schema({
       default: false
     }
   },
-  
+
   // Limits and restrictions
   limits: {
     deploymentsPerDay: {
@@ -143,7 +143,7 @@ const planSchema = new mongoose.Schema({
       default: 30
     }
   },
-  
+
   // Admin settings
   adminOnly: {
     type: Boolean,
@@ -158,7 +158,7 @@ const planSchema = new mongoose.Schema({
     ref: 'User',
     default: null // If this is a custom plan for a specific user
   },
-  
+
   // Pricing strategy
   billingCycle: {
     type: String,
@@ -169,7 +169,7 @@ const planSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
-  
+
   // Statistics
   userCount: {
     type: Number,
@@ -185,15 +185,14 @@ const planSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Indexes
-planSchema.index({ name: 1 });
+// Indexes (name already has unique index from schema)
 planSchema.index({ isActive: 1 });
 planSchema.index({ sortOrder: 1 });
 planSchema.index({ 'pricing.usd': 1 });
 planSchema.index({ userCount: -1 });
 
 // Virtual for formatted pricing
-planSchema.virtual('formattedPricing').get(function() {
+planSchema.virtual('formattedPricing').get(function () {
   return {
     usd: `$${this.pricing.usd}/month`,
     pkr: `Rs ${this.pricing.pkr.toLocaleString()}/month`,
@@ -203,25 +202,25 @@ planSchema.virtual('formattedPricing').get(function() {
 });
 
 // Virtual for resource summary
-planSchema.virtual('resourceSummary').get(function() {
+planSchema.virtual('resourceSummary').get(function () {
   return `${this.resources.cpu} OCPU, ${this.resources.ram}GB RAM, ${this.resources.storage}GB Storage`;
 });
 
 // Static methods
-planSchema.statics.findActivePlans = function() {
+planSchema.statics.findActivePlans = function () {
   return this.find({ isActive: true, adminOnly: false })
-              .sort({ sortOrder: 1, 'pricing.usd': 1 });
+    .sort({ sortOrder: 1, 'pricing.usd': 1 });
 };
 
-planSchema.statics.findDefaultPlan = function() {
+planSchema.statics.findDefaultPlan = function () {
   return this.findOne({ isDefault: true, isActive: true });
 };
 
-planSchema.statics.findTrialPlan = function() {
+planSchema.statics.findTrialPlan = function () {
   return this.findOne({ isTrial: true, isActive: true });
 };
 
-planSchema.statics.createDefaultPlans = async function() {
+planSchema.statics.createDefaultPlans = async function () {
   try {
     const existingPlans = await this.countDocuments();
     if (existingPlans > 0) {
@@ -368,22 +367,22 @@ planSchema.statics.createDefaultPlans = async function() {
 };
 
 // Instance methods
-planSchema.methods.getPricingForCurrency = function(currency = 'usd') {
+planSchema.methods.getPricingForCurrency = function (currency = 'usd') {
   return this.pricing[currency.toLowerCase()] || this.pricing.usd;
 };
 
-planSchema.methods.canUpgradeFrom = function(currentPlan) {
+planSchema.methods.canUpgradeFrom = function (currentPlan) {
   if (!currentPlan) return true;
   return this.pricing.usd > currentPlan.pricing.usd;
 };
 
-planSchema.methods.canDowngradeFrom = function(currentPlan) {
+planSchema.methods.canDowngradeFrom = function (currentPlan) {
   if (!currentPlan) return false;
   return this.pricing.usd < currentPlan.pricing.usd;
 };
 
 // Pre-save middleware
-planSchema.pre('save', function(next) {
+planSchema.pre('save', function (next) {
   // Ensure only one default plan
   if (this.isDefault && this.isModified('isDefault')) {
     this.constructor.updateMany(

@@ -1,49 +1,11 @@
 const express = require('express');
-const { body, validationResult } = require('express-validator');
+const router = express.Router();
+const { body, param, query, validationResult } = require('express-validator');
+const logger = require('../utils/logger');
 const Project = require('../models/Project');
 const User = require('../models/User');
-const githubService = require('../services/github');
-const logger = require('../utils/logger');
-const { requireProjectAccess } = require('../middleware/auth');
-
-const router = express.Router();
-
-// Mock Deployment model until we create the actual model
-const MockDeployment = {
-  async create(data) {
-    const deployment = {
-      _id: `deploy_${Date.now()}`,
-      ...data,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    return deployment;
-  },
-
-  async findById(id) {
-    return {
-      _id: id,
-      status: 'success',
-      url: 'https://example.com',
-      logs: ['Build started', 'Build completed'],
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-  },
-
-  async find(query) {
-    return [
-      {
-        _id: 'deploy_1',
-        status: 'success',
-        commitSha: 'abc123',
-        commitMessage: 'Initial commit',
-        createdAt: new Date(),
-        updatedAt: new Date()
-      }
-    ];
-  }
-};
+const Deployment = require('../models/Deployment');
+const buildQueue = require('../services/buildQueue');
 
 // Helper functions
 const handleValidationErrors = (req, res, next) => {
@@ -86,13 +48,14 @@ router.get('/', async (req, res) => {
       });
     }
 
-    // Build query
-    const query = { projectId };
-    if (status) {
-      query.status = status;
-    }
+    // Get deployments
+    const deployments = await Deployment.findByProject(projectId, {
+      limit: parseInt(limit),
+      skip: (parseInt(page) - 1) * parseInt(limit),
+      environment: status
+    });
 
-    const deployments = await MockDeployment.find(query);
+    const total = await Deployment.countDocuments({ projectId });
 
     res.json({
       success: true,
@@ -100,11 +63,11 @@ router.get('/', async (req, res) => {
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
-        total: deployments.length
+        total
       }
     });
   } catch (error) {
-    logger.error('Get deployments error:', error.message);
+    logger.error('Get deployments error:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch deployments' });
   }
 });
@@ -114,7 +77,10 @@ router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const deployment = await MockDeployment.findById(id);
+    const deployment = await Deployment.findById(id)
+      .populate('userId', 'username email avatar')
+      .populate('projectId', 'name repository');
+
     if (!deployment) {
       return res.status(404).json({
         success: false,
@@ -136,7 +102,7 @@ router.get('/:id', async (req, res) => {
       deployment
     });
   } catch (error) {
-    logger.error('Get deployment error:', error.message);
+    logger.error('Get deployment error:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch deployment' });
   }
 });
@@ -176,20 +142,24 @@ router.post('/', [
     }
 
     // Create deployment
-    const deploymentData = {
+    const deployment = await Deployment.create({
       projectId,
       userId: req.user._id,
       branch: branch || project.repository.branch,
-      commitSha: commitSha || `auto_${Date.now()}`,
+      commitSha: commitSha || `manual_${Date.now()}`,
       commitMessage: commitMessage || 'Manual deployment',
       status: 'queued',
       isPreview,
       environment: isPreview ? 'preview' : 'production',
-      trigger: 'manual',
-      triggerBy: req.user.username
-    };
+      trigger: 'manual'
+    });
 
-    const deployment = await MockDeployment.create(deploymentData);
+    // Add to build queue
+    await buildQueue.addDeployment(
+      deployment._id.toString(),
+      projectId,
+      req.user._id.toString()
+    );
 
     // Update project stats
     project.stats.totalDeployments += 1;
@@ -208,7 +178,7 @@ router.post('/', [
       });
     }
 
-    logger.deployment('Deployment created', {
+    logger.info('Deployment created', {
       deploymentId: deployment._id,
       projectId,
       userId: req.user._id,
@@ -219,10 +189,10 @@ router.post('/', [
     res.status(201).json({
       success: true,
       deployment,
-      message: 'Deployment created successfully'
+      message: 'Deployment created and queued successfully'
     });
   } catch (error) {
-    logger.error('Create deployment error:', error.message);
+    logger.error('Create deployment error:', error);
     res.status(500).json({ success: false, error: 'Failed to create deployment' });
   }
 });
@@ -232,7 +202,7 @@ router.post('/:id/cancel', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const deployment = await MockDeployment.findById(id);
+    const deployment = await Deployment.findById(id);
     if (!deployment) {
       return res.status(404).json({
         success: false,
@@ -249,16 +219,18 @@ router.post('/:id/cancel', async (req, res) => {
       });
     }
 
-    if (!['queued', 'building'].includes(deployment.status)) {
+    if (!['queued', 'building', 'deploying'].includes(deployment.status)) {
       return res.status(400).json({
         success: false,
         error: 'Cannot cancel deployment in current status'
       });
     }
 
+    // Cancel in queue
+    await buildQueue.cancelDeployment(deployment._id.toString());
+
     // Update deployment status
-    deployment.status = 'cancelled';
-    deployment.finishedAt = new Date();
+    await deployment.updateStatus('cancelled');
 
     // Emit real-time update
     if (req.io) {
@@ -268,7 +240,7 @@ router.post('/:id/cancel', async (req, res) => {
       });
     }
 
-    logger.deployment('Deployment cancelled', {
+    logger.info('Deployment cancelled', {
       deploymentId: deployment._id,
       projectId: deployment.projectId,
       userId: req.user._id
@@ -280,7 +252,7 @@ router.post('/:id/cancel', async (req, res) => {
       message: 'Deployment cancelled successfully'
     });
   } catch (error) {
-    logger.error('Cancel deployment error:', error.message);
+    logger.error('Cancel deployment error:', error);
     res.status(500).json({ success: false, error: 'Failed to cancel deployment' });
   }
 });
@@ -290,7 +262,7 @@ router.post('/:id/retry', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const deployment = await MockDeployment.findById(id);
+    const deployment = await Deployment.findById(id);
     if (!deployment) {
       return res.status(404).json({
         success: false,
@@ -322,8 +294,8 @@ router.post('/:id/retry', async (req, res) => {
       });
     }
 
-    // Create new deployment based on the failed one
-    const newDeploymentData = {
+    // Create new deployment
+    const newDeployment = await Deployment.create({
       projectId: deployment.projectId,
       userId: req.user._id,
       branch: deployment.branch,
@@ -333,17 +305,22 @@ router.post('/:id/retry', async (req, res) => {
       isPreview: deployment.isPreview,
       environment: deployment.environment,
       trigger: 'retry',
-      triggerBy: req.user.username,
-      retryOf: deployment._id
-    };
+      retryOf: deployment._id,
+      retryCount: (deployment.retryCount || 0) + 1
+    });
 
-    const newDeployment = await MockDeployment.create(newDeploymentData);
+    // Add to build queue
+    await buildQueue.retryDeployment(
+      newDeployment._id.toString(),
+      deployment.projectId.toString(),
+      req.user._id.toString()
+    );
 
     // Update user usage
     req.user.currentUsage.deployments += 1;
     await req.user.save();
 
-    logger.deployment('Deployment retried', {
+    logger.info('Deployment retried', {
       originalDeploymentId: deployment._id,
       newDeploymentId: newDeployment._id,
       projectId: deployment.projectId,
@@ -356,7 +333,7 @@ router.post('/:id/retry', async (req, res) => {
       message: 'Deployment retry initiated'
     });
   } catch (error) {
-    logger.error('Retry deployment error:', error.message);
+    logger.error('Retry deployment error:', error);
     res.status(500).json({ success: false, error: 'Failed to retry deployment' });
   }
 });
@@ -366,7 +343,7 @@ router.get('/:id/logs', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const deployment = await MockDeployment.findById(id);
+    const deployment = await Deployment.findById(id);
     if (!deployment) {
       return res.status(404).json({
         success: false,
@@ -383,18 +360,9 @@ router.get('/:id/logs', async (req, res) => {
       });
     }
 
-    // Mock logs for now
-    const logs = [
-      { timestamp: new Date(), level: 'info', message: 'Build started' },
-      { timestamp: new Date(), level: 'info', message: 'Installing dependencies...' },
-      { timestamp: new Date(), level: 'info', message: 'Running build command...' },
-      { timestamp: new Date(), level: 'success', message: 'Build completed successfully' },
-      { timestamp: new Date(), level: 'info', message: 'Deployment finished' }
-    ];
-
     res.json({
       success: true,
-      logs,
+      logs: deployment.buildLogs || [],
       deployment: {
         id: deployment._id,
         status: deployment.status,
@@ -402,7 +370,7 @@ router.get('/:id/logs', async (req, res) => {
       }
     });
   } catch (error) {
-    logger.error('Get deployment logs error:', error.message);
+    logger.error('Get deployment logs error:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch deployment logs' });
   }
 });
@@ -412,7 +380,7 @@ router.get('/:id/logs/stream', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const deployment = await MockDeployment.findById(id);
+    const deployment = await Deployment.findById(id);
     if (!deployment) {
       return res.status(404).json({
         success: false,
@@ -434,40 +402,44 @@ router.get('/:id/logs/stream', async (req, res) => {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'Cache-Control'
+      'Access-Control-Allow-Origin': '*'
     });
 
-    // Send initial logs
-    const logs = [
-      'Build started',
-      'Installing dependencies...',
-      'Running build command...',
-      'Build completed successfully',
-      'Deployment finished'
-    ];
+    // Send existing logs
+    if (deployment.buildLogs && deployment.buildLogs.length > 0) {
+      deployment.buildLogs.forEach(log => {
+        res.write(`data: ${JSON.stringify(log)}\n\n`);
+      });
+    }
 
-    logs.forEach((log, index) => {
-      setTimeout(() => {
-        res.write(`data: ${JSON.stringify({
-          timestamp: new Date(),
-          level: 'info',
-          message: log
-        })}\n\n`);
-      }, index * 1000);
+    // Listen for new logs via Socket.IO
+    const logHandler = (log) => {
+      res.write(`data: ${JSON.stringify(log)}\n\n`);
+    };
+
+    if (req.io) {
+      req.io.on(`deployment-${id}-log`, logHandler);
+    }
+
+    // Handle client disconnect
+    req.on('close', () => {
+      if (req.io) {
+        req.io.off(`deployment-${id}-log`, logHandler);
+      }
+      res.end();
     });
 
-    // Close connection after logs
-    setTimeout(() => {
+    // Send completion event if deployment is done
+    if (['success', 'failed', 'cancelled'].includes(deployment.status)) {
       res.write(`data: ${JSON.stringify({
         type: 'complete',
-        status: 'success'
+        status: deployment.status
       })}\n\n`);
       res.end();
-    }, logs.length * 1000 + 500);
+    }
 
   } catch (error) {
-    logger.error('Stream deployment logs error:', error.message);
+    logger.error('Stream deployment logs error:', error);
     res.status(500).json({ success: false, error: 'Failed to stream deployment logs' });
   }
 });
@@ -477,7 +449,7 @@ router.post('/:id/promote', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const deployment = await MockDeployment.findById(id);
+    const deployment = await Deployment.findById(id);
     if (!deployment) {
       return res.status(404).json({
         success: false,
@@ -508,11 +480,17 @@ router.post('/:id/promote', async (req, res) => {
       });
     }
 
+    // Update deployment
+    deployment.promotedToProduction = true;
+    deployment.promotedAt = new Date();
+    deployment.environment = 'production';
+    await deployment.save();
+
     // Update project's production deployment
     project.productionDeployment = deployment._id;
     await project.save();
 
-    logger.deployment('Deployment promoted to production', {
+    logger.info('Deployment promoted to production', {
       deploymentId: deployment._id,
       projectId: deployment.projectId,
       userId: req.user._id
@@ -520,11 +498,46 @@ router.post('/:id/promote', async (req, res) => {
 
     res.json({
       success: true,
+      deployment,
       message: 'Deployment promoted to production successfully'
     });
   } catch (error) {
-    logger.error('Promote deployment error:', error.message);
+    logger.error('Promote deployment error:', error);
     res.status(500).json({ success: false, error: 'Failed to promote deployment' });
+  }
+});
+
+// Get deployment stats
+router.get('/stats/:projectId', async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { timeRange = 30 } = req.query;
+
+    // Verify user has access to the project
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        error: 'Project not found'
+      });
+    }
+
+    if (!project.hasAccess(req.user._id, 'viewer')) {
+      return res.status(403).json({
+        success: false,
+        error: 'Insufficient permissions'
+      });
+    }
+
+    const stats = await Deployment.getStats(projectId, parseInt(timeRange));
+
+    res.json({
+      success: true,
+      stats
+    });
+  } catch (error) {
+    logger.error('Get deployment stats error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch deployment stats' });
   }
 });
 

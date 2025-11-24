@@ -52,6 +52,31 @@ router.get('/dashboard', logAdminAction('view_dashboard'), async (req, res) => {
   }
 });
 
+// Platform statistics
+router.get('/stats', logAdminAction('view_stats'), async (req, res) => {
+  try {
+    const [totalUsers, activeUsers, totalProjects, totalDeployments] = await Promise.all([
+      User.countDocuments(),
+      User.countDocuments({ status: 'active' }),
+      Project.countDocuments(),
+      require('../models/Deployment').countDocuments({ status: 'success' })
+    ]);
+
+    const stats = {
+      totalUsers,
+      activeUsers,
+      totalProjects,
+      activeDeployments: totalDeployments,
+      totalRevenue: 0 // Placeholder for billing integration
+    };
+
+    res.json(stats);
+  } catch (error) {
+    logger.error('Admin stats error:', error.message);
+    res.status(500).json({ error: 'Failed to load statistics' });
+  }
+});
+
 // User management
 router.get('/users', [
   query('page').optional().isInt({ min: 1 }),
@@ -61,7 +86,7 @@ router.get('/users', [
 ], requirePermission('user.read'), logAdminAction('list_users'), async (req, res) => {
   try {
     const { page = 1, limit = 20, containerType, search } = req.query;
-    
+
     const query = {};
     if (containerType) query.containerType = containerType;
     if (search) {
@@ -177,7 +202,7 @@ router.get('/servers', requirePermission('server.read'), logAdminAction('view_se
       {
         id: 'EC3',
         name: 'EC3 - Mixed Server',
-        type: 'mixed_users', 
+        type: 'mixed_users',
         status: ec3Status.success ? 'healthy' : 'error',
         utilization: ec3Status.success ? ec3Status.utilization : null,
         error: ec3Status.success ? null : ec3Status.error
@@ -211,12 +236,12 @@ router.get('/resources/status', requirePermission('server.read'), logAdminAction
       ec2: ec2Status.success ? ec2Status.utilization : { error: ec2Status.error },
       ec3: ec3Status.success ? ec3Status.utilization : { error: ec3Status.error },
       combined: {
-        totalUsers: (ec2Status.success ? ec2Status.utilization.totalUsers : 0) + 
-                   (ec3Status.success ? ec3Status.utilization.totalUsers : 0),
-        sharedUsers: (ec2Status.success ? ec2Status.utilization.sharedUsers : 0) + 
-                    (ec3Status.success ? ec3Status.utilization.sharedUsers : 0),
-        dedicatedUsers: (ec2Status.success ? ec2Status.utilization.dedicatedUsers : 0) + 
-                       (ec3Status.success ? ec3Status.utilization.dedicatedUsers : 0)
+        totalUsers: (ec2Status.success ? ec2Status.utilization.totalUsers : 0) +
+          (ec3Status.success ? ec3Status.utilization.totalUsers : 0),
+        sharedUsers: (ec2Status.success ? ec2Status.utilization.sharedUsers : 0) +
+          (ec3Status.success ? ec3Status.utilization.sharedUsers : 0),
+        dedicatedUsers: (ec2Status.success ? ec2Status.utilization.dedicatedUsers : 0) +
+          (ec3Status.success ? ec3Status.utilization.dedicatedUsers : 0)
       }
     };
 
@@ -234,7 +259,7 @@ router.post('/users/:userId/upgrade-dedicated', [
   try {
     const { userId } = req.params;
     const { planId } = req.body;
-    
+
     const plan = await Plan.findById(planId);
     if (!plan) {
       return res.status(404).json({ success: false, error: 'Plan not found' });
@@ -326,7 +351,7 @@ router.post('/users/:userId/upgrade-plan', [
   try {
     const { userId } = req.params;
     const { planId } = req.body;
-    
+
     const [user, plan] = await Promise.all([
       User.findById(userId).populate('plan'),
       Plan.findById(planId)
@@ -379,9 +404,9 @@ router.post('/users/:userId/upgrade-plan', [
 router.get('/users/:userId/container', requirePermission('user.read'), logAdminAction('view_user_container'), async (req, res) => {
   try {
     const { userId } = req.params;
-    
+
     const containerInfo = await containerOrchestrator.getUserContainer(userId);
-    
+
     if (containerInfo.success) {
       res.json({
         success: true,
@@ -414,7 +439,7 @@ router.put('/users/:userId/resources', [
     const { resourceAllocation } = req.body;
 
     const user = await User.findByIdAndUpdate(
-      userId, 
+      userId,
       { resourceAllocation },
       { new: true }
     ).populate('plan');

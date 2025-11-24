@@ -2,10 +2,15 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const userSchema = new mongoose.Schema({
-  // GitHub OAuth data
+  // OAuth data (GitHub or Google)
   githubId: {
     type: String,
-    required: true,
+    sparse: true, // Allow null values, but enforce uniqueness when present
+    unique: true
+  },
+  googleId: {
+    type: String,
+    sparse: true, // Allow null values, but enforce uniqueness when present
     unique: true
   },
   username: {
@@ -30,7 +35,7 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
-  
+
   // User role and status
   role: {
     type: String,
@@ -42,7 +47,7 @@ const userSchema = new mongoose.Schema({
     enum: ['active', 'suspended', 'banned', 'trial'],
     default: 'trial'
   },
-  
+
   // Billing and subscription
   plan: {
     type: mongoose.Schema.Types.ObjectId,
@@ -66,7 +71,7 @@ const userSchema = new mongoose.Schema({
     enum: ['trial', 'active', 'cancelled', 'expired', 'past_due'],
     default: 'trial'
   },
-  
+
   // Payoneer payment info
   payoneerCustomerId: {
     type: String,
@@ -89,7 +94,7 @@ const userSchema = new mongoose.Schema({
       default: Date.now
     }
   }],
-  
+
   // Current usage and limits
   currentUsage: {
     projects: {
@@ -109,9 +114,17 @@ const userSchema = new mongoose.Schema({
       default: 0 // in MB this month
     }
   },
-  
+
   // Resource allocation (can be overridden by admin)
   resourceAllocation: {
+    projects: {
+      type: Number,
+      default: 10 // Free users can create up to 10 projects
+    },
+    deployments: {
+      type: Number,
+      default: 100 // Deployments per month
+    },
     cpu: {
       type: Number,
       default: 0.5 // OCPU
@@ -137,7 +150,7 @@ const userSchema = new mongoose.Schema({
     guaranteedCpu: { type: Number, default: 0.01 }, // Minimum guaranteed
     guaranteedRam: { type: Number, default: 0.08 }  // Minimum guaranteed in GB
   },
-  
+
   // Real-time resource usage tracking
   currentResourceUsage: {
     cpu: { type: Number, default: 0 },           // Current CPU usage
@@ -146,7 +159,7 @@ const userSchema = new mongoose.Schema({
     ramPercent: { type: Number, default: 0 },    // RAM usage percentage
     lastChecked: { type: Date, default: Date.now }
   },
-  
+
   // Oracle Cloud server allocation (Load Balanced EC2/EC3 architecture)
   oracleAccountId: {
     type: String,
@@ -177,7 +190,7 @@ const userSchema = new mongoose.Schema({
       type: String
     }
   }],
-  
+
   // User preferences
   preferences: {
     notifications: {
@@ -199,7 +212,7 @@ const userSchema = new mongoose.Schema({
       default: 'UTC'
     }
   },
-  
+
   // Security and access
   lastLogin: {
     type: Date,
@@ -218,18 +231,18 @@ const userSchema = new mongoose.Schema({
       default: Date.now
     }
   }],
-  
+
   // Admin notes (only visible to admins)
   adminNotes: {
     type: String,
     default: ''
   },
-  
+
 }, {
   timestamps: true,
-  toJSON: { 
+  toJSON: {
     virtuals: true,
-    transform: function(doc, ret) {
+    transform: function (doc, ret) {
       delete ret.apiKeys; // Never send API keys in JSON
       return ret;
     }
@@ -237,17 +250,14 @@ const userSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Indexes for performance
-userSchema.index({ githubId: 1 });
-userSchema.index({ email: 1 });
-userSchema.index({ username: 1 });
+// Indexes for performance (unique indexes already defined in schema)
 userSchema.index({ status: 1 });
 userSchema.index({ subscriptionStatus: 1 });
 userSchema.index({ trialExpiry: 1 });
 userSchema.index({ oracleAccountId: 1 });
 
 // Virtual for trial days remaining
-userSchema.virtual('trialDaysRemaining').get(function() {
+userSchema.virtual('trialDaysRemaining').get(function () {
   if (!this.isTrialActive || this.subscriptionStatus !== 'trial') {
     return 0;
   }
@@ -259,7 +269,7 @@ userSchema.virtual('trialDaysRemaining').get(function() {
 });
 
 // Virtual for resource usage percentage
-userSchema.virtual('resourceUsagePercentage').get(function() {
+userSchema.virtual('resourceUsagePercentage').get(function () {
   return {
     storage: Math.round((this.currentUsage.storage / (this.resourceAllocation.storage * 1024)) * 100),
     bandwidth: Math.round((this.currentUsage.bandwidth / (this.resourceAllocation.bandwidth * 1024)) * 100)
@@ -267,7 +277,7 @@ userSchema.virtual('resourceUsagePercentage').get(function() {
 });
 
 // Pre-save middleware to check trial expiry
-userSchema.pre('save', function(next) {
+userSchema.pre('save', function (next) {
   if (this.isTrialActive && new Date() > this.trialExpiry) {
     this.isTrialActive = false;
     if (this.subscriptionStatus === 'trial') {
@@ -279,44 +289,44 @@ userSchema.pre('save', function(next) {
 });
 
 // Instance methods
-userSchema.methods.toJSON = function() {
+userSchema.methods.toJSON = function () {
   const user = this.toObject();
   delete user.apiKeys; // Never expose API keys
   return user;
 };
 
-userSchema.methods.generateApiKey = function() {
+userSchema.methods.generateApiKey = function () {
   const crypto = require('crypto');
   const key = crypto.randomBytes(32).toString('hex');
   return `vcp_${key}`; // Vercel Clone Platform prefix
 };
 
-userSchema.methods.hasResourceCapacity = function(resourceType, amount) {
+userSchema.methods.hasResourceCapacity = function (resourceType, amount) {
   const current = this.currentUsage[resourceType] || 0;
   const limit = this.resourceAllocation[resourceType] || 0;
-  
+
   if (resourceType === 'storage') {
     return (current + amount) <= (limit * 1024); // Convert GB to MB
   } else if (resourceType === 'bandwidth') {
     return (current + amount) <= (limit * 1024); // Convert GB to MB
   }
-  
+
   return (current + amount) <= limit;
 };
 
 // Static methods
-userSchema.statics.findByGithubId = function(githubId) {
+userSchema.statics.findByGithubId = function (githubId) {
   return this.findOne({ githubId });
 };
 
-userSchema.statics.findActiveUsers = function() {
-  return this.find({ 
+userSchema.statics.findActiveUsers = function () {
+  return this.find({
     status: { $in: ['active', 'trial'] },
     subscriptionStatus: { $in: ['trial', 'active'] }
   });
 };
 
-userSchema.statics.findExpiredTrials = function() {
+userSchema.statics.findExpiredTrials = function () {
   return this.find({
     isTrialActive: false,
     subscriptionStatus: 'trial',

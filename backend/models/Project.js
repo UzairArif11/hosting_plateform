@@ -12,7 +12,7 @@ const projectSchema = new mongoose.Schema({
     unique: true,
     lowercase: true
   },
-  
+
   // Repository information
   repository: {
     url: {
@@ -37,7 +37,7 @@ const projectSchema = new mongoose.Schema({
       default: false
     }
   },
-  
+
   // Owner and access
   owner: {
     type: mongoose.Schema.Types.ObjectId,
@@ -59,7 +59,7 @@ const projectSchema = new mongoose.Schema({
       default: Date.now
     }
   }],
-  
+
   // Framework and build configuration
   framework: {
     type: String,
@@ -94,7 +94,7 @@ const projectSchema = new mongoose.Schema({
       default: '18'
     }
   },
-  
+
   // Environment variables
   environmentVariables: [{
     key: {
@@ -115,7 +115,7 @@ const projectSchema = new mongoose.Schema({
       default: 'production'
     }]
   }],
-  
+
   // Domain configuration
   domains: [{
     domain: {
@@ -143,7 +143,7 @@ const projectSchema = new mongoose.Schema({
       default: Date.now
     }
   }],
-  
+
   // Project status and settings
   status: {
     type: String,
@@ -158,7 +158,7 @@ const projectSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
-  
+
   // Resource usage tracking
   currentUsage: {
     storage: {
@@ -178,7 +178,7 @@ const projectSchema = new mongoose.Schema({
       default: 0 // this month
     }
   },
-  
+
   // Deployment configuration
   deploymentConfig: {
     region: {
@@ -194,7 +194,7 @@ const projectSchema = new mongoose.Schema({
       default: 512 // MB
     }
   },
-  
+
   // Latest deployment information
   latestDeployment: {
     type: mongoose.Schema.Types.ObjectId,
@@ -206,7 +206,7 @@ const projectSchema = new mongoose.Schema({
     ref: 'Deployment',
     default: null
   },
-  
+
   // Statistics
   stats: {
     totalDeployments: {
@@ -234,7 +234,7 @@ const projectSchema = new mongoose.Schema({
       default: Date.now
     }
   },
-  
+
   // Project settings
   settings: {
     notifications: {
@@ -271,7 +271,7 @@ const projectSchema = new mongoose.Schema({
 
 // Indexes for performance
 projectSchema.index({ owner: 1 });
-projectSchema.index({ slug: 1 });
+// slug index removed (duplicate)
 projectSchema.index({ 'repository.fullName': 1 });
 projectSchema.index({ status: 1 });
 projectSchema.index({ framework: 1 });
@@ -283,18 +283,18 @@ projectSchema.index({ owner: 1, status: 1 });
 projectSchema.index({ owner: 1, createdAt: -1 });
 
 // Virtual for default domain
-projectSchema.virtual('defaultDomain').get(function() {
+projectSchema.virtual('defaultDomain').get(function () {
   const primaryDomain = this.domains.find(d => d.isPrimary);
   if (primaryDomain) {
     return primaryDomain.domain;
   }
-  
+
   // Return the generated subdomain
   return `${this.slug}.${process.env.BASE_DOMAIN || 'vcp.dev'}`;
 });
 
 // Virtual for repository provider icon
-projectSchema.virtual('repositoryIcon').get(function() {
+projectSchema.virtual('repositoryIcon').get(function () {
   switch (this.repository.provider) {
     case 'github':
       return 'github';
@@ -306,7 +306,7 @@ projectSchema.virtual('repositoryIcon').get(function() {
 });
 
 // Virtual for framework icon/color
-projectSchema.virtual('frameworkInfo').get(function() {
+projectSchema.virtual('frameworkInfo').get(function () {
   const frameworks = {
     nextjs: { name: 'Next.js', color: '#000000', icon: 'nextjs' },
     react: { name: 'React', color: '#61DAFB', icon: 'react' },
@@ -325,82 +325,82 @@ projectSchema.virtual('frameworkInfo').get(function() {
     flask: { name: 'Flask', color: '#000000', icon: 'flask' },
     custom: { name: 'Custom', color: '#6B7280', icon: 'code' }
   };
-  
+
   return frameworks[this.framework] || frameworks.custom;
 });
 
 // Pre-save middleware to generate slug
-projectSchema.pre('save', async function(next) {
+projectSchema.pre('save', async function (next) {
   if (this.isNew || this.isModified('name')) {
     let baseSlug = this.name
       .toLowerCase()
       .replace(/[^a-z0-9]/g, '-')
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '');
-    
+
     let slug = baseSlug;
     let counter = 1;
-    
+
     // Ensure unique slug
     while (await this.constructor.findOne({ slug, _id: { $ne: this._id } })) {
       slug = `${baseSlug}-${counter}`;
       counter++;
     }
-    
+
     this.slug = slug;
   }
-  
+
   // Update last activity
   this.stats.lastActivity = new Date();
-  
+
   next();
 });
 
 // Instance methods
-projectSchema.methods.addCollaborator = function(userId, role = 'viewer') {
+projectSchema.methods.addCollaborator = function (userId, role = 'viewer') {
   const existingCollaborator = this.collaborators.find(
     c => c.user.toString() === userId.toString()
   );
-  
+
   if (existingCollaborator) {
     existingCollaborator.role = role;
   } else {
     this.collaborators.push({ user: userId, role });
   }
-  
+
   return this.save();
 };
 
-projectSchema.methods.removeCollaborator = function(userId) {
+projectSchema.methods.removeCollaborator = function (userId) {
   this.collaborators = this.collaborators.filter(
     c => c.user.toString() !== userId.toString()
   );
   return this.save();
 };
 
-projectSchema.methods.hasAccess = function(userId, requiredRole = 'viewer') {
+projectSchema.methods.hasAccess = function (userId, requiredRole = 'viewer') {
   if (this.owner.toString() === userId.toString()) {
     return true;
   }
-  
+
   const collaborator = this.collaborators.find(
     c => c.user.toString() === userId.toString()
   );
-  
+
   if (!collaborator) return false;
-  
+
   const roleHierarchy = { viewer: 1, developer: 2, admin: 3 };
   return roleHierarchy[collaborator.role] >= roleHierarchy[requiredRole];
 };
 
-projectSchema.methods.incrementUsage = function(type, amount = 1) {
+projectSchema.methods.incrementUsage = function (type, amount = 1) {
   if (this.currentUsage[type] !== undefined) {
     this.currentUsage[type] += amount;
     return this.save();
   }
 };
 
-projectSchema.methods.resetMonthlyUsage = function() {
+projectSchema.methods.resetMonthlyUsage = function () {
   this.currentUsage.bandwidth = 0;
   this.currentUsage.builds = 0;
   this.currentUsage.deployments = 0;
@@ -408,7 +408,7 @@ projectSchema.methods.resetMonthlyUsage = function() {
 };
 
 // Static methods
-projectSchema.statics.findByOwner = function(userId, status = 'active') {
+projectSchema.statics.findByOwner = function (userId, status = 'active') {
   const query = { owner: userId };
   if (status !== 'all') {
     query.status = status;
@@ -416,21 +416,21 @@ projectSchema.statics.findByOwner = function(userId, status = 'active') {
   return this.find(query).sort({ 'stats.lastActivity': -1 });
 };
 
-projectSchema.statics.findByCollaborator = function(userId) {
+projectSchema.statics.findByCollaborator = function (userId) {
   return this.find({
     'collaborators.user': userId,
     status: 'active'
   }).sort({ 'stats.lastActivity': -1 });
 };
 
-projectSchema.statics.findPublicProjects = function(limit = 10) {
+projectSchema.statics.findPublicProjects = function (limit = 10) {
   return this.find({
     isPublic: true,
     status: 'active'
   })
-  .populate('owner', 'username displayName avatar')
-  .sort({ 'stats.lastActivity': -1 })
-  .limit(limit);
+    .populate('owner', 'username displayName avatar')
+    .sort({ 'stats.lastActivity': -1 })
+    .limit(limit);
 };
 
 module.exports = mongoose.model('Project', projectSchema);
