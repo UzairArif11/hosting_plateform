@@ -1,0 +1,362 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+
+# nyc test coverage
+.nyc_output
+
+# Grunt intermediate storage
+.grunt
+
+# Bower dependency directory
+bower_components
+
+# node-waf configuration
+.lock-wscript
+
+# Compiled binary addons
+build/Release
+
+# Dependency directories
+jspm_packages/
+
+# Snowpack dependency directory
+web_modules/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Microbundle cache
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# parcel-bundler cache
+.cache
+.parcel-cache
+
+# Next.js build output
+.next
+out/
+
+# Nuxt.js build / generate output
+.nuxt
+dist
+
+# Gatsby files
+.cache/
+public
+
+# Storybook build outputs
+.out
+.storybook-out
+
+# Temporary folders
+tmp/
+temp/
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Runtime logs
+backend/logs/
+frontend/logs/
+build-worker/logs/
+
+# PM2 logs and process files
+.pm2/
+ecosystem.config.js.backup
+
+# Docker
+.dockerignore
+Dockerfile.backup
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Oracle Cloud credentials and configuration
+*.pem
+*.key
+*.crt
+*.p12
+oracle-config/
+oci-config/
+oracle-credentials/
+
+# Payoneer credentials
+payoneer-credentials/
+payment-config/
+
+# Database dumps
+*.sql
+*.sqlite
+*.db
+database-backups/
+db-dumps/
+
+# Build artifacts
+build/
+dist/
+*.tar.gz
+*.zip
+
+# Uploaded files
+uploads/
+user-files/
+build-artifacts/
+deployment-files/
+
+# SSL certificates
+ssl/
+certificates/
+*.crt
+*.key
+*.csr
+*.pem
+
+# Monitoring and metrics
+monitoring-data/
+prometheus-data/
+grafana-data/
+
+# Backups
+backups/
+*.backup
+*.bak
+
+# Test files
+test-results/
+coverage/
+test-reports/
+
+# Deployment specific
+deployment-configs/
+production-configs/
+staging-configs/
+
+# Local development
+dev-db/
+local-storage/
+dev-uploads/
+
+# Build worker temp files
+build-temp/
+worker-temp/
+container-builds/
+
+# Docker volumes and data
+docker-data/
+docker-volumes/
+
+# Caddy files
+Caddyfile.backup
+caddy-data/
+
+# Security sensitive files
+secrets/
+keys/
+credentials/
+api-keys/
+tokens/
+
+# User generated content
+user-projects/
+deployed-apps/
+static-sites/
+
+# Analytics and tracking
+analytics-data/
+tracking-data/
+user-metrics/
+
+# Cache directories
+.cache/
+cache/
+redis-data/
+
+# Session files
+sessions/
+session-store/
+
+# Temporary build files
+.tmp/
+.temp/
+*.tmp
+*.temp
+
+# Package manager lock files (uncomment if you want to ignore them)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# Local configuration overrides
+config.local.js
+settings.local.json
+
+# Database connection files
+mongodb-uri.txt
+connection-strings.txt
+
+# Webhook test files
+webhook-test/
+webhook-logs/
+
+# Performance monitoring
+performance-logs/
+benchmark-results/
+
+# Error logs and crash dumps
+crash-logs/
+error-dumps/
+*.dmp
+
+# Development utilities
+dev-tools/
+testing-tools/
+debug-files/
+
+# Terraform (if used for infrastructure)
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Kubernetes (if used for deployment)
+kubeconfig
+*.kubeconfig
+k8s-secrets/
+
+# Local environment scripts
+start-local.sh
+start-local.bat
+local-setup.sh
+local-setup.bat
+
+# Backup configurations
+backup-configs/
+restore-scripts/
+
+# Load testing results
+load-test-results/
+stress-test-data/
+
+# Documentation builds
+docs/build/
+docs/dist/
+
+# Linting and formatting cache
+.eslintcache
+.prettier-cache
+.stylelintcache
+
+# Husky
+.husky/_
+
+# Local history (VS Code extension)
+.history/
+
+# JetBrains IDEs
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk

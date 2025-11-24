@@ -1,6 +1,6 @@
 # 🚀 Vercel Clone Platform
 
-A full-stack zero-cost cloud hosting platform built entirely with the MERN stack, featuring Payoneer payment integration for both Pakistani (PKR) and international payments, Oracle Cloud infrastructure, and advanced admin controls.
+A full-stack cloud hosting platform built with MERN stack, featuring Payoneer payment integration for Pakistani (PKR) and international payments, Docker container management on a fixed Oracle server, and smart resource allocation.
 
 ## ✨ Features
 
@@ -21,12 +21,12 @@ A full-stack zero-cost cloud hosting platform built entirely with the MERN stack
 - **Flexible Plans**: From starter to enterprise levels
 
 ### ☁️ Infrastructure
-- **Oracle Cloud Integration**: Leverage free tier and paid instances
+- **Single Oracle Server**: Fixed server with Docker container management
 - **Smart Resource Allocation**: 
-  - Free users: Shared container pool
-  - Paid users: Dedicated Oracle instances
-- **Auto-scaling**: Dynamic resource allocation based on usage
-- **Multi-Region Support**: Deploy across different Oracle regions
+  - Free users: Minimal container resources (0.5 CPU, 1GB RAM)
+  - Paid users: Full or reduced container resources based on availability
+- **Dynamic Container Management**: Docker containers split server resources efficiently
+- **Resource Monitoring**: Real-time server utilization tracking
 
 ### 🛠️ Admin Panel
 - **Dynamic Resource Management**: Adjust CPU, RAM, storage in real-time
@@ -61,14 +61,19 @@ A full-stack zero-cost cloud hosting platform built entirely with the MERN stack
                     ┌─────────────▼──────────────┐
                     │     Oracle Cloud           │
                     │  ┌─────────────────────┐   │
-                    │  │ Account A (Free)    │   │
-                    │  │ - Shared containers │   │
-                    │  │ - Trial users       │   │
+                    │  │ EC1 - API Server    │   │
+                    │  │ - Backend APIs      │   │
+                    │  │ - Admin Panel       │   │
                     │  └─────────────────────┘   │
                     │  ┌─────────────────────┐   │
-                    │  │ Account B (Paid)    │   │
+                    │  │ EC2 - Mixed Server  │   │
+                    │  │ - Shared containers │   │
                     │  │ - Dedicated VMs     │   │
-                    │  │ - Production users  │   │
+                    │  └─────────────────────┘   │
+                    │  ┌─────────────────────┐   │
+                    │  │ EC3 - Mixed Server  │   │
+                    │  │ - Shared containers │   │
+                    │  │ - Dedicated VMs     │   │
                     │  └─────────────────────┘   │
                     └────────────────────────────┘
 ```
@@ -91,10 +96,8 @@ A full-stack zero-cost cloud hosting platform built entirely with the MERN stack
 
 ### Prerequisites
 - Node.js 18+ 
-- MongoDB 5+
-- Oracle Cloud account(s)
-- GitHub OAuth app
-- Payoneer developer account
+- Docker Desktop (for MongoDB)
+- PowerShell (Windows) or Bash (Linux/macOS)
 
 ### Installation
 
@@ -104,47 +107,48 @@ A full-stack zero-cost cloud hosting platform built entirely with the MERN stack
    cd vercel-clone-platform
    ```
 
-2. **Install backend dependencies**
+2. **Start MongoDB using existing setup scripts**
+   
+   **Windows (PowerShell - Recommended):**
+   ```powershell
+   .\setup-mongodb.ps1 start
+   ```
+   
+   **Windows (Batch file):**
+   ```cmd
+   .\mongodb-start.bat
+   ```
+   
+   **Any OS (Docker Compose):**
+   ```bash
+   docker-compose up -d mongodb mongo-express
+   ```
+
+3. **Install backend dependencies**
    ```bash
    cd backend
    npm install
    ```
 
-3. **Setup environment variables**
+4. **Setup environment variables**
    ```bash
    cp .env.example .env
-   # Edit .env with your configuration
-   ```
-
-4. **Start MongoDB**
-   ```bash
-   # Using Docker
-   docker run -d -p 27017:27017 --name mongodb mongo:5
-   
-   # Or start your local MongoDB instance
-   mongod
+   # Edit .env with your GitHub OAuth and other configurations
    ```
 
 5. **Start the backend server**
    ```bash
+   # Development mode
    npm run dev
+   
+   # Production mode
+   npm start
    ```
 
-6. **Install frontend dependencies**
-   ```bash
-   cd ../frontend
-   npm install
-   ```
-
-7. **Start the frontend**
-   ```bash
-   npm run dev
-   ```
-
-8. **Access the application**
-   - Frontend: http://localhost:3000
+6. **Access the application**
    - Backend API: http://localhost:5000
-   - Admin Panel: http://localhost:3000/admin
+   - MongoDB Web UI: http://localhost:8081
+   - Database: `mongodb://admin:password123@localhost:27017/vercel_clone?authSource=admin`
 
 ## 🔧 Configuration
 
@@ -161,38 +165,33 @@ A full-stack zero-cost cloud hosting platform built entirely with the MERN stack
 3. Set up webhook endpoint: `http://your-domain.com/api/webhooks/payoneer`
 4. Configure payment methods for PKR and international currencies
 
-### Oracle Cloud Setup
-1. Create two Oracle Cloud accounts for resource separation
-2. Generate API keys and download configuration files
-3. Set up compartments and VCNs for container deployment
-4. Configure security lists and ingress rules
+### Oracle Server Setup
+1. Ensure Docker is installed on your Oracle server
+2. Add your Oracle server IP to `.env` file
+3. Configure server resources (CPU, RAM limits)
 
 ## 📁 Project Structure
 
 ```
 vercel-clone-platform/
-├── backend/
-│   ├── models/          # MongoDB schemas
-│   ├── routes/          # API endpoints
-│   ├── services/        # Business logic
-│   ├── middleware/      # Auth, validation, etc.
-│   ├── utils/          # Helper functions
-│   └── server.js       # Entry point
-├── frontend/
-│   ├── pages/          # Next.js pages
-│   ├── components/     # React components
-│   ├── styles/         # CSS and styling
-│   ├── utils/          # Frontend utilities
-│   └── next.config.js  # Next.js configuration
-├── build-worker/
-│   ├── services/       # Build and deployment logic
-│   ├── templates/      # Framework templates
-│   └── worker.js       # Build worker process
-├── infrastructure/
-│   ├── scripts/        # Setup and deployment scripts
-│   ├── configs/        # Server configurations
-│   └── monitoring/     # Monitoring setup
-└── docs/              # Documentation
+├── backend/                    # Backend API (Express.js)
+│   ├── models/                 # MongoDB schemas (User, Plan, Project)
+│   ├── routes/                 # API endpoints (auth, billing, admin)
+│   ├── services/               # Business logic
+│   │   ├── payoneer.js         # Payment processing
+│   │   ├── containerOrchestrator.js # Docker container management
+│   │   └── docker.js           # Docker operations
+│   ├── middleware/             # Auth, validation, admin
+│   ├── utils/                  # Helper functions, logger
+│   └── server.js               # Entry point
+├── docs/                       # Documentation
+│   ├── backend-changes.md      # What changed in backend
+│   └── ...
+├── SETUP.md                    # Setup instructions
+└── README.md                   # This file
+
+# Coming Soon:
+└── frontend/                   # Next.js dashboard (planned)
 ```
 
 ## 🔐 Security Features
@@ -237,15 +236,10 @@ vercel-clone-platform/
 ### Production Deployment
 1. **Server Setup**
    ```bash
-   # Install dependencies
+   # Install Node.js and PM2
    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
    nvm install 18
    npm install -g pm2
-   
-   # Clone and setup project
-   git clone https://github.com/yourusername/vercel-clone-platform.git
-   cd vercel-clone-platform/backend
-   npm install --production
    ```
 
 2. **Environment Configuration**
@@ -253,28 +247,17 @@ vercel-clone-platform/
    # Set production environment variables
    export NODE_ENV=production
    export MONGODB_URI=mongodb://your-production-mongodb
-   # ... other environment variables
+   export ORACLE_SERVER_IP=your-oracle-server-ip
    ```
 
-3. **Start Services**
+3. **Start Backend**
    ```bash
-   # Start with PM2
-   pm2 start ecosystem.config.js
+   cd backend
+   npm install --production
+   pm2 start server.js --name vercel-clone-api
    pm2 startup
    pm2 save
    ```
-
-4. **Reverse Proxy Setup**
-   ```bash
-   # Install and configure Caddy
-   sudo caddy run --config Caddyfile
-   ```
-
-### Docker Deployment
-```bash
-# Build and run with Docker Compose
-docker-compose up -d
-```
 
 ## 🤝 Contributing
 
@@ -307,21 +290,27 @@ docker-compose up -d
 ### Payment Endpoints
 - `POST /api/billing/create-session` - Create payment session
 - `GET /api/billing/plans` - Get available plans
-- `POST /api/billing/upgrade` - Upgrade user plan
+- `GET /api/billing/info` - Get user billing info
+
+### Admin Endpoints
+- `GET /api/admin/resources/status` - Get server status
+- `POST /api/admin/resources/reallocate` - Update user container
+- `GET /api/admin/resources/users` - View user containers
+- `GET /api/admin/server/test` - Test server connection
 
 ## ⚠️ Known Issues
 
 - Large file uploads may timeout on slower connections
 - Real-time logs may disconnect on mobile browsers
-- Oracle API rate limits may affect rapid scaling
+- Docker container resources may need manual optimization
 
 ## 🔮 Future Roadmap
 
-- [ ] **Database Support**: PostgreSQL, MySQL deployment options
+- [ ] **Frontend Dashboard**: Next.js user and admin interface
 - [ ] **CI/CD Integration**: GitHub Actions, GitLab CI integration
-- [ ] **Edge Functions**: Serverless function deployment
+- [ ] **Build System**: Automated framework detection and builds
 - [ ] **Analytics Dashboard**: Detailed usage and performance metrics
-- [ ] **Multi-tenant Architecture**: White-label solutions
+- [ ] **Multi-server Support**: Distribute containers across servers
 - [ ] **API Marketplace**: Third-party integrations
 
 ## 📄 License

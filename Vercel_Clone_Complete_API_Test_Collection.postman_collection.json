@@ -1,0 +1,1630 @@
+{
+	"info": {
+		"_postman_id": "vercel-clone-complete-api-2024",
+		"name": "🚀 Vercel Clone Platform - Complete API Test Suite",
+		"description": "Complete API testing collection for Vercel Clone Platform with 3-server Oracle Cloud architecture:\n\n**Architecture:**\n- **EC1**: API Server (localhost:5000) - Backend APIs, Admin Panel, Database\n- **EC2**: Shared Users Server (:3001) - Free/Trial users containers\n- **EC3**: Paid Users Server (:3001) - Paid users containers\n\n**Features Tested:**\n- Authentication (GitHub OAuth + JWT)\n- Admin Container Management (Resource allocation, Server migration)\n- User Management & Plans\n- Project & Deployment Management\n- Payment Processing (Payoneer)\n- Container Host Agents (EC2/EC3)\n- Webhooks & Integrations\n\n**Setup Instructions:**\n1. Update environment variables with your server IPs\n2. Start MongoDB: `docker-compose up mongodb`\n3. Start Backend: `npm run dev` (in backend folder)\n4. Deploy container agents on EC2/EC3 using `deploy-container-host.sh`\n5. Run tests in order: Health → Auth → Admin → Projects\n\nBuilt by: Vercel Clone Platform Team",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "🔧 System Health & Setup",
+			"item": [
+				{
+					"name": "🏥 Health Check - Backend API",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/health",
+							"host": ["{{BASE_URL}}"],
+							"path": ["health"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🏥 Health Check - EC2 Container Host",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{EC2_SERVER_URL}}/health",
+							"host": ["{{EC2_SERVER_URL}}"],
+							"path": ["health"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🏥 Health Check - EC3 Container Host",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{EC3_SERVER_URL}}/health",
+							"host": ["{{EC3_SERVER_URL}}"],
+							"path": ["health"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "📡 Webhook Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/api/webhooks/health",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "webhooks", "health"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "🔐 Authentication & Users",
+			"item": [
+				{
+					"name": "🚪 Start GitHub OAuth Flow",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/api/auth/github",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "auth", "github"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "👤 Get Current User (JWT Required)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/auth/me",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "auth", "me"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "📝 Direct Registration (Testing Only)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"testuser@example.com\",\n  \"password\": \"testpassword123\",\n  \"plan\": \"free-trial\"\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/auth/register",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "auth", "register"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🔑 Generate API Key",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Test API Key\"\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/auth/api-key",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "auth", "api-key"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🔄 Refresh JWT Token",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Cookie",
+								"value": "auth_token={{JWT_TOKEN}}"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/auth/refresh",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "auth", "refresh"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🚪 Logout",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/auth/logout",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "auth", "logout"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "👑 Admin Panel - Dashboard",
+			"item": [
+				{
+					"name": "📊 Admin Dashboard Overview",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{ADMIN_JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/admin/dashboard",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "admin", "dashboard"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🖥️ Server Status (EC1/EC2/EC3 Architecture)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{ADMIN_JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/admin/servers",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "admin", "servers"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🔌 Test All Server Connections",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{ADMIN_JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/admin/server/test",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "admin", "server", "test"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "💰 Revenue Analytics",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{ADMIN_JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/admin/analytics/revenue?period=30d",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "admin", "analytics", "revenue"],
+							"query": [
+								{
+									"key": "period",
+									"value": "30d"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "👥 Admin - User Management",
+			"item": [
+				{
+					"name": "📋 List All Users",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{ADMIN_JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/admin/users?page=1&limit=20&status=active&search=",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "admin", "users"],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "20"
+								},
+								{
+									"key": "status",
+									"value": "active"
+								},
+								{
+									"key": "search",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🔍 Get Specific User Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{ADMIN_JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/admin/users/{{USER_ID}}",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "admin", "users", "{{USER_ID}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "✏️ Update User Plan & Resources",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{ADMIN_JWT_TOKEN}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"plan\": \"{{PLAN_ID}}\",\n  \"status\": \"active\",\n  \"subscriptionStatus\": \"active\",\n  \"resourceAllocation\": {\n    \"cpu\": 2.0,\n    \"ram\": 8,\n    \"storage\": 100,\n    \"bandwidth\": 2048\n  },\n  \"adminNotes\": \"Upgraded for high traffic project\"\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/admin/users/{{USER_ID}}",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "admin", "users", "{{USER_ID}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🖥️ Get User Container Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{ADMIN_JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/admin/users/{{USER_ID}}/container",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "admin", "users", "{{USER_ID}}", "container"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "🔧 Admin - Container Management",
+			"item": [
+				{
+					"name": "📊 Get Resource Status & Recommendations",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{ADMIN_JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/admin/resources/status",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "admin", "resources", "status"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "👥 Get All Users with Containers",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{ADMIN_JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/admin/resources/users",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "admin", "resources", "users"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "⚡ Reallocate User Container Resources",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{ADMIN_JWT_TOKEN}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"userId\": \"{{USER_ID}}\",\n  \"cpu\": 3.0,\n  \"ram\": 16,\n  \"reason\": \"User requested more resources for heavy workload\"\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/admin/resources/reallocate",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "admin", "resources", "reallocate"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🔄 Move User Between Servers (EC2 ↔ EC3)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{ADMIN_JWT_TOKEN}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"targetServer\": \"EC3\",\n  \"reason\": \"Migrating to dedicated server for better performance\"\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/admin/users/{{USER_ID}}/move-server",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "admin", "users", "{{USER_ID}}", "move-server"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "📦 Bulk Update Container Resources",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{ADMIN_JWT_TOKEN}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"filters\": {\n    \"serverKey\": \"EC2\",\n    \"status\": \"trial\"\n  },\n  \"newResources\": {\n    \"cpu\": 1.0,\n    \"ram\": 2\n  },\n  \"reason\": \"Optimizing resources for trial users\"\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/admin/resources/bulk-update",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "admin", "resources", "bulk-update"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🎛️ Resource Optimization",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{ADMIN_JWT_TOKEN}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"REBALANCE\",\n  \"targetUsers\": [],\n  \"dryRun\": true\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/admin/resources/optimize",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "admin", "resources", "optimize"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "🏷️ Admin - Plan Management",
+			"item": [
+				{
+					"name": "📋 Get All Plans with User Count",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{ADMIN_JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/admin/plans",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "admin", "plans"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "➕ Create New Plan",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{ADMIN_JWT_TOKEN}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"premium\",\n  \"displayName\": \"Premium\",\n  \"description\": \"High performance plan for enterprise users\",\n  \"pricing\": {\n    \"usd\": 99,\n    \"pkr\": 27500,\n    \"eur\": 85,\n    \"gbp\": 75\n  },\n  \"resources\": {\n    \"cpu\": 4,\n    \"ram\": 32,\n    \"storage\": 500,\n    \"bandwidth\": 8192,\n    \"containers\": 15,\n    \"projects\": 100\n  },\n  \"features\": [\n    {\n      \"name\": \"Premium Support\",\n      \"description\": \"Priority support with dedicated account manager\",\n      \"enabled\": true\n    },\n    {\n      \"name\": \"Advanced Analytics\",\n      \"description\": \"Detailed performance and usage analytics\",\n      \"enabled\": true\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/admin/plans",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "admin", "plans"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "✏️ Update Existing Plan",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{ADMIN_JWT_TOKEN}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"displayName\": \"Premium Plus\",\n  \"pricing\": {\n    \"usd\": 89,\n    \"pkr\": 25000\n  },\n  \"resources\": {\n    \"cpu\": 3.5,\n    \"ram\": 28,\n    \"storage\": 400\n  },\n  \"isActive\": true\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/admin/plans/{{PLAN_ID}}",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "admin", "plans", "{{PLAN_ID}}"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "💳 Billing & Payments (Payoneer)",
+			"item": [
+				{
+					"name": "📋 Get Available Plans for Users",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/billing/plans?currency=USD",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "billing", "plans"],
+							"query": [
+								{
+									"key": "currency",
+									"value": "USD"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "📋 Get Available Plans (PKR Currency)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/billing/plans?currency=PKR",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "billing", "plans"],
+							"query": [
+								{
+									"key": "currency",
+									"value": "PKR"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "💰 Get User Billing Info",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/billing/info",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "billing", "info"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "💳 Create Payment Session (USD)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"planId\": \"{{PLAN_ID}}\",\n  \"currency\": \"USD\",\n  \"returnUrl\": \"http://localhost:3000/dashboard/billing?success=true\",\n  \"cancelUrl\": \"http://localhost:3000/dashboard/billing?cancelled=true\"\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/billing/create-session",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "billing", "create-session"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "💳 Create Payment Session (PKR - Pakistani Users)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"planId\": \"{{PLAN_ID}}\",\n  \"currency\": \"PKR\",\n  \"returnUrl\": \"http://localhost:3000/dashboard/billing?success=true\",\n  \"cancelUrl\": \"http://localhost:3000/dashboard/billing?cancelled=true\"\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/billing/create-session",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "billing", "create-session"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "❌ Cancel Subscription",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/billing/cancel",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "billing", "cancel"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "📊 Get Payment History",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/billing/payments?page=1&limit=20",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "billing", "payments"],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "20"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🧾 Get Invoices",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/billing/invoices?page=1&limit=20",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "billing", "invoices"],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "20"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "💸 Get Exchange Rates (USD to PKR)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/billing/exchange-rates?from=USD&to=PKR",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "billing", "exchange-rates"],
+							"query": [
+								{
+									"key": "from",
+									"value": "USD"
+								},
+								{
+									"key": "to",
+									"value": "PKR"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "🚀 Projects & Deployments",
+			"item": [
+				{
+					"name": "📋 Get User Projects",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/projects?status=active&page=1&limit=20&sort=-createdAt",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "projects"],
+							"query": [
+								{
+									"key": "status",
+									"value": "active"
+								},
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "20"
+								},
+								{
+									"key": "sort",
+									"value": "-createdAt"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🔍 Get Specific Project",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/projects/{{PROJECT_ID}}",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "projects", "{{PROJECT_ID}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "➕ Create New Project",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"My React App\",\n  \"repository\": {\n    \"url\": \"https://github.com/username/my-react-app\",\n    \"fullName\": \"username/my-react-app\",\n    \"branch\": \"main\"\n  },\n  \"framework\": \"react\",\n  \"buildConfig\": {\n    \"buildCommand\": \"npm run build\",\n    \"outputDirectory\": \"build\",\n    \"installCommand\": \"npm install\",\n    \"nodeVersion\": \"18\"\n  },\n  \"environmentVariables\": [\n    {\n      \"key\": \"REACT_APP_API_URL\",\n      \"value\": \"https://api.example.com\",\n      \"environments\": [\"production\", \"preview\"]\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/projects",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "projects"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "✏️ Update Project Settings",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"My Updated React App\",\n  \"repository.branch\": \"development\",\n  \"buildConfig\": {\n    \"buildCommand\": \"npm run build:prod\",\n    \"outputDirectory\": \"dist\"\n  },\n  \"autoDeployEnabled\": true\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/projects/{{PROJECT_ID}}",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "projects", "{{PROJECT_ID}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🗑️ Delete Project",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/projects/{{PROJECT_ID}}",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "projects", "{{PROJECT_ID}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🌐 Add Custom Domain",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"domain\": \"myapp.example.com\",\n  \"isPrimary\": true\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/projects/{{PROJECT_ID}}/domains",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "projects", "{{PROJECT_ID}}", "domains"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "👥 Add Project Collaborator",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"username\": \"collaborator_username\",\n  \"role\": \"developer\"\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/projects/{{PROJECT_ID}}/collaborators",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "projects", "{{PROJECT_ID}}", "collaborators"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "📊 Get Project Analytics",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/projects/{{PROJECT_ID}}/analytics",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "projects", "{{PROJECT_ID}}", "analytics"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "🚢 Deployments",
+			"item": [
+				{
+					"name": "📋 Get Project Deployments",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/deployments?projectId={{PROJECT_ID}}&status=&page=1&limit=10",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "deployments"],
+							"query": [
+								{
+									"key": "projectId",
+									"value": "{{PROJECT_ID}}"
+								},
+								{
+									"key": "status",
+									"value": ""
+								},
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🔍 Get Specific Deployment",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/deployments/{{DEPLOYMENT_ID}}",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "deployments", "{{DEPLOYMENT_ID}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🚀 Create New Deployment",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"projectId\": \"{{PROJECT_ID}}\",\n  \"branch\": \"main\",\n  \"commitSha\": \"abc123def456\",\n  \"commitMessage\": \"Deploy latest changes\",\n  \"isPreview\": false\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/deployments",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "deployments"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🚀 Create Preview Deployment",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"projectId\": \"{{PROJECT_ID}}\",\n  \"branch\": \"feature-branch\",\n  \"commitMessage\": \"Preview deployment for feature testing\",\n  \"isPreview\": true\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/deployments",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "deployments"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "❌ Cancel Deployment",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/deployments/{{DEPLOYMENT_ID}}/cancel",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "deployments", "{{DEPLOYMENT_ID}}", "cancel"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🔄 Retry Failed Deployment",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/deployments/{{DEPLOYMENT_ID}}/retry",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "deployments", "{{DEPLOYMENT_ID}}", "retry"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "📜 Get Deployment Logs",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/deployments/{{DEPLOYMENT_ID}}/logs",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "deployments", "{{DEPLOYMENT_ID}}", "logs"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "📺 Stream Deployment Logs (SSE)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "text/event-stream"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/deployments/{{DEPLOYMENT_ID}}/logs/stream",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "deployments", "{{DEPLOYMENT_ID}}", "logs", "stream"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "⬆️ Promote Preview to Production",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{JWT_TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/api/deployments/{{DEPLOYMENT_ID}}/promote",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "deployments", "{{DEPLOYMENT_ID}}", "promote"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "🖥️ Container Host Agents (EC2/EC3)",
+			"item": [
+				{
+					"name": "📊 Get EC2 Server Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{EC2_SERVER_URL}}/stats",
+							"host": ["{{EC2_SERVER_URL}}"],
+							"path": ["stats"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "📊 Get EC3 Server Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{EC3_SERVER_URL}}/stats",
+							"host": ["{{EC3_SERVER_URL}}"],
+							"path": ["stats"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "👤 Add User to EC2 Shared Container",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"add_user_to_shared\",\n  \"userId\": \"trial_user_123\",\n  \"config\": {\n    \"resources\": {\n      \"memory\": \"1g\",\n      \"cpu\": 0.5\n    }\n  }\n}"
+						},
+						"url": {
+							"raw": "{{EC2_SERVER_URL}}/container-command",
+							"host": ["{{EC2_SERVER_URL}}"],
+							"path": ["container-command"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🏢 Create Dedicated Container on EC3",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"create_dedicated_container\",\n  \"userId\": \"paid_user_456\",\n  \"config\": {\n    \"resources\": {\n      \"memory\": \"8g\",\n      \"cpu\": 2.0\n    },\n    \"env\": {\n      \"PLAN\": \"pro\",\n      \"MAX_PROJECTS\": 50,\n      \"MAX_DEPLOYMENTS\": 100\n    },\n    \"ports\": {\n      \"start\": 4001\n    }\n  }\n}"
+						},
+						"url": {
+							"raw": "{{EC3_SERVER_URL}}/container-command",
+							"host": ["{{EC3_SERVER_URL}}"],
+							"path": ["container-command"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🗑️ Remove User Container from EC2",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"remove_user_container\",\n  \"userId\": \"trial_user_123\"\n}"
+						},
+						"url": {
+							"raw": "{{EC2_SERVER_URL}}/container-command",
+							"host": ["{{EC2_SERVER_URL}}"],
+							"path": ["container-command"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🗑️ Remove User Container from EC3",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"remove_user_container\",\n  \"userId\": \"paid_user_456\"\n}"
+						},
+						"url": {
+							"raw": "{{EC3_SERVER_URL}}/container-command",
+							"host": ["{{EC3_SERVER_URL}}"],
+							"path": ["container-command"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "📡 Webhooks & Integrations",
+			"item": [
+				{
+					"name": "🔗 GitHub Webhook (Mock Push Event)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-GitHub-Event",
+								"value": "push",
+								"type": "text"
+							},
+							{
+								"key": "X-Hub-Signature-256",
+								"value": "sha256=mock_signature",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"ref\": \"refs/heads/main\",\n  \"before\": \"abc123def456\",\n  \"after\": \"def456ghi789\",\n  \"repository\": {\n    \"id\": 123456789,\n    \"name\": \"my-react-app\",\n    \"full_name\": \"username/my-react-app\",\n    \"html_url\": \"https://github.com/username/my-react-app\",\n    \"private\": false\n  },\n  \"head_commit\": {\n    \"id\": \"def456ghi789\",\n    \"message\": \"Update README.md\",\n    \"timestamp\": \"2024-01-15T10:30:00Z\",\n    \"author\": {\n      \"name\": \"John Doe\",\n      \"email\": \"john@example.com\",\n      \"username\": \"johndoe\"\n    },\n    \"committer\": {\n      \"name\": \"John Doe\",\n      \"email\": \"john@example.com\",\n      \"username\": \"johndoe\"\n    }\n  },\n  \"pusher\": {\n    \"name\": \"johndoe\",\n    \"email\": \"john@example.com\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/webhooks/github",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "webhooks", "github"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "💳 Payoneer Webhook (Payment Completed)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Payoneer-Signature",
+								"value": "mock_payoneer_signature",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"id\": \"evt_1234567890\",\n  \"type\": \"payment.completed\",\n  \"created\": 1705320600,\n  \"data\": {\n    \"id\": \"pay_abcdef123456\",\n    \"amount\": 2900,\n    \"currency\": \"USD\",\n    \"status\": \"completed\",\n    \"customer_id\": \"cust_987654321\",\n    \"plan_id\": \"{{PLAN_ID}}\",\n    \"metadata\": {\n      \"user_id\": \"{{USER_ID}}\",\n      \"plan_name\": \"Growth Plan\",\n      \"billing_cycle\": \"monthly\"\n    }\n  }\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/webhooks/payoneer",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "webhooks", "payoneer"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "💳 Payoneer Webhook (Payment Failed)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Payoneer-Signature",
+								"value": "mock_payoneer_signature",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"id\": \"evt_1234567891\",\n  \"type\": \"payment.failed\",\n  \"created\": 1705320600,\n  \"data\": {\n    \"id\": \"pay_failed_123456\",\n    \"amount\": 2900,\n    \"currency\": \"USD\",\n    \"status\": \"failed\",\n    \"customer_id\": \"cust_987654321\",\n    \"error_code\": \"insufficient_funds\",\n    \"error_message\": \"Insufficient funds in account\",\n    \"metadata\": {\n      \"user_id\": \"{{USER_ID}}\",\n      \"plan_name\": \"Growth Plan\"\n    }\n  }\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/webhooks/payoneer",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "webhooks", "payoneer"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "✅ Webhook Verification - GitHub",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/api/webhooks/verify/github",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "webhooks", "verify", "github"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "✅ Webhook Verification - Payoneer",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/api/webhooks/verify/payoneer?challenge=verification_challenge_123",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "webhooks", "verify", "payoneer"],
+							"query": [
+								{
+									"key": "challenge",
+									"value": "verification_challenge_123"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🧪 Test GitHub Webhook (Development Only)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"test\": true,\n  \"repository\": {\n    \"full_name\": \"test/test-repo\"\n  },\n  \"ref\": \"refs/heads/main\"\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/webhooks/test/github",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "webhooks", "test", "github"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "🧪 Test Payoneer Webhook (Development Only)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"type\": \"payment.completed\",\n  \"test\": true,\n  \"data\": {\n    \"amount\": 2900,\n    \"currency\": \"USD\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/api/webhooks/test/payoneer",
+							"host": ["{{BASE_URL}}"],
+							"path": ["api", "webhooks", "test", "payoneer"]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "BASE_URL",
+			"value": "http://localhost:5000",
+			"type": "string",
+			"description": "Main EC1 API Server URL"
+		},
+		{
+			"key": "EC2_SERVER_URL",
+			"value": "http://your-ec2-server-ip:3001",
+			"type": "string",
+			"description": "EC2 Shared Users Server URL (Replace with actual IP)"
+		},
+		{
+			"key": "EC3_SERVER_URL",
+			"value": "http://your-ec3-server-ip:3001",
+			"type": "string",
+			"description": "EC3 Paid Users Server URL (Replace with actual IP)"
+		},
+		{
+			"key": "JWT_TOKEN",
+			"value": "your-jwt-token-here",
+			"type": "string",
+			"description": "User JWT Token (Get from auth/me endpoint)"
+		},
+		{
+			"key": "ADMIN_JWT_TOKEN",
+			"value": "your-admin-jwt-token-here",
+			"type": "string",
+			"description": "Admin JWT Token (Create admin user first)"
+		},
+		{
+			"key": "USER_ID",
+			"value": "user-object-id-here",
+			"type": "string",
+			"description": "MongoDB User Object ID"
+		},
+		{
+			"key": "PROJECT_ID",
+			"value": "project-object-id-here",
+			"type": "string",
+			"description": "MongoDB Project Object ID"
+		},
+		{
+			"key": "DEPLOYMENT_ID",
+			"value": "deployment-object-id-here",
+			"type": "string",
+			"description": "MongoDB Deployment Object ID"
+		},
+		{
+			"key": "PLAN_ID",
+			"value": "plan-object-id-here",
+			"type": "string",
+			"description": "MongoDB Plan Object ID"
+		}
+	]
+}
