@@ -5,10 +5,19 @@ const logger = require('../utils/logger');
 const createDockerClient = (host = null) => {
   if (host) {
     // Remote Docker host (Oracle instance)
+    // Try HTTPS first, fallback to HTTP
+    const useHttps = process.env.DOCKER_USE_HTTPS !== 'false';
+    
     return new Docker({
       host: host,
       port: 2376,
-      protocol: 'https'
+      protocol: useHttps ? 'https' : 'http',
+      // Skip certificate verification for self-signed certs
+      // In production, you should use proper certificates
+      ca: null,
+      cert: null,
+      key: null,
+      checkServerIdentity: () => undefined
     });
   }
   
