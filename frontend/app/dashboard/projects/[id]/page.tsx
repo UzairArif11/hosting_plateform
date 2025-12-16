@@ -8,6 +8,7 @@ import { fetchProject, deleteProject } from '@/lib/slices/projectsSlice';
 import { fetchDeployments, createDeployment } from '@/lib/slices/deploymentsSlice';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
+import DeploymentStatus from '@/components/DeploymentStatus';
 import {
     RocketLaunchIcon,
     Cog6ToothIcon,
@@ -26,6 +27,8 @@ export default function ProjectDetailPage() {
     const { deployments, loading: deploymentsLoading } = useSelector((state: RootState) => state.deployments);
     const [activeTab, setActiveTab] = useState('deployments');
     const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>([]);
+    const [activeDeploymentId, setActiveDeploymentId] = useState<string | null>(null);
+    const [isDeploying, setIsDeploying] = useState(false);
 
     useEffect(() => {
         if (params.id) {
@@ -45,12 +48,40 @@ export default function ProjectDetailPage() {
         }
     }, [currentProject]);
 
+    // Track active deployment
+    useEffect(() => {
+        if (deployments.length > 0) {
+            // Find the most recent deployment that's in progress
+            const activeDeployment = deployments.find(
+                (d: any) => d.status === 'building' || d.status === 'deploying' || d.status === 'queued'
+            );
+
+            if (activeDeployment) {
+                setActiveDeploymentId(activeDeployment._id);
+                setIsDeploying(true);
+            } else {
+                setActiveDeploymentId(null);
+                setIsDeploying(false);
+            }
+        }
+    }, [deployments]);
+
     const handleDeploy = async () => {
+        if (isDeploying) {
+            toast.error('A deployment is already in progress');
+            return;
+        }
+
         try {
-            await dispatch(createDeployment({
+            const result = await dispatch(createDeployment({
                 projectId: params.id as string,
                 branch: currentProject?.repository?.branch || 'main',
             })).unwrap();
+
+            // Set the new deployment as active
+            setActiveDeploymentId(result._id);
+            setIsDeploying(true);
+
             toast.success('Deployment started!');
         } catch (error: any) {
             toast.error(error || 'Failed to start deployment');
@@ -122,10 +153,14 @@ export default function ProjectDetailPage() {
                 <div className="flex items-center space-x-3">
                     <button
                         onClick={handleDeploy}
-                        className="flex items-center space-x-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition-colors"
+                        disabled={isDeploying}
+                        className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${isDeploying
+                                ? 'bg-gray-600 cursor-not-allowed text-gray-400'
+                                : 'bg-purple-600 hover:bg-purple-700 text-white'
+                            }`}
                     >
                         <RocketLaunchIcon className="h-5 w-5" />
-                        <span>Deploy Now</span>
+                        <span>{isDeploying ? 'Deploying...' : 'Deploy Now'}</span>
                     </button>
                     <button
                         onClick={handleDeleteProject}
@@ -157,14 +192,21 @@ export default function ProjectDetailPage() {
                 </div>
             </div>
 
+            {/* Active Deployment Status */}
+            {activeDeploymentId && (
+                <div className="mb-6">
+                    <DeploymentStatus deploymentId={activeDeploymentId} />
+                </div>
+            )}
+
             {/* Tabs */}
             <div className="border-b border-gray-800">
                 <div className="flex space-x-8">
                     <button
                         onClick={() => setActiveTab('deployments')}
                         className={`pb-4 px-1 border-b-2 transition-colors ${activeTab === 'deployments'
-                                ? 'border-purple-500 text-white'
-                                : 'border-transparent text-gray-400 hover:text-white'
+                            ? 'border-purple-500 text-white'
+                            : 'border-transparent text-gray-400 hover:text-white'
                             }`}
                     >
                         Deployments
@@ -172,8 +214,8 @@ export default function ProjectDetailPage() {
                     <button
                         onClick={() => setActiveTab('settings')}
                         className={`pb-4 px-1 border-b-2 transition-colors ${activeTab === 'settings'
-                                ? 'border-purple-500 text-white'
-                                : 'border-transparent text-gray-400 hover:text-white'
+                            ? 'border-purple-500 text-white'
+                            : 'border-transparent text-gray-400 hover:text-white'
                             }`}
                     >
                         Settings
@@ -181,8 +223,8 @@ export default function ProjectDetailPage() {
                     <button
                         onClick={() => setActiveTab('env')}
                         className={`pb-4 px-1 border-b-2 transition-colors ${activeTab === 'env'
-                                ? 'border-purple-500 text-white'
-                                : 'border-transparent text-gray-400 hover:text-white'
+                            ? 'border-purple-500 text-white'
+                            : 'border-transparent text-gray-400 hover:text-white'
                             }`}
                     >
                         Environment Variables
@@ -227,6 +269,24 @@ export default function ProjectDetailPage() {
                                                 <p className="text-sm text-gray-400">
                                                     {deployment.branch} • {deployment.commitSha?.substring(0, 7)}
                                                 </p>
+                                                {/* Show URL for successful deployments */}
+                                                {deployment.status === 'success' && deployment.url && (
+                                                    <a
+                                                        href={deployment.url}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="text-xs text-green-400 hover:text-green-300 underline mt-1 inline-block"
+                                                        onClick={(e) => e.stopPropagation()}
+                                                    >
+                                                        View Deployment →
+                                                    </a>
+                                                )}
+                                                {/* Show error for failed deployments */}
+                                                {deployment.status === 'failed' && deployment.error && (
+                                                    <p className="text-xs text-red-400 mt-1">
+                                                        Error: {deployment.error.substring(0, 100)}{deployment.error.length > 100 ? '...' : ''}
+                                                    </p>
+                                                )}
                                             </div>
                                         </div>
                                         <div className="text-right">

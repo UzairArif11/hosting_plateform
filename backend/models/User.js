@@ -36,6 +36,17 @@ const userSchema = new mongoose.Schema({
     default: ''
   },
 
+  // OAuth tokens and provider
+  githubAccessToken: {
+    type: String,
+    default: null
+  },
+  provider: {
+    type: String,
+    enum: ['github', 'google', 'local'],
+    default: 'local'
+  },
+
   // User role and status
   role: {
     type: String,
@@ -160,6 +171,53 @@ const userSchema = new mongoose.Schema({
     lastChecked: { type: Date, default: Date.now }
   },
 
+  // What user SEES in UI
+  displayedResources: {
+    cpu: { type: Number },
+    ram: { type: Number },
+    storage: { type: Number },
+    bandwidth: { type: Number },
+    projects: { type: Number }
+  },
+
+  // What backend ACTUALLY enforces
+  allocatedResources: {
+    cpu: { type: Number },
+    ram: { type: Number },
+    storage: { type: Number },
+    bandwidth: { type: Number },
+    projects: { type: Number }
+  },
+
+  // Admin override for this specific user (highest priority)
+  adminOverride: {
+    enabled: { type: Boolean, default: false },
+    reason: { type: String, default: '' },
+    customCPU: { type: Number },
+    customRAM: { type: Number },
+    customStorage: { type: Number },
+    customBandwidth: { type: Number },
+    expiresAt: { type: Date },
+    setBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    setAt: { type: Date }
+  },
+
+  // Active containers tracking
+  containers: [{
+    id: String,
+    name: String,
+    type: { type: String, enum: ['shared', 'dedicated', 'free'] },
+    server: String,
+    port: Number,
+    resources: {
+      cpu: Number,
+      ram: Number
+    },
+    projects: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Project' }],
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now }
+  }],
+
   // Oracle Cloud server allocation (Load Balanced EC2/EC3 architecture)
   oracleAccountId: {
     type: String,
@@ -169,9 +227,9 @@ const userSchema = new mongoose.Schema({
   },
   containerType: {
     type: String,
-    enum: ['shared', 'dedicated', null],
-    default: null, // shared: Free users, dedicated: Paid users
-    description: 'Container allocation type (shared vs dedicated)'
+    enum: ['shared', 'dedicated', 'free', null],
+    default: null, // shared: Free users, dedicated: Paid users, free: Small dedicated containers
+    description: 'Container allocation type (shared vs dedicated vs free)'
   },
   serverAssignmentHistory: [{
     server: {

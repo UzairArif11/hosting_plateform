@@ -28,6 +28,7 @@ export default function ProjectsPage() {
         dispatch(fetchProjects({ page: 1, limit: 100 }));
     }, [dispatch]);
 
+
     const handleCreateProject = async (e: React.FormEvent) => {
         e.preventDefault();
 
@@ -36,9 +37,47 @@ export default function ProjectsPage() {
             return;
         }
 
-        const [owner, name] = newProject.repository.split('/');
-        if (!owner || !name) {
-            toast.error('Repository must be in format: owner/repo');
+        // Smart repository parsing - handle multiple formats
+        let owner = '';
+        let repoName = '';
+
+        const repoInput = newProject.repository.trim();
+
+        // Format 1: Full GitHub HTTPS URL (https://github.com/owner/repo)
+        if (repoInput.startsWith('http')) {
+            const match = repoInput.match(/github\.com\/([^\/]+)\/([^\/\?#]+)/);
+            if (match) {
+                owner = match[1];
+                repoName = match[2].replace('.git', '');
+            }
+        }
+        // Format 2: SSH Git URL (git@github.com:owner/repo.git)
+        else if (repoInput.startsWith('git@')) {
+            const match = repoInput.match(/git@github\.com:([^\/]+)\/(.+)/);
+            if (match) {
+                owner = match[1];
+                repoName = match[2].replace('.git', '');
+            }
+        }
+        // Format 3: gh CLI command (gh repo clone owner/repo)
+        else if (repoInput.includes('gh repo clone')) {
+            const match = repoInput.match(/gh repo clone\s+([^\/\s]+)\/([^\s]+)/);
+            if (match) {
+                owner = match[1];
+                repoName = match[2];
+            }
+        }
+        // Format 4: Simple owner/repo format
+        else if (repoInput.includes('/')) {
+            const parts = repoInput.split('/');
+            if (parts.length >= 2) {
+                owner = parts[0];
+                repoName = parts[1].replace('.git', '');
+            }
+        }
+
+        if (!owner || !repoName) {
+            toast.error('Invalid repository format. Use: owner/repo or paste GitHub URL');
             return;
         }
 
@@ -46,10 +85,11 @@ export default function ProjectsPage() {
             await dispatch(createProject({
                 name: newProject.name,
                 repository: {
-                    owner,
-                    name,
-                    branch: newProject.branch,
+                    url: `https://github.com/${owner}/${repoName}`,
+                    fullName: `${owner}/${repoName}`,
+                    branch: newProject.branch || 'main',
                 },
+                framework: 'nextjs',
             })).unwrap();
 
             toast.success('Project created successfully!');
@@ -161,8 +201,8 @@ export default function ProjectsPage() {
                             <div className="flex items-center justify-between">
                                 <span
                                     className={`px-3 py-1 rounded-full text-xs font-medium ${project.status === 'active'
-                                            ? 'bg-green-500/10 text-green-500'
-                                            : 'bg-gray-500/10 text-gray-500'
+                                        ? 'bg-green-500/10 text-green-500'
+                                        : 'bg-gray-500/10 text-gray-500'
                                         }`}
                                 >
                                     {project.status}
@@ -199,15 +239,23 @@ export default function ProjectsPage() {
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-300 mb-2">
-                                    Repository (owner/repo)
+                                    GitHub Repository
                                 </label>
                                 <input
                                     type="text"
                                     value={newProject.repository}
                                     onChange={(e) => setNewProject({ ...newProject, repository: e.target.value })}
                                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                    placeholder="username/repository"
+                                    placeholder="owner/repo"
                                 />
+                                <p className="mt-2 text-xs text-gray-400">
+                                    Accepts: <span className="text-purple-400">owner/repo</span>, GitHub URL, SSH URL, or <span className="text-purple-400">gh repo clone</span> command
+                                </p>
+                                <div className="mt-1 text-xs text-gray-500 space-y-0.5">
+                                    <div>• UzairArif11/Trello-Clone</div>
+                                    <div>• https://github.com/UzairArif11/Trello-Clone.git</div>
+                                    <div>• git@github.com:UzairArif11/Trello-Clone.git</div>
+                                </div>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-300 mb-2">
@@ -238,8 +286,9 @@ export default function ProjectsPage() {
                             </div>
                         </form>
                     </div>
-                </div>
-            )}
-        </div>
+                </div >
+            )
+            }
+        </div >
     );
 }

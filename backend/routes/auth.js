@@ -576,6 +576,16 @@ const handleDirectRegistration = async (req, res) => {
 
     await user.save();
 
+    // Generate token
+    const token = generateToken(user);
+
+    // Set cookie
+    res.cookie('auth_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+
     // Assign user to container server
     try {
       const containerAssignment = await assignUserToServer(user._id, plan);
@@ -590,6 +600,7 @@ const handleDirectRegistration = async (req, res) => {
 
       res.json({
         success: true,
+        token,
         user: {
           id: user._id,
           email: user.email,
@@ -599,9 +610,17 @@ const handleDirectRegistration = async (req, res) => {
       });
     } catch (containerError) {
       logger.error('Failed to assign user to container server:', containerError.message);
-      res.status(500).json({
-        error: 'User created but container assignment failed',
-        details: containerError.message
+
+      // Still return token even if container assignment fails
+      res.json({
+        success: true,
+        token,
+        user: {
+          id: user._id,
+          email: user.email,
+          plan: user.plan
+        },
+        warning: 'Container assignment pending'
       });
     }
 
@@ -611,6 +630,57 @@ const handleDirectRegistration = async (req, res) => {
   }
 };
 
+// Login handler
+const handleLogin = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    // Find user by email
+    const user = await User.findOne({ email }).populate('plan');
+
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Check password
+    const isValidPassword = await user.comparePassword(password);
+
+    if (!isValidPassword) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Generate token
+    const token = generateToken(user);
+
+    // Set cookie
+    res.cookie('auth_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user._id,
+        email: user.email,
+        displayName: user.displayName,
+        plan: user.plan?.name || 'free'
+      }
+    });
+
+  } catch (error) {
+    logger.error('Login error:', error.message);
+    res.status(500).json({ error: 'Login failed' });
+  }
+};
+
+router.post('/login', handleLogin);
 router.get('/me', getCurrentUser);
 router.post('/logout', handleLogout);
 router.post('/register', handleDirectRegistration);

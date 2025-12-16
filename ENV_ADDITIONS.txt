@@ -1,0 +1,14 @@
+# Add these to your .env file:
+
+# SSH Keys for EC2/EC3
+SSH_EC2_KEY=F:/sshA/ec2
+SSH_EC3_KEY=F:/sshA/ec3
+SSH_USERNAME=ubuntu
+
+# Domain
+BASE_DOMAIN=foodpanda.site
+
+# Existing variables (keep these)
+# MONGODB_URI=...
+# REDIS_HOST=...
+# etc.

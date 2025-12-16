@@ -195,6 +195,13 @@ const projectSchema = new mongoose.Schema({
     }
   },
 
+  // Active container tracking (for cleanup)
+  activeContainer: {
+    id: { type: String },
+    name: { type: String },
+    updatedAt: { type: Date, default: Date.now }
+  },
+
   // Latest deployment information
   latestDeployment: {
     type: mongoose.Schema.Types.ObjectId,

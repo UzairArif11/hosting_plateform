@@ -35,6 +35,7 @@ const deploymentRoutes = require('./routes/deployments');
 const billingRoutes = require('./routes/billing');
 const adminRoutes = require('./routes/admin');
 const webhookRoutes = require('./routes/webhooks');
+const settingsRoutes = require('./routes/settings');
 
 // Import middleware
 const { requireAuth } = require('./middleware/auth');
@@ -43,14 +44,13 @@ const { requireAdmin } = require('./middleware/admin');
 // Import passport configuration
 require('./config/passport');
 
+
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server, {
-  cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
-    methods: ["GET", "POST"]
-  }
-});
+
+// Initialize WebSocket for real-time deployment updates
+const websocketService = require('./services/websocket');
+websocketService.initializeWebSocket(server);
 
 // Global middleware
 app.use(helmet());
@@ -105,35 +105,20 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Connect to MongoDB
 connectDB();
 
-// Socket.IO connection handling
-io.on('connection', (socket) => {
-  logger.info(`New client connected: ${socket.id}`);
-
-  socket.on('join-deployment-room', (deploymentId) => {
-    socket.join(`deployment-${deploymentId}`);
-    logger.info(`Socket ${socket.id} joined deployment room: ${deploymentId}`);
-  });
-
-  socket.on('join-user-room', (userId) => {
-    socket.join(`user-${userId}`);
-    logger.info(`Socket ${socket.id} joined user room: ${userId}`);
-  });
-
-  socket.on('disconnect', () => {
-    logger.info(`Client disconnected: ${socket.id}`);
-  });
-});
-
-// Make io available to routes
-app.use((req, res, next) => {
-  req.io = io;
-  next();
-});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
+// API health check endpoint (for tests)
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
     timestamp: new Date().toISOString(),
     uptime: process.uptime()
   });
@@ -145,6 +130,7 @@ app.use('/api/projects', requireAuth, projectRoutes);
 app.use('/api/deployments', requireAuth, deploymentRoutes);
 app.use('/api/billing', requireAuth, billingRoutes);
 app.use('/api/admin', requireAuth, requireAdmin, adminRoutes);
+app.use('/api/settings', settingsRoutes); // Settings (public domain lookup, admin for updates)
 app.use('/api/test', require('./routes/test')); // Test endpoints (no auth required)
 app.use('/api/webhooks', webhookRoutes);
 
@@ -188,9 +174,10 @@ process.on('SIGTERM', () => {
     logger.info('Resource monitoring stopped');
   }
 
+
   server.close(() => {
     logger.info('Process terminated');
   });
 });
 
-module.exports = { app, io };
+module.exports = { app };

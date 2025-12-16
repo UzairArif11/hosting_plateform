@@ -1,6 +1,7 @@
 const Queue = require('bull');
 const logger = require('../utils/logger');
 const buildExecutor = require('./buildExecutor');
+const websocket = require('./websocket');
 
 // Create build queue with Redis
 const buildQueue = new Queue('deployments', {
@@ -35,17 +36,47 @@ buildQueue.process(async (job) => {
         // Update job progress
         await job.progress(0);
 
+        // Emit initial status
+        websocket.emitDeploymentStatus(deploymentId, 'building', {
+            progress: 0,
+            message: 'Starting deployment...'
+        });
+
         // Execute build
         const result = await buildExecutor.executeBuild(deploymentId, {
             onProgress: async (progress) => {
                 await job.progress(progress);
+
+                // Emit progress via WebSocket
+                websocket.emitDeploymentProgress(deploymentId, progress);
             },
             onLog: async (level, message) => {
                 logger.info(`[${deploymentId}] ${message}`);
+
+                // Emit log via WebSocket
+                websocket.emitDeploymentLog(deploymentId, {
+                    level,
+                    message
+                });
             }
         });
 
         await job.progress(100);
+
+        // Save deployment URL to database
+        const Deployment = require('../models/Deployment');
+        await Deployment.findByIdAndUpdate(deploymentId, {
+            deploymentUrl: result.deploymentUrl,
+            status: 'success',
+            completedAt: new Date()
+        });
+
+        // Emit completion with URL
+        websocket.emitDeploymentStatus(deploymentId, 'success', {
+            progress: 100,
+            url: result.deploymentUrl,
+            message: 'Deployment successful!'
+        });
 
         logger.info(`Deployment completed successfully: ${deploymentId}`);
         return result;
@@ -55,6 +86,13 @@ buildQueue.process(async (job) => {
             error: error.message,
             stack: error.stack
         });
+
+        // Emit failure status
+        websocket.emitDeploymentStatus(deploymentId, 'failed', {
+            error: error.message,
+            message: `Deployment failed: ${error.message}`
+        });
+
         throw error;
     }
 });
@@ -95,7 +133,10 @@ async function addDeployment(deploymentId, projectId, userId, options = {}) {
     const jobOptions = {
         priority: options.priority || 10,
         delay: options.delay || 0,
-        jobId: `deployment-${deploymentId}`
+        jobId: `deployment-${deploymentId}`,
+        attempts: 1,  // Disable retries - user can manually retry
+        removeOnComplete: false,
+        removeOnFail: false
     };
 
     const job = await buildQueue.add({
@@ -105,9 +146,19 @@ async function addDeployment(deploymentId, projectId, userId, options = {}) {
         ...options
     }, jobOptions);
 
+    // Get position if available (some Bull versions don't have this method)
+    let position = 'unknown';
+    try {
+        if (typeof job.getPosition === 'function') {
+            position = await job.getPosition();
+        }
+    } catch (e) {
+        // Ignore if getPosition fails
+    }
+
     logger.info(`Deployment added to queue: ${deploymentId}`, {
         jobId: job.id,
-        position: await job.getPosition()
+        position
     });
 
     return job;

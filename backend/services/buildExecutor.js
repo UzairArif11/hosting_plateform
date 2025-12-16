@@ -111,12 +111,25 @@ async function executeBuild(deploymentId, callbacks = {}) {
  * Clone repository from GitHub
  */
 async function cloneRepository(deployment, project, user, onLog) {
-    const buildId = `${deployment._id}-${Date.now()}`;
+    // Use deployment ID as buildId (no timestamp) so retries clean up and reuse the same directory
+    const buildId = deployment._id.toString();
     const buildPath = path.join(BUILD_DIR, buildId);
 
     try {
-        // Create build directory
-        await fs.mkdir(buildPath, { recursive: true });
+        // Clean up existing directory if it exists
+        try {
+            const exists = await fs.access(buildPath).then(() => true).catch(() => false);
+            if (exists) {
+                await onLog('info', `Cleaning up existing build directory...`);
+                await fs.rm(buildPath, { recursive: true, force: true });
+                await onLog('info', `✓ Old directory removed`);
+            }
+        } catch (cleanupError) {
+            await onLog('warn', `Cleanup warning: ${cleanupError.message}`);
+        }
+
+        // Ensure parent directory exists
+        await fs.mkdir(BUILD_DIR, { recursive: true });
 
         // Get repository URL with token
         const repoUrl = project.repository.url;
@@ -125,7 +138,7 @@ async function cloneRepository(deployment, project, user, onLog) {
             `https://${user.githubAccessToken}@github.com/`
         );
 
-        await onLog('info', `Cloning ${project.repository.owner}/${project.repository.name}...`);
+        await onLog('info', `Cloning ${project.repository.fullName}...`);
 
         // Clone repository
         const cloneCommand = `git clone --depth 1 --branch ${deployment.branch} ${repoWithAuth} ${buildPath}`;
@@ -243,20 +256,40 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
 
         await onLog('info', `Using package manager: ${packageManager}`);
 
-        // Install command
-        const installCmd = packageManager === 'yarn' ? 'yarn install --frozen-lockfile' :
+        // Install command with fallback
+        let installCmd = packageManager === 'yarn' ? 'yarn install --frozen-lockfile' :
             packageManager === 'pnpm' ? 'pnpm install --frozen-lockfile' :
                 'npm ci';
 
         deployment.installCommand = installCmd;
         await deployment.save();
 
-        // Execute install
-        const { stdout, stderr } = await execAsync(installCmd, {
-            cwd: buildPath,
-            timeout: 10 * 60 * 1000, // 10 minutes
-            maxBuffer: 10 * 1024 * 1024 // 10MB
-        });
+        // Execute install with fallback
+        let stdout, stderr;
+        try {
+            const result = await execAsync(installCmd, {
+                cwd: buildPath,
+                timeout: 10 * 60 * 1000, // 10 minutes
+                maxBuffer: 10 * 1024 * 1024 // 10MB
+            });
+            stdout = result.stdout;
+            stderr = result.stderr;
+        } catch (error) {
+            // If npm ci fails (no package-lock.json), fallback to npm install
+            if (packageManager === 'npm' && error.message.includes('package-lock.json')) {
+                await onLog('warn', 'npm ci failed, falling back to npm install...');
+                installCmd = 'npm install';
+                const result = await execAsync(installCmd, {
+                    cwd: buildPath,
+                    timeout: 10 * 60 * 1000,
+                    maxBuffer: 10 * 1024 * 1024
+                });
+                stdout = result.stdout;
+                stderr = result.stderr;
+            } else {
+                throw error;
+            }
+        }
 
         if (stdout) await onLog('info', stdout.substring(0, 500));
         if (stderr) await onLog('warn', stderr.substring(0, 500));
@@ -351,7 +384,8 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
                 env: {
                     ...process.env,
                     NODE_ENV: 'production',
-                    CI: 'true'
+                    CI: 'false',  // Set to false to allow warnings (CRA treats warnings as errors when CI=true)
+                    PUBLIC_URL: '.'  // Use relative paths for all assets (works with any subpath)
                 }
             });
 
@@ -407,57 +441,162 @@ async function deployToContainer(buildPath, buildOutput, deployment, project, us
         const outputPath = path.join(buildPath, buildOutput.outputDir);
 
         // Get user's container or create new one
+        await onLog('info', `Checking for existing container for user ${user._id}...`);
         let containerInfo = await containerOrchestrator.getUserContainer(user._id);
 
         if (!containerInfo) {
             // Allocate new container
-            await onLog('info', 'Allocating new container...');
-            containerInfo = await containerOrchestrator.allocateContainer(user, user.currentPlan);
+            await onLog('info', 'No existing container found. Allocating new container...');
+            await onLog('info', `User plan: ${user.currentPlan || 'undefined'}`);
+            await onLog('info', `User email: ${user.email}`);
+
+            try {
+                containerInfo = await containerOrchestrator.allocateContainer(user, user.currentPlan || 'free');
+
+                if (!containerInfo) {
+                    throw new Error('allocateContainer returned null/undefined');
+                }
+
+                await onLog('info', `✓ Container allocated successfully`);
+                await onLog('info', `Container details: ${JSON.stringify({
+                    name: containerInfo.containerName,
+                    port: containerInfo.port,
+                    server: containerInfo.serverKey
+                })}`);
+            } catch (allocError) {
+                await onLog('error', `Container allocation failed: ${allocError.message}`);
+                await onLog('error', `Stack: ${allocError.stack}`);
+                throw new Error(`Failed to allocate container: ${allocError.message}`);
+            }
+        } else {
+            await onLog('info', `✓ Using existing container: ${containerInfo.containerName}`);
         }
 
-        const { containerName, port, serverKey } = containerInfo;
+        if (!containerInfo || !containerInfo.containerName) {
+            throw new Error('Container info is invalid - missing containerName');
+        }
 
-        await onLog('info', `Deploying to container: ${containerName}`);
+        const { containerName, serverKey, host } = containerInfo;
+        let { port } = containerInfo; // Use let for port since it may be reassigned for shared containers
+
+
+        if (!host) {
+            throw new Error(`Container info missing host. ServerKey: ${serverKey}, Available servers: ${Object.keys(containerOrchestrator.ORACLE_SERVERS).join(', ')}`);
+        }
+
+        await onLog('info', `Deploying to container: ${containerName} on ${host}:${port}`);
 
         // Create Dockerfile based on framework
         const dockerfile = generateDockerfile(framework, buildOutput.outputDir);
         await fs.writeFile(path.join(buildPath, 'Dockerfile'), dockerfile);
 
-        // Build Docker image
+        // Build Docker image ON THE REMOTE SERVER (EC2/EC3)
         const imageName = `${project.name}-${deployment._id}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
         await onLog('info', `Building Docker image: ${imageName}`);
 
-        const buildImageCmd = `docker build -t ${imageName} ${buildPath}`;
-        await execAsync(buildImageCmd, {
-            timeout: 10 * 60 * 1000 // 10 minutes
-        });
+        const remoteBuild = require('./remoteBuild');
 
-        // Stop existing container if running
-        try {
-            await docker.stopContainer(containerName);
-            await docker.removeContainer(containerName);
-            await onLog('info', '✓ Stopped previous deployment');
-        } catch (err) {
-            // Container might not exist, ignore
+        // Build on the same server where container will run
+        await remoteBuild.buildOnRemoteServer(
+            buildPath,
+            imageName,
+            host,       // EC2 or EC3 host
+            serverKey,  // 'EC2' or 'EC3'
+            onLog
+        );
+
+        await onLog('info', `✅ Docker image built on ${serverKey}`);
+
+        // Determine container type based on user plan
+        const isSharedUser = user.containerType === 'shared' ||
+            user.plan?.oracleConfig?.accountType === 'shared';
+
+        let containerResult;
+        let newContainerId;
+        let newContainerName;
+
+        if (isSharedUser) {
+            // FREE TIER USERS: Deploy with resource limits
+            await onLog('info', 'Deploying as free tier...');
+
+            const freeTierContainer = require('./freeTierContainer');
+            const server = containerOrchestrator.ORACLE_SERVERS[serverKey];
+
+            containerResult = await freeTierContainer.deployFreeTierContainer(
+                user,
+                project,
+                imageName,
+                serverKey,
+                server
+            );
+
+            newContainerId = containerResult.containerId;
+            newContainerName = containerResult.containerName;
+            port = containerResult.port;
+
+            await onLog('info', `✅ Free tier container deployed on port ${port}`);
+
+        } else {
+            // PAID USERS: Deploy to dedicated container
+            await onLog('info', 'Deploying to dedicated container...');
+
+            // Stop existing container if running
+            try {
+                await docker.stopContainer(containerName, host);
+                await onLog('info', '✓ Stopped previous deployment');
+            } catch (err) {
+                // Container might not exist, ignore
+            }
+
+            // Run new container (on the REMOTE server)
+            const server = containerOrchestrator.ORACLE_SERVERS[serverKey];
+            const newContainer = await docker.runContainer(imageName, containerName, {
+                host: host,  // Use the remote host (EC3)
+                port: port,
+                memory: user.resourceAllocation?.ram * 1024 || 1024, // Convert GB to MB
+                cpu: user.resourceAllocation?.cpu || 0.5,
+                env: project.environmentVariables?.map(e => `${e.key}=${e.value}`) || [],
+                restart: 'unless-stopped'
+            });
+
+            newContainerId = newContainer.id;
+            newContainerName = containerName;
+
+            await onLog('info', '✅ Dedicated container started');
         }
 
-        // Run new container
-        await onLog('info', 'Starting new container...');
+        // Update Nginx routing for URL path access
+        await onLog('info', 'Configuring domain routing...');
+        const nginxRouter = require('./nginxRouter');
+        const routingResult = await nginxRouter.updateNginxRouting(
+            project.name,
+            port,
+            host,
+            serverKey,
+            deployment._id.toString()  // Pass deployment ID for unique URL
+        );
 
-        const server = containerOrchestrator.ORACLE_SERVERS[serverKey];
-        await docker.runContainer(imageName, containerName, {
-            host: server.host,
-            port: port,
-            memory: user.resourceAllocation.ram * 1024, // Convert GB to MB
-            cpu: user.resourceAllocation.cpu,
-            env: project.environmentVariables?.map(e => `${e.key}=${e.value}`) || [],
-            restart: 'unless-stopped'
-        });
+        // Cleanup old containers (for dedicated containers)
+        if (!isSharedUser) {
+            await onLog('info', 'Cleaning up old containers...');
+            const containerCleanup = require('./containerCleanup');
+            const cleanupResult = await containerCleanup.cleanupOnRedeploy(
+                project,
+                newContainerId,
+                newContainerName
+            );
+
+            if (cleanupResult.success && cleanupResult.cleaned > 0) {
+                await onLog('info', `✓ Removed ${cleanupResult.cleaned} old container(s)`);
+            }
+        }
 
         // Generate deployment URL
-        const deploymentUrl = deployment.isPreview
-            ? `https://preview-${project.name}-${deployment._id.toString().substring(0, 8)}.${process.env.BASE_DOMAIN || 'vcp.dev'}`
-            : `https://${project.name}.${process.env.BASE_DOMAIN || 'vcp.dev'}`;
+        const deploymentUrl = routingResult.success
+            ? routingResult.url
+            : deployment.isPreview
+                ? `https://preview-${project.name}-${deployment._id.toString().substring(0, 8)}.${process.env.BASE_DOMAIN || 'vcp.dev'}`
+                : `https://${project.name}.${process.env.BASE_DOMAIN || 'vcp.dev'}`;
 
         const deployTime = Date.now() - startTime;
         deployment.deployDuration = deployTime;
