@@ -6,19 +6,19 @@ const logger = require('../utils/logger');
 const extractTokenFromRequest = (req) => {
   // Try to get token from cookie first, then from Authorization header
   let token = req.cookies?.auth_token;
-  
+
   if (!token && req.headers.authorization) {
     const authHeader = req.headers.authorization;
     if (authHeader.startsWith('Bearer ')) {
       token = authHeader.substring(7);
     }
   }
-  
+
   // Check for API key format
   if (!token && req.headers['x-api-key']) {
     return req.headers['x-api-key'];
   }
-  
+
   return token;
 };
 
@@ -36,22 +36,22 @@ const verifyApiKey = async (apiKey) => {
     if (!apiKey.startsWith('vcp_')) {
       return null;
     }
-    
+
     const user = await User.findOne({
       'apiKeys.key': apiKey
     });
-    
+
     if (!user) {
       return null;
     }
-    
+
     // Update last used timestamp for the API key
     const keyIndex = user.apiKeys.findIndex(k => k.key === apiKey);
     if (keyIndex !== -1) {
       user.apiKeys[keyIndex].lastUsed = new Date();
       await user.save();
     }
-    
+
     return user;
   } catch (error) {
     logger.error('API key verification error:', error.message);
@@ -99,14 +99,14 @@ const logAuthEvent = (eventType, userId, details = {}) => {
 const requireAuth = async (req, res, next) => {
   try {
     const token = extractTokenFromRequest(req);
-    
+
     if (!token) {
       logAuthEvent('Missing token', null, { ip: req.ip, userAgent: req.get('User-Agent') });
       return createUnauthorizedResponse(res, 'No authentication token provided');
     }
-    
+
     let user = null;
-    
+
     // Check if it's an API key or JWT token
     if (token.startsWith('vcp_')) {
       // Handle API key authentication
@@ -120,50 +120,61 @@ const requireAuth = async (req, res, next) => {
       // Handle JWT token authentication
       const decoded = verifyJWTToken(token);
       user = await User.findById(decoded.userId).populate('plan');
-      
+
       if (!user) {
         logAuthEvent('User not found', decoded.userId);
         return createUnauthorizedResponse(res, 'User not found');
       }
+
+      // Log token status
+      logger.info('🔑 User loaded from JWT', {
+        userId: user._id,
+        email: user.email,
+        hasGithubToken: !!user.githubAccessToken,
+        githubTokenLength: user.githubAccessToken ? user.githubAccessToken.length : 0,
+        provider: user.provider,
+        githubId: user.githubId
+      });
+
       req.authMethod = 'jwt';
     }
-    
+
     // Check if user account is active
     if (user.status === 'banned') {
       logAuthEvent('Banned user access attempt', user._id);
       return createForbiddenResponse(res, 'Account has been banned');
     }
-    
+
     if (user.status === 'suspended') {
       logAuthEvent('Suspended user access attempt', user._id);
       return createForbiddenResponse(res, 'Account is suspended');
     }
-    
+
     // Check trial expiry
     user = await checkTrialExpiry(user);
-    
+
     // Attach user to request
     req.user = user;
     req.userId = user._id;
-    
+
     logAuthEvent('Successful authentication', user._id, {
       method: req.authMethod,
       ip: req.ip,
       userAgent: req.get('User-Agent')
     });
-    
+
     next();
   } catch (error) {
     if (error.name === 'JsonWebTokenError') {
       logAuthEvent('Invalid JWT token', null, { error: error.message });
       return createUnauthorizedResponse(res, 'Invalid authentication token');
     }
-    
+
     if (error.name === 'TokenExpiredError') {
       logAuthEvent('Expired JWT token', null);
       return createUnauthorizedResponse(res, 'Authentication token expired');
     }
-    
+
     logger.error('Authentication middleware error:', error.message);
     return res.status(500).json({
       success: false,
@@ -177,13 +188,13 @@ const requireAuth = async (req, res, next) => {
 const optionalAuth = async (req, res, next) => {
   try {
     const token = extractTokenFromRequest(req);
-    
+
     if (!token) {
       req.user = null;
       req.userId = null;
       return next();
     }
-    
+
     // Use the main auth logic but don't fail on errors
     return requireAuth(req, res, next);
   } catch (error) {
@@ -199,23 +210,23 @@ const requireActiveSubscription = (req, res, next) => {
   if (!req.user) {
     return createUnauthorizedResponse(res);
   }
-  
+
   const user = req.user;
-  
+
   // Allow trial users
   if (user.isTrialActive && user.subscriptionStatus === 'trial') {
     return next();
   }
-  
+
   // Check for active subscription
   if (user.subscriptionStatus !== 'active') {
     logAuthEvent('Inactive subscription access attempt', user._id, {
       subscriptionStatus: user.subscriptionStatus
     });
-    
+
     return createForbiddenResponse(res, 'Active subscription required');
   }
-  
+
   next();
 };
 
@@ -225,9 +236,9 @@ const requireResourceCapacity = (resourceType, amount = 1) => {
     if (!req.user) {
       return createUnauthorizedResponse(res);
     }
-    
+
     const user = req.user;
-    
+
     if (!user.hasResourceCapacity(resourceType, amount)) {
       logAuthEvent('Resource capacity exceeded', user._id, {
         resourceType,
@@ -235,10 +246,10 @@ const requireResourceCapacity = (resourceType, amount = 1) => {
         currentUsage: user.currentUsage[resourceType],
         limit: user.resourceAllocation[resourceType]
       });
-      
+
       return createForbiddenResponse(res, `Insufficient ${resourceType} capacity`);
     }
-    
+
     next();
   };
 };
@@ -250,7 +261,7 @@ const requireProjectAccess = (requiredRole = 'viewer') => {
       if (!req.user) {
         return createUnauthorizedResponse(res);
       }
-      
+
       const projectId = req.params.projectId || req.params.id;
       if (!projectId) {
         return res.status(400).json({
@@ -259,10 +270,10 @@ const requireProjectAccess = (requiredRole = 'viewer') => {
           code: 'MISSING_PROJECT_ID'
         });
       }
-      
+
       const Project = require('../models/Project');
       const project = await Project.findById(projectId);
-      
+
       if (!project) {
         return res.status(404).json({
           success: false,
@@ -270,7 +281,7 @@ const requireProjectAccess = (requiredRole = 'viewer') => {
           code: 'PROJECT_NOT_FOUND'
         });
       }
-      
+
       // Check if user has access to this project
       if (!project.hasAccess(req.user._id, requiredRole)) {
         logAuthEvent('Unauthorized project access', req.user._id, {
@@ -278,10 +289,10 @@ const requireProjectAccess = (requiredRole = 'viewer') => {
           requiredRole,
           projectOwner: project.owner.toString()
         });
-        
+
         return createForbiddenResponse(res, 'Insufficient project permissions');
       }
-      
+
       req.project = project;
       next();
     } catch (error) {
@@ -301,7 +312,7 @@ module.exports = {
   requireActiveSubscription,
   requireResourceCapacity,
   requireProjectAccess,
-  
+
   // Utility functions for custom middleware
   extractTokenFromRequest,
   verifyJWTToken,

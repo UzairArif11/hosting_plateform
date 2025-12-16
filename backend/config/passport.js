@@ -70,6 +70,8 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
 
 // GitHub OAuth Strategy
 if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
+    const logger = require('../utils/logger');
+
     passport.use(
         new GitHubStrategy(
             {
@@ -80,17 +82,45 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
             },
             async (accessToken, refreshToken, profile, done) => {
                 try {
+                    logger.info('🔐 GitHub OAuth callback received', {
+                        githubId: profile.id,
+                        username: profile.username,
+                        email: profile.emails?.[0]?.value,
+                        hasAccessToken: !!accessToken,
+                        tokenLength: accessToken ? accessToken.length : 0
+                    });
+
                     // Check if user already exists
                     let user = await User.findOne({ githubId: profile.id });
 
                     if (user) {
+                        logger.info('✅ Existing user found, updating token...', {
+                            userId: user._id,
+                            email: user.email,
+                            hadTokenBefore: !!user.githubAccessToken
+                        });
+
                         // Update GitHub access token
                         user.githubAccessToken = accessToken;
                         await user.save();
+
+                        logger.info('✅ GitHub token updated successfully!', {
+                            userId: user._id,
+                            email: user.email,
+                            hasToken: !!user.githubAccessToken,
+                            tokenPreview: user.githubAccessToken ? `${user.githubAccessToken.substring(0, 10)}...` : 'none'
+                        });
+
                         return done(null, user);
                     }
 
                     // Create new user
+                    logger.info('👤 Creating new user from GitHub...', {
+                        githubId: profile.id,
+                        username: profile.username,
+                        email: profile.emails?.[0]?.value
+                    });
+
                     user = await User.create({
                         githubId: profile.id,
                         email: profile.emails?.[0]?.value || `${profile.username}@github.com`,
@@ -98,10 +128,24 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                         username: profile.username,
                         avatar: profile.photos?.[0]?.value,
                         githubAccessToken: accessToken,
+                        provider: 'github'
+                    });
+
+                    logger.info('✅ New user created with GitHub token!', {
+                        userId: user._id,
+                        email: user.email,
+                        hasToken: !!user.githubAccessToken,
+                        tokenPreview: user.githubAccessToken ? `${user.githubAccessToken.substring(0, 10)}...` : 'none'
                     });
 
                     done(null, user);
                 } catch (error) {
+                    logger.error('❌ GitHub OAuth Error:', {
+                        message: error.message,
+                        stack: error.stack,
+                        githubId: profile?.id,
+                        username: profile?.username
+                    });
                     done(error, null);
                 }
             }

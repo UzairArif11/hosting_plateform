@@ -1,0 +1,13 @@
+# Update these lines in your backend/.env file:
+
+# SSH Keys (CORRECTED PATHS)
+SSH_EC2_KEY=D:/work/ec2/uz.key
+SSH_EC3_KEY=D:/work/ec3/uz.key
+SSH_USERNAME=ubuntu
+
+# Remove these if you added them:
+# SSH_USE_PASSWORD=true
+# SSH_PASSWORD=...
+
+# Domain
+BASE_DOMAIN=foodpanda.site

@@ -10,35 +10,35 @@ const SHARED_RESOURCE_CAPS = {
   EC2: {
     totalCPU: 2.0,        // 2 CPU cores total
     totalRAM: 12288,      // 12GB in MB
-    maxUsers: 150,        
+    maxUsers: 150,
     perUserCap: {
       cpu: 0.2,           // 10% of total CPU
       ram: 1228,          // 10% of total RAM (MB)
-      storage: 10,        
-      bandwidth: 100      
+      storage: 10,
+      bandwidth: 100
     },
     perUserMin: {
       cpu: 0.013,         // Guaranteed minimum
       ram: 81,            // Guaranteed minimum (MB)
-      storage: 1,         
-      bandwidth: 10       
+      storage: 1,
+      bandwidth: 10
     }
   },
   EC3: {
     totalCPU: 3.0,        // 3 CPU cores total
     totalRAM: 18432,      // 18GB in MB
-    maxUsers: 200,        
+    maxUsers: 200,
     perUserCap: {
       cpu: 0.3,           // 10% of total CPU
       ram: 1843,          // 10% of total RAM (MB)
-      storage: 10,        
-      bandwidth: 100      
+      storage: 10,
+      bandwidth: 100
     },
     perUserMin: {
       cpu: 0.015,         // Guaranteed minimum
       ram: 92,            // Guaranteed minimum (MB)
-      storage: 1,         
-      bandwidth: 10       
+      storage: 1,
+      bandwidth: 10
     }
   }
 };
@@ -178,23 +178,29 @@ const chooseBestServerForUser = async (containerType = 'shared') => {
 // Allocate container for user (shared vs dedicated on both EC2/EC3)
 const allocateContainer = async (user, plan) => {
   try {
-    const isFreePlan = !plan || plan.isTrial || plan.name === 'free-trial';
+    logger.info(`allocateContainer called with plan: ${JSON.stringify(plan)}`);
+
+    const isFreePlan = !plan || plan === 'free' || plan.isTrial || plan.name === 'free-trial';
     const containerType = isFreePlan ? 'shared' : 'dedicated';
-    
+
+    logger.info(`isFreePlan: ${isFreePlan}, containerType: ${containerType}`);
+
     // Choose best server based on container type and current load
     const targetServer = await chooseBestServerForUser(containerType);
     const server = ORACLE_SERVERS[targetServer];
-    
+
     if (isFreePlan) {
       // Create shared container allocation (can be on EC2 or EC3)
+      logger.info('Calling allocateSharedContainer');
       return await allocateSharedContainer(user, targetServer, server);
     } else {
       // Create dedicated container (can be on EC2 or EC3)
+      logger.info('Calling allocateDedicatedContainer');
       return await allocateDedicatedContainer(user, plan, targetServer, server);
     }
   } catch (error) {
     logger.error('Container allocation failed:', error);
-    return { success: false, error: error.message };
+    throw error;  // Re-throw instead of returning error object
   }
 };
 
@@ -203,76 +209,56 @@ const allocateSharedContainer = async (user, serverKey, server) => {
   try {
     const containerName = `${serverKey}-shared-user-${user.username}-${Date.now()}`;
     const port = await getAvailablePort(serverKey);
-    
+
     // Get resource caps for this server
     const resourceCaps = SHARED_RESOURCE_CAPS[serverKey];
     if (!resourceCaps) {
       throw new Error(`No resource caps defined for server ${serverKey}`);
     }
-    
-    const result = await docker.runContainer('node:18-alpine', containerName, {
-      host: server.host,
-      port: port,
-      memory: resourceCaps.perUserCap.ram, // Per-user memory limit
-      cpu: resourceCaps.perUserCap.cpu,     // Per-user CPU limit
-      env: [
-        `USER_ID=${user._id || user.id}`,
-        `USER_NAME=${user.username}`,
-        `CONTAINER_TYPE=shared`,
-        `SERVER=${serverKey}`,
-        `PLAN=free-trial`,
-        // Add resource cap information
-        `USER_CPU_CAP=${resourceCaps.perUserCap.cpu}`,
-        `USER_RAM_CAP=${resourceCaps.perUserCap.ram}`,
-        `USER_CPU_MIN=${resourceCaps.perUserMin.cpu}`,
-        `USER_RAM_MIN=${resourceCaps.perUserMin.ram}`
-      ]
+
+    // NOTE: We do NOT create the container here!
+    // Container creation happens in buildExecutor.js using the built Docker image
+    // This function only allocates resources and updates the database
+
+    // Update user assignment with allocated resources
+    const User = require('../models/User');
+    await User.findByIdAndUpdate(user._id || user.id, {
+      assignedServer: serverKey,
+      containerName: containerName,
+      assignedPort: port,
+      containerType: 'shared',
+      resourceAllocation: {
+        cpu: resourceCaps.perUserCap.cpu,
+        ram: resourceCaps.perUserCap.ram / 1024,
+        storage: resourceCaps.perUserCap.storage,
+        bandwidth: resourceCaps.perUserCap.bandwidth,
+        maxCpu: resourceCaps.perUserCap.cpu,
+        maxRam: resourceCaps.perUserCap.ram / 1024,
+        guaranteedCpu: resourceCaps.perUserMin.cpu,
+        guaranteedRam: resourceCaps.perUserMin.ram / 1024
+      }
     });
 
-    if (result.success) {
-      // Update user assignment with actual caps
-      const User = require('../models/User');
-      await User.findByIdAndUpdate(user._id || user.id, {
-        oracleAccountId: serverKey,
-        containerType: 'shared',
-        resourceAllocation: {
-          cpu: resourceCaps.perUserCap.cpu,                    // Actual cap
-          ram: resourceCaps.perUserCap.ram / 1024,             // Actual cap in GB
-          storage: resourceCaps.perUserCap.storage,
-          bandwidth: resourceCaps.perUserCap.bandwidth,
-          maxCpu: resourceCaps.perUserCap.cpu,
-          maxRam: resourceCaps.perUserCap.ram / 1024,
-          guaranteedCpu: resourceCaps.perUserMin.cpu,
-          guaranteedRam: resourceCaps.perUserMin.ram / 1024
-        }
-      });
-      
-      // Apply per-user limits using cgroups
-      await enforceUserResourceCaps(containerName, user._id || user.id, resourceCaps.perUserCap);
+    logger.info('Shared container allocated', {
+      userId: user._id || user.id,
+      username: user.username,
+      server: serverKey,
+      containerName,
+      port,
+      type: 'shared'
+    });
 
-      logger.info('Shared container allocated', {
-        userId: user._id || user.id,
-        username: user.username,
-        server: serverKey,
-        containerName,
-        type: 'shared'
-      });
+    // Return allocation info for buildExecutor to use
+    return {
+      containerName: containerName,
+      port: port,
+      serverKey: serverKey,
+      host: server.host
+    };
 
-      return {
-        success: true,
-        container: {
-          name: containerName,
-          server: serverKey,
-          type: 'shared',
-          url: `http://${server.host}:${port}`
-        }
-      };
-    }
-
-    return result;
   } catch (error) {
     logger.error('Shared container allocation failed:', error);
-    return { success: false, error: error.message };
+    throw error;
   }
 };
 
@@ -282,7 +268,7 @@ const allocateDedicatedContainer = async (user, plan, serverKey, server) => {
     const planResources = plan.resources || { cpu: 1, ram: 4, storage: 50 };
     const containerName = `${serverKey}-dedicated-user-${user.username}-${planResources.cpu}cpu-${planResources.ram}ram-${Date.now()}`;
     const port = await getAvailablePort(serverKey);
-    
+
     const result = await docker.runContainer('node:18-alpine', containerName, {
       host: server.host,
       port: port,
@@ -415,20 +401,20 @@ const moveAndUpgradeUser = async (userId, targetServer, newPlan) => {
   try {
     const User = require('../models/User');
     const user = await User.findById(userId);
-    
+
     const sourceServer = user.oracleAccountId || 'EC2';
     const sourceHost = ORACLE_SERVERS[sourceServer].host;
     const targetHost = ORACLE_SERVERS[targetServer].host;
-    
+
     const oldContainerName = `${sourceServer}-shared-user-${user.username}`;
-    
+
     // Create dedicated container on target server
     const dedicatedResult = await allocateDedicatedContainer(user, newPlan, targetServer, ORACLE_SERVERS[targetServer]);
-    
+
     if (dedicatedResult.success) {
       // Remove old container from source server
       await docker.stopContainer(oldContainerName, sourceHost);
-      
+
       logger.info('User moved and upgraded', {
         userId,
         username: user.username,
@@ -460,7 +446,7 @@ const moveAndUpgradeUser = async (userId, targetServer, newPlan) => {
 // Get available port for server
 const getAvailablePort = async (serverKey, maxOffset = 1000) => {
   const basePort = serverKey === 'EC2' ? 3000 : 4000;
-  
+
   for (let i = 0; i < maxOffset; i++) {
     const port = basePort + Math.floor(Math.random() * maxOffset);
     const isFree = await isPortFree(port);
@@ -490,45 +476,36 @@ const getUserContainer = async (userId) => {
   try {
     const User = require('../models/User');
     const user = await User.findById(userId);
-    if (!user || !user.oracleAccountId) {
-      return { success: false, error: 'User or container assignment not found' };
+
+    if (!user) {
+      logger.warn(`User not found: ${userId}`);
+      return null;
     }
 
-    const server = ORACLE_SERVERS[user.oracleAccountId];
+    // Check if user has container assigned (using new field names)
+    if (!user.assignedServer || !user.containerName) {
+      logger.debug(`User ${userId} has no container assigned yet`);
+      return null;
+    }
+
+    const server = ORACLE_SERVERS[user.assignedServer];
     if (!server) {
-      return { success: false, error: 'Invalid server assignment' };
+      logger.error(`Invalid server assignment for user ${userId}: ${user.assignedServer}`);
+      return null;
     }
 
-    // Find user's container
-    const containers = await docker.listContainers(server.host, true);
-    if (!containers.success) {
-      return { success: false, error: containers.error };
-    }
+    logger.info(`Found existing container for user ${userId}: ${user.containerName} on ${user.assignedServer}`);
 
-    const userContainer = containers.containers.find(container => {
-      return container.names.some(name => name.includes(`user-${user.username}`));
-    });
-
-    if (!userContainer) {
-      return { success: false, error: 'User container not found' };
-    }
-
+    // Return in the format expected by buildExecutor
     return {
-      success: true,
-      container: {
-        id: userContainer.id,
-        name: userContainer.names[0].replace('/', ''),
-        status: userContainer.status,
-        state: userContainer.state,
-        image: userContainer.image,
-        server: user.oracleAccountId,
-        type: user.containerType
-      },
-      user: user
+      containerName: user.containerName,
+      port: user.assignedPort || 3001,
+      serverKey: user.assignedServer,
+      host: server.host
     };
   } catch (error) {
-    logger.error('Failed to get user container:', error);
-    return { success: false, error: error.message };
+    logger.error(`Error getting user container: ${error.message}`);
+    return null;
   }
 };
 
@@ -562,7 +539,7 @@ const scaleContainerResources = async (userId, newResources) => {
         userId,
         error: updateResult.error
       });
-      
+
       // Step 2: If in-place update fails, recreate container with data preservation
       return await recreateContainerWithDataPreservation(userId, newResources);
     }
@@ -622,7 +599,7 @@ const recreateContainerWithDataPreservation = async (userId, newResources) => {
     // Step 1: Create data backup volume
     const backupVolumeName = `${user.username}-backup-${Date.now()}`;
     const createVolumeResult = await docker.createDataVolume(backupVolumeName, server.host);
-    
+
     if (!createVolumeResult.success) {
       return { success: false, error: 'Failed to create backup volume' };
     }
@@ -726,10 +703,10 @@ const recreateContainerWithDataPreservation = async (userId, newResources) => {
 // Generate container name based on user and resources
 const generateContainerName = (user, resources, serverKey) => {
   const timestamp = Date.now();
-  
+
   // Determine container type from plan or existing type
   const containerType = user.containerType || 'shared';
-  
+
   if (containerType === 'shared') {
     return `${serverKey}-shared-user-${user.username}-${timestamp}`;
   } else {
@@ -748,7 +725,7 @@ const upgradeUserPlan = async (userId, newPlan) => {
     }
 
     const newResources = newPlan.resources || { cpu: 1, ram: 4, storage: 50, bandwidth: 1024 };
-    
+
     logger.info('Starting user plan upgrade', {
       userId,
       username: user.username,
@@ -801,17 +778,17 @@ const assignUserToServer = async (userId, planName) => {
   try {
     const User = require('../models/User');
     const Plan = require('../models/Plan');
-    
+
     const user = await User.findById(userId);
     const plan = await Plan.findOne({ name: planName });
-    
+
     if (!user) {
       return { success: false, error: 'User not found' };
     }
 
     // Allocate container for user
     const allocation = await allocateContainer(user, plan);
-    
+
     if (allocation.success) {
       return {
         success: true,
@@ -837,7 +814,7 @@ const enforceUserResourceCaps = async (containerName, userId, caps) => {
     await docker.execCommand(containerName, [
       'mkdir', '-p', `/sys/fs/cgroup/user_${userId}`
     ]);
-    
+
     // Set CPU cap (Docker uses 100000 microseconds = 1 CPU core)
     const cpuQuota = Math.floor(caps.cpu * 100000);
     await docker.execCommand(containerName, [
@@ -846,23 +823,23 @@ const enforceUserResourceCaps = async (containerName, userId, caps) => {
     await docker.execCommand(containerName, [
       'sh', '-c', `echo 100000 > /sys/fs/cgroup/user_${userId}/cpu.cfs_period_us`
     ]);
-    
+
     // Set memory cap (convert MB to bytes)
     const memoryLimit = caps.ram * 1024 * 1024;
     await docker.execCommand(containerName, [
       'sh', '-c', `echo ${memoryLimit} > /sys/fs/cgroup/user_${userId}/memory.limit_in_bytes`
     ]);
-    
+
     // Set memory soft limit (90% for graceful handling)
     const memorySoftLimit = Math.floor(memoryLimit * 0.9);
     await docker.execCommand(containerName, [
       'sh', '-c', `echo ${memorySoftLimit} > /sys/fs/cgroup/user_${userId}/memory.soft_limit_in_bytes`
     ]);
-    
+
     logger.info('User resource caps enforced', {
       userId, containerName, cpuCap: caps.cpu, ramCap: caps.ram
     });
-    
+
     return { success: true };
   } catch (error) {
     logger.error('Failed to enforce user resource caps:', error);
@@ -877,27 +854,27 @@ const monitorUserResourceUsage = async (containerName, userId) => {
     const cpuUsage = await docker.execCommand(containerName, [
       'cat', `/sys/fs/cgroup/user_${userId}/cpuacct.usage`
     ]);
-    
+
     // Get memory usage from cgroup
     const memoryUsage = await docker.execCommand(containerName, [
       'cat', `/sys/fs/cgroup/user_${userId}/memory.usage_in_bytes`
     ]);
-    
+
     // Get memory limit
     const memoryLimit = await docker.execCommand(containerName, [
       'cat', `/sys/fs/cgroup/user_${userId}/memory.limit_in_bytes`
     ]);
-    
+
     // Calculate usage percentages
     const memUsageBytes = parseInt(memoryUsage.output.trim());
     const memLimitBytes = parseInt(memoryLimit.output.trim());
     const memUsageMB = memUsageBytes / (1024 * 1024);
     const memUsagePercent = (memUsageBytes / memLimitBytes) * 100;
-    
+
     // CPU usage calculation (simplified)
     const cpuUsageNs = parseInt(cpuUsage.output.trim());
     const cpuUsagePercent = (cpuUsageNs / 1000000000) / 60; // Approximate over 60 seconds
-    
+
     return {
       success: true,
       usage: {
@@ -913,8 +890,8 @@ const monitorUserResourceUsage = async (containerName, userId) => {
     };
   } catch (error) {
     logger.error('Failed to monitor user resource usage:', error);
-    return { 
-      success: false, 
+    return {
+      success: false,
       error: error.message,
       usage: { cpu: { usage: 0 }, memory: { usage: 0, percentage: 0 } }
     };
@@ -949,47 +926,47 @@ const reclaimUserMemory = async (containerName, userId) => {
 // Start continuous monitoring service
 const startResourceMonitoring = (intervalMs = 60000) => {
   logger.info('Starting shared container resource monitoring');
-  
+
   return setInterval(async () => {
     try {
       const User = require('../models/User');
-      const sharedUsers = await User.find({ 
+      const sharedUsers = await User.find({
         containerType: 'shared',
         status: { $in: ['active', 'trial'] }
       });
-      
+
       for (const user of sharedUsers) {
         const serverKey = user.oracleAccountId;
         if (!serverKey) continue;
-        
+
         const resourceCaps = SHARED_RESOURCE_CAPS[serverKey];
         if (!resourceCaps) continue;
-        
+
         // Get user container
         const containerInfo = await getUserContainer(user._id);
-        if (!containerInfo.success) continue;
-        
+        if (!containerInfo || !containerInfo.success) continue;
+
         // Monitor usage
         const monitoring = await monitorUserResourceUsage(containerInfo.container.name, user._id);
         if (!monitoring.success) continue;
-        
+
         const { usage } = monitoring;
         const violations = [];
-        
+
         // Check CPU violation (>10% with 5% tolerance)
         if (usage.cpu.usage > resourceCaps.perUserCap.cpu * 1.05) {
           violations.push({ type: 'cpu', current: usage.cpu.usage, limit: resourceCaps.perUserCap.cpu });
         }
-        
+
         // Check memory violation (>95% of allocated)
         if (usage.memory.percentage > 95) {
           violations.push({ type: 'memory', current: usage.memory.usage, limit: resourceCaps.perUserCap.ram });
         }
-        
+
         // Handle violations
         if (violations.length > 0) {
           logger.warn('Resource violation detected', { userId: user._id, violations });
-          
+
           for (const violation of violations) {
             if (violation.type === 'cpu') {
               await throttleUserCPU(containerInfo.container.name, user._id, resourceCaps.perUserCap.cpu);
@@ -998,7 +975,7 @@ const startResourceMonitoring = (intervalMs = 60000) => {
             }
           }
         }
-        
+
         // Update user usage in database
         await User.findByIdAndUpdate(user._id, {
           'currentResourceUsage': {

@@ -69,6 +69,85 @@ const planSchema = new mongoose.Schema({
     }
   },
 
+  // What users SEE in UI (can be different from actual)
+  displayResources: {
+    cpu: {
+      type: Number,
+      default: function () { return this.resources?.cpu || 1; }
+    },
+    ram: {
+      type: Number,
+      default: function () { return this.resources?.ram || 4; }
+    },
+    storage: {
+      type: Number,
+      default: function () { return this.resources?.storage || 50; }
+    },
+    bandwidth: {
+      type: Number,
+      default: function () { return this.resources?.bandwidth || 1024; }
+    },
+    projects: {
+      type: Number,
+      default: function () { return this.resources?.projects || 10; }
+    }
+  },
+
+  // What backend ACTUALLY enforces (can be less than display)
+  actualResources: {
+    cpu: {
+      type: Number,
+      default: function () { return this.resources?.cpu || 1; }
+    },
+    ram: {
+      type: Number,
+      default: function () { return this.resources?.ram || 4; }
+    },
+    storage: {
+      type: Number,
+      default: function () { return this.resources?.storage || 50; }
+    },
+    bandwidth: {
+      type: Number,
+      default: function () { return this.resources?.bandwidth || 1024; }
+    },
+    projects: {
+      type: Number,
+      default: function () { return this.resources?.projects || 10; }
+    }
+  },
+
+  // Admin override settings for this plan
+  resourceOverride: {
+    enabled: {
+      type: Boolean,
+      default: false
+    },
+    percentage: {
+      type: Number,
+      default: 100,
+      min: 1,
+      max: 200
+    },
+    reason: {
+      type: String,
+      default: ''
+    },
+    expiresAt: {
+      type: Date,
+      default: null
+    },
+    setBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null
+    },
+    setAt: {
+      type: Date,
+      default: null
+    }
+  },
+
   // Features included in this plan
   features: [{
     name: {

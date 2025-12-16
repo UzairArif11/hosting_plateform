@@ -32,6 +32,15 @@ router.get('/', async (req, res) => {
       });
     }
 
+    // Validate projectId format
+    if (typeof projectId !== 'string' || !projectId.match(/^[0-9a-fA-F]{24}$/)) {
+      logger.error('Invalid projectId format:', { projectId, type: typeof projectId });
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid project ID format'
+      });
+    }
+
     // Verify user has access to the project
     const project = await Project.findById(projectId);
     if (!project) {
@@ -538,6 +547,50 @@ router.get('/stats/:projectId', async (req, res) => {
   } catch (error) {
     logger.error('Get deployment stats error:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch deployment stats' });
+  }
+});
+
+// Get deployment history for a project
+router.get('/project/:projectId', async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { limit = 10, skip = 0 } = req.query;
+
+    // Verify project exists and user has access
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        error: 'Project not found'
+      });
+    }
+
+    if (project.userId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    // Get deployments
+    const deployments = await Deployment.find({ projectId })
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(parseInt(skip))
+      .select('_id status createdAt completedAt deploymentUrl branch commitSha commitMessage error');
+
+    const total = await Deployment.countDocuments({ projectId });
+
+    res.json({
+      success: true,
+      deployments,
+      total,
+      hasMore: total > (parseInt(skip) + parseInt(limit))
+    });
+
+  } catch (error) {
+    logger.error('Get deployment history error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch deployment history' });
   }
 });
 

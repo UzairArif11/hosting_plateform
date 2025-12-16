@@ -461,4 +461,247 @@ router.put('/users/:userId/resources', [
   }
 });
 
+// ==================== RESOURCE MANAGEMENT ====================
+
+const resourceManager = require('../services/resourceManager');
+
+/**
+ * GET /api/admin/users/:id/resources
+ * Get detailed resource information for a user
+ */
+router.get('/users/:id/resources', requirePermission('user.read'), async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).populate('plan');
+
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const effectiveResources = resourceManager.getEffectiveResources(user);
+
+    res.json({
+      success: true,
+      displayed: user.displayedResources,
+      allocated: user.allocatedResources,
+      effective: effectiveResources,
+      usage: user.currentResourceUsage,
+      containers: user.containers,
+      override: user.adminOverride
+    });
+
+  } catch (error) {
+    logger.error('Get user resources error:', error);
+    res.status(500).json({ success: false, error: 'Failed to get user resources' });
+  }
+});
+
+/**
+ * PUT /api/admin/users/:id/resources/backend
+ * Update user's backend resources only (what backend enforces)
+ */
+router.put('/users/:id/resources/backend', requirePermission('user.update'), async (req, res) => {
+  try {
+    const { cpu, ram, storage, bandwidth, projects } = req.body;
+
+    const result = await resourceManager.updateUserResources(
+      req.params.id,
+      { cpu, ram, storage, bandwidth, projects },
+      'backend'
+    );
+
+    logger.admin('User backend resources updated', {
+      adminId: req.user._id,
+      userId: req.params.id,
+      resources: { cpu, ram, storage, bandwidth, projects }
+    });
+
+    res.json(result);
+
+  } catch (error) {
+    logger.error('Update backend resources error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update backend resources' });
+  }
+});
+
+/**
+ * PUT /api/admin/users/:id/resources/display
+ * Update user's display resources only (what user sees)
+ */
+router.put('/users/:id/resources/display', requirePermission('user.update'), async (req, res) => {
+  try {
+    const { cpu, ram, storage, bandwidth, projects } = req.body;
+
+    const result = await resourceManager.updateUserResources(
+      req.params.id,
+      { cpu, ram, storage, bandwidth, projects },
+      'display'
+    );
+
+    logger.admin('User display resources updated', {
+      adminId: req.user._id,
+      userId: req.params.id,
+      resources: { cpu, ram, storage, bandwidth, projects }
+    });
+
+    res.json(result);
+
+  } catch (error) {
+    logger.error('Update display resources error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update display resources' });
+  }
+});
+
+/**
+ * POST /api/admin/users/:id/resources/override
+ * Apply temporary resource override with auto-expiration
+ */
+router.post('/users/:id/resources/override', requirePermission('user.update'), async (req, res) => {
+  try {
+    const { cpu, ram, storage, bandwidth, duration, reason } = req.body;
+
+    if (!duration || duration < 1) {
+      return res.status(400).json({
+        success: false,
+        error: 'Duration must be at least 1 second'
+      });
+    }
+
+    const result = await resourceManager.applyAdminOverride(
+      req.params.id,
+      { cpu, ram, storage, bandwidth, duration, reason },
+      req.user._id
+    );
+
+    logger.admin('Admin override applied', {
+      adminId: req.user._id,
+      userId: req.params.id,
+      override: { cpu, ram, duration, reason }
+    });
+
+    res.json(result);
+
+  } catch (error) {
+    logger.error('Apply override error:', error);
+    res.status(500).json({ success: false, error: 'Failed to apply override' });
+  }
+});
+
+/**
+ * DELETE /api/admin/users/:id/resources/override
+ * Remove admin override and revert to normal resources
+ */
+router.delete('/users/:id/resources/override', requirePermission('user.update'), async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    user.adminOverride.enabled = false;
+    await user.save();
+
+    // Revert to normal resources
+    const effectiveResources = resourceManager.getEffectiveResources(user);
+    for (const container of user.containers || []) {
+      await resourceManager.updateContainerResourcesLive(
+        container.id,
+        effectiveResources,
+        container.type
+      );
+    }
+
+    logger.admin('Admin override removed', {
+      adminId: req.user._id,
+      userId: req.params.id
+    });
+
+    res.json({ success: true, message: 'Override removed' });
+
+  } catch (error) {
+    logger.error('Remove override error:', error);
+    res.status(500).json({ success: false, error: 'Failed to remove override' });
+  }
+});
+
+/**
+ * POST /api/admin/plans/:id/bulk-update
+ * Bulk update all users on a plan
+ */
+router.post('/plans/:id/bulk-update', requirePermission('plan.update'), async (req, res) => {
+  try {
+    const { displayResources, actualResources, updateType = 'both' } = req.body;
+
+    const resources = updateType === 'display' ? displayResources :
+      updateType === 'backend' ? actualResources :
+        actualResources || displayResources;
+
+    const result = await resourceManager.bulkUpdatePlanUsers(
+      req.params.id,
+      resources,
+      updateType
+    );
+
+    logger.admin('Plan bulk update', {
+      adminId: req.user._id,
+      planId: req.params.id,
+      updateType,
+      resources,
+      affectedUsers: result.affectedUsers
+    });
+
+    res.json(result);
+
+  } catch (error) {
+    logger.error('Bulk update plan error:', error);
+    res.status(500).json({ success: false, error: 'Failed to bulk update plan' });
+  }
+});
+
+/**
+ * GET /api/admin/servers/stats
+ * Get statistics for all servers
+ */
+router.get('/servers/stats', requirePermission('server.read'), async (req, res) => {
+  try {
+    const servers = [];
+
+    for (const [key, caps] of Object.entries(containerOrchestrator.SHARED_RESOURCE_CAPS)) {
+      const users = await User.find({ oracleAccountId: key });
+
+      const totalAllocated = users.reduce((sum, u) => ({
+        cpu: sum.cpu + (u.allocatedResources?.cpu || u.resourceAllocation?.cpu || 0),
+        ram: sum.ram + (u.allocatedResources?.ram || u.resourceAllocation?.ram || 0)
+      }), { cpu: 0, ram: 0 });
+
+      servers.push({
+        key,
+        name: containerOrchestrator.ORACLE_SERVERS[key]?.name || key,
+        physical: {
+          cpu: caps.totalCPU,
+          ram: caps.totalRAM
+        },
+        allocated: totalAllocated,
+        available: {
+          cpu: caps.totalCPU - totalAllocated.cpu,
+          ram: caps.totalRAM - totalAllocated.ram
+        },
+        users: users.length,
+        maxUsers: caps.maxUsers,
+        utilization: {
+          cpu: ((totalAllocated.cpu / caps.totalCPU) * 100).toFixed(2),
+          ram: ((totalAllocated.ram / caps.totalRAM) * 100).toFixed(2)
+        }
+      });
+    }
+
+    res.json({ success: true, servers });
+
+  } catch (error) {
+    logger.error('Get server stats error:', error);
+    res.status(500).json({ success: false, error: 'Failed to get server stats' });
+  }
+});
+
 module.exports = router;
+

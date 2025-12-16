@@ -106,9 +106,9 @@ router.get('/:id', requireProjectAccess('viewer'), async (req, res) => {
 });
 
 // Create new project
-router.post('/', 
+router.post('/',
   requireResourceCapacity('projects', 1),
-  validateProjectCreation, 
+  validateProjectCreation,
   handleValidationErrors,
   async (req, res) => {
     try {
@@ -116,7 +116,7 @@ router.post('/',
 
       // Check if user has access to the repository
       const accessCheck = await githubService.checkRepositoryAccess(
-        repository.fullName, 
+        repository.fullName,
         req.user.githubAccessToken
       );
 
@@ -141,8 +141,11 @@ router.post('/',
       }
 
       // Create the project
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
       const project = new Project({
         name,
+        slug,
         repository: {
           url: repository.url,
           fullName: repository.fullName,
@@ -158,7 +161,7 @@ router.post('/',
           environments: env.environments || ['production']
         })),
         domains: [{
-          domain: `${name.toLowerCase().replace(/[^a-z0-9]/g, '-')}.${process.env.BASE_DOMAIN || 'vcp.dev'}`,
+          domain: `${slug}.${process.env.BASE_DOMAIN || 'vcp.dev'}`,
           isCustom: false,
           isPrimary: true,
           verified: true
@@ -192,7 +195,7 @@ router.post('/',
 );
 
 // Update project
-router.put('/:id', 
+router.put('/:id',
   requireProjectAccess('admin'),
   validateProjectUpdate,
   handleValidationErrors,
@@ -382,7 +385,7 @@ router.delete('/:id/collaborators/:userId', requireProjectAccess('admin'), async
 router.get('/:id/analytics', requireProjectAccess('viewer'), async (req, res) => {
   try {
     const project = req.project;
-    
+
     // This would integrate with your analytics service
     // For now, return basic stats
     const analytics = {
@@ -390,7 +393,7 @@ router.get('/:id/analytics', requireProjectAccess('viewer'), async (req, res) =>
         total: project.stats.totalDeployments,
         successful: project.stats.successfulDeployments,
         failed: project.stats.failedDeployments,
-        successRate: project.stats.totalDeployments > 0 
+        successRate: project.stats.totalDeployments > 0
           ? Math.round((project.stats.successfulDeployments / project.stats.totalDeployments) * 100)
           : 0
       },

@@ -7,7 +7,7 @@ const createDockerClient = (host = null) => {
     // Remote Docker host (Oracle instance)
     // Try HTTPS first, fallback to HTTP
     const useHttps = process.env.DOCKER_USE_HTTPS !== 'false';
-    
+
     return new Docker({
       host: host,
       port: 2376,
@@ -20,7 +20,7 @@ const createDockerClient = (host = null) => {
       checkServerIdentity: () => undefined
     });
   }
-  
+
   // Local Docker
   return new Docker();
 };
@@ -29,7 +29,7 @@ const createDockerClient = (host = null) => {
 const buildImage = async (buildContext, imageName, dockerfile = 'Dockerfile') => {
   try {
     const docker = createDockerClient();
-    
+
     logger.info('Starting Docker image build', { imageName });
 
     const stream = await docker.buildImage(buildContext, {
@@ -41,7 +41,7 @@ const buildImage = async (buildContext, imageName, dockerfile = 'Dockerfile') =>
 
     // Process build stream
     const buildLogs = [];
-    
+
     await new Promise((resolve, reject) => {
       docker.modem.followProgress(stream, (err, res) => {
         if (err) reject(err);
@@ -75,40 +75,70 @@ const buildImage = async (buildContext, imageName, dockerfile = 'Dockerfile') =>
 // Run container from image
 const runContainer = async (imageName, containerName, options = {}) => {
   try {
+    logger.info('🐳 Step 1: Starting container creation...', {
+      imageName,
+      containerName,
+      host: options.host || 'local',
+      port: options.port || '3000',
+      memory: options.memory || 512,
+      cpu: options.cpu || 1
+    });
+
     const docker = createDockerClient(options.host);
-    
+    logger.info('✅ Step 2: Docker client created');
+
     const containerConfig = {
       Image: imageName,
       name: containerName,
       ExposedPorts: {
-        '3000/tcp': {},
         '80/tcp': {},
         '443/tcp': {}
       },
       HostConfig: {
         PortBindings: {
-          '3000/tcp': [{ HostPort: options.port || '3000' }]
+          '80/tcp': [{ HostPort: String(options.port || '3000') }]  // Map nginx port 80 to host port
         },
         Memory: (options.memory || 512) * 1024 * 1024, // Convert MB to bytes
-        CpuShares: (options.cpu || 1) * 1024, // CPU shares
+        CpuShares: Math.round((options.cpu || 1) * 1024), // CPU shares - must be integer!
         RestartPolicy: {
-          Name: 'unless-stopped'
+          Name: options.restart || 'unless-stopped'
         }
       },
       Env: options.env || [],
-      WorkingDir: '/app',
-      Cmd: options.cmd || ['npm', 'start']
+      WorkingDir: '/app'
+      // NOTE: Do NOT set Cmd - use the image's default CMD (nginx)
     };
 
+    // Only set Cmd if explicitly provided
+    if (options.cmd) {
+      containerConfig.Cmd = options.cmd;
+    }
+
+    logger.info('📋 Step 3: Container config prepared', {
+      image: containerConfig.Image,
+      name: containerConfig.name,
+      memory: `${options.memory || 512}MB`,
+      cpu: options.cpu || 1
+    });
+
+    logger.info('🔨 Step 4: Creating container...');
     const container = await docker.createContainer(containerConfig);
+    logger.info('✅ Step 5: Container created successfully', { containerId: container.id });
+
+    logger.info('▶️  Step 6: Starting container...');
     await container.start();
+    logger.info('✅ Step 7: Container started');
 
+    logger.info('🔍 Step 8: Inspecting container...');
     const info = await container.inspect();
+    logger.info('✅ Step 9: Container inspection complete');
 
-    logger.info('Container started successfully', {
+    logger.info('🎉 Container started successfully!', {
       containerId: container.id,
       containerName: containerName,
-      port: options.port || '3000'
+      port: options.port || '3000',
+      status: info.State.Status,
+      ipAddress: info.NetworkSettings.IPAddress
     });
 
     return {
@@ -121,10 +151,25 @@ const runContainer = async (imageName, containerName, options = {}) => {
     };
 
   } catch (error) {
-    logger.error('Failed to run container:', error);
+    logger.error('❌ CONTAINER CREATION FAILED:', {
+      errorName: error.name,
+      errorMessage: error.message,
+      errorCode: error.code,
+      statusCode: error.statusCode,
+      stack: error.stack,
+      imageName,
+      containerName,
+      host: options.host
+    });
+
     return {
       success: false,
-      error: error.message
+      error: error.message,
+      errorDetails: {
+        name: error.name,
+        code: error.code,
+        statusCode: error.statusCode
+      }
     };
   }
 };
@@ -134,7 +179,7 @@ const stopContainer = async (containerName, host = null) => {
   try {
     const docker = createDockerClient(host);
     const container = docker.getContainer(containerName);
-    
+
     await container.stop();
     await container.remove();
 
@@ -159,7 +204,7 @@ const getContainerStatus = async (containerName, host = null) => {
   try {
     const docker = createDockerClient(host);
     const container = docker.getContainer(containerName);
-    
+
     const info = await container.inspect();
 
     return {
@@ -212,7 +257,7 @@ const getContainerLogs = async (containerName, host = null, tail = 100) => {
   try {
     const docker = createDockerClient(host);
     const container = docker.getContainer(containerName);
-    
+
     const logs = await container.logs({
       stdout: true,
       stderr: true,
@@ -239,7 +284,7 @@ const updateContainerResources = async (containerName, resources, host = null) =
   try {
     const docker = createDockerClient(host);
     const container = docker.getContainer(containerName);
-    
+
     const updateConfig = {
       Memory: resources.memory * 1024 * 1024, // MB to bytes
       CpuShares: resources.cpu * 1024
@@ -273,15 +318,15 @@ const execInContainer = async (containerName, command, host = null) => {
   try {
     const docker = createDockerClient(host);
     const container = docker.getContainer(containerName);
-    
+
     const exec = await container.exec({
-      Cmd: command.split(' '),
+      Cmd: Array.isArray(command) ? command : ['sh', '-c', command],
       AttachStdout: true,
       AttachStderr: true
     });
 
     const stream = await exec.start({ hijack: true, stdin: true });
-    
+
     let output = '';
     stream.on('data', (chunk) => {
       output += chunk.toString();
@@ -293,7 +338,7 @@ const execInContainer = async (containerName, command, host = null) => {
 
     return {
       success: true,
-      output: output
+      output: output.trim()
     };
 
   } catch (error) {
@@ -363,7 +408,7 @@ const deployToContainer = async (deploymentConfig) => {
 const cleanupOldContainers = async (projectName, keepCount = 2, host = null) => {
   try {
     const containers = await listContainers(host, true);
-    
+
     if (!containers.success) {
       return containers;
     }
@@ -375,7 +420,7 @@ const cleanupOldContainers = async (projectName, keepCount = 2, host = null) => 
 
     // Keep only the latest containers, remove others
     const containersToRemove = projectContainers.slice(keepCount);
-    
+
     for (const container of containersToRemove) {
       const containerName = container.names[0].replace('/', '');
       await stopContainer(containerName, host);
@@ -404,7 +449,7 @@ const cleanupOldContainers = async (projectName, keepCount = 2, host = null) => 
 const createDataVolume = async (volumeName, host = null) => {
   try {
     const docker = createDockerClient(host);
-    
+
     const volume = await docker.createVolume({
       Name: volumeName,
       Driver: 'local'
@@ -434,7 +479,7 @@ const removeDataVolume = async (volumeName, host = null) => {
   try {
     const docker = createDockerClient(host);
     const volume = docker.getVolume(volumeName);
-    
+
     await volume.remove();
 
     logger.info('Data volume removed successfully', { volumeName });
@@ -540,7 +585,7 @@ const startContainer = async (containerName, host = null) => {
   try {
     const docker = createDockerClient(host);
     const container = docker.getContainer(containerName);
-    
+
     await container.start();
 
     logger.info('Container started successfully', { containerName });
@@ -558,49 +603,15 @@ const startContainer = async (containerName, host = null) => {
   }
 };
 
-// Execute command in container (for cgroup operations)
-const execCommand = async (containerName, command, host = null) => {
-  try {
-    const docker = createDockerClient(host);
-    const container = docker.getContainer(containerName);
-    
-    const exec = await container.exec({
-      Cmd: command,
-      AttachStdout: true,
-      AttachStderr: true
-    });
-
-    const stream = await exec.start({ hijack: true, stdin: false });
-    
-    let output = '';
-    stream.on('data', (chunk) => {
-      output += chunk.toString();
-    });
-
-    await new Promise((resolve) => {
-      stream.on('end', resolve);
-    });
-
-    return {
-      success: true,
-      output: output
-    };
-
-  } catch (error) {
-    logger.error('Failed to execute command in container:', error);
-    return {
-      success: false,
-      error: error.message
-    };
-  }
-};
+// Alias for execInContainer (for backward compatibility)
+const execCommand = execInContainer;
 
 // Remove container
 const removeContainer = async (containerName, host = null) => {
   try {
     const docker = createDockerClient(host);
     const container = docker.getContainer(containerName);
-    
+
     await container.remove({ force: true });
 
     logger.info('Container removed successfully', { containerName });
@@ -622,7 +633,7 @@ const removeContainer = async (containerName, host = null) => {
 const runContainerWithVolumes = async (imageName, containerName, options = {}) => {
   try {
     const docker = createDockerClient(options.host);
-    
+
     const containerConfig = {
       Image: imageName,
       name: containerName,
