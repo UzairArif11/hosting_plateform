@@ -188,3 +188,33 @@ console.log('Projects:', projects);
 ---
 
 **EVERYTHING YOU NEED IS IN `PLATFORM_ARCHITECTURE.md`!** 📖✨
+
+
+cleans previous config and containers 
+
+rm cleanup-server.sh
+vim cleanup-server.sh
+chmod +x cleanup-server.sh
+./cleanup-server.sh  
+╔══════════════════════════════════════════════════════════
+
+clean setup of config 
+
+
+rm setup-deployment-server.sh
+vim setup-deployment-server.sh
+chmod +x setup-deployment-server.sh
+./setup-deployment-server.sh  
+╔══════════════════════════════════════════════════════════
+
+# Create and run fix script
+vim fix-ssl-now.sh
+# Paste the content
+chmod +x fix-ssl-now.sh
+sudo ./fix-ssl-now.sh
+══════════════════════════════════════════════
+
+
+
+node reset-db.js
+node make-admin.js user@example.com
