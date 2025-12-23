@@ -164,10 +164,14 @@ console.log('Projects:', projects);
 
 ## 📚 **DOCUMENTATION**
 
-- **Complete Guide:** `PLATFORM_ARCHITECTURE.md` ← **READ THIS**
-- **Container Details:** `FINAL_CORRECT_ARCHITECTURE.md`
-- **IP Restrictions:** `IP_RESTRICTIONS_FINAL_CORRECT.md`
-- **Routing:** `ROUTING_VERIFICATION.md`
+- **Architecture:** `PLATFORM_ARCHITECTURE.md` (Read This First)
+- **User Guide:** `USER_GUIDE.md`
+- **Admin Guide:** `ADMIN_GUIDE.md`
+- **Quick Start:** `QUICK_START_GUIDE.md`
+- **Testing:** `TESTING_GUIDE.md`
+- **Specific Guides:**
+  - `DOMAIN_MIGRATION_COMPLETE_GUIDE.md`
+  - `ADMIN_PANEL_SERVER_DNS_GUIDE.md`
 
 ---
 

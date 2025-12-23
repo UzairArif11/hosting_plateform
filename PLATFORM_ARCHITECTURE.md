@@ -644,11 +644,12 @@ Result: ✅ User can now create 20 projects with 8GB RAM, 2 CPU
 
 ---
 
-## 📚 **RELATED FILES**
+## 📚 **RELATED GUIDES**
 
-- ✅ `FINAL_CORRECT_ARCHITECTURE.md` - Detailed container architecture
-- ✅ `IP_RESTRICTIONS_FINAL_CORRECT.md` - Detailed IP restrictions
-- ✅ `ROUTING_VERIFICATION.md` - Routing verification
+- ✅ `ADMIN_GUIDE.md` - Management & Operations
+- ✅ `USER_GUIDE.md` - Developer Experience
+- ✅ `TESTING_GUIDE.md` - QA & Verification
+- ✅ `QUICK_START_GUIDE.md` - Getting Started
 
 ---
 

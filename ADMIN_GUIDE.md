@@ -11,9 +11,36 @@
 7. [Resource Management](#resource-management)
 8. [Security & Backups](#security--backups)
 9. [Troubleshooting](#troubleshooting)
+    - [MongoDB Not Running](#mongodb-not-running)
+    - [Port Conflicts](#port-conflicts)
 10. [Maintenance Tasks](#maintenance-tasks)
 
 ---
+
+## 🛠️ **TROUBLESHOOTING**
+
+### **MongoDB Not Running**
+
+If you see `AggregateError at internalConnectMultiple` or `❌ MongoDB connection failed`:
+
+#### **Windows:**
+```powershell
+# Open PowerShell as Administrator
+net start MongoDB
+```
+
+#### **Linux (Ubuntu):**
+```bash
+sudo systemctl start mongod
+sudo systemctl status mongod
+```
+
+#### **Verification:**
+Try connecting with the mongo shell: `mongosh`
+
+---
+
+
 
 ## 🔐 **ADMIN ACCESS**
 
@@ -416,18 +443,45 @@ db.deployments.aggregate([
 ])
 ```
 
-### **Container Usage**
+### **Detailed Container Monitoring**
 
+Use these commands on the deployment servers to monitor user resource usage more granularly.
+
+#### **Check All User Containers Storage**
 ```bash
-# On server
-docker stats
-
-# Container count
-docker ps -q | wc -l
-
-# Disk usage
-docker system df
+# List all containers with their storage usage
+docker ps --filter "name=EC3-user-" --format "{{.Names}}" | while read name; do
+  storage=$(docker exec $name du -sh /app 2>/dev/null | cut -f1)
+  echo "$name: $storage"
+done
 ```
+
+#### **Live Stats (CPU, RAM, Storage)**
+```bash
+# Formatted overview
+docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}"
+
+# Real-time monitoring (refreshes every 2s)
+watch -n 2 'docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"'
+```
+
+#### **Resource Alerts via CLI**
+```bash
+# Find containers over 2GB
+docker ps --filter "name=EC3-user-" -q | while read id; do
+  size=$(docker exec $id du -sk /app 2>/dev/null | awk '{print $1}')
+  if [ $size -gt 2097152 ]; then  # 2GB in KB
+    name=$(docker inspect $id --format '{{.Name}}')
+    echo "⚠️ ALERT: $name using $(($size/1024))MB (>2GB)"
+  fi
+done
+
+# Find containers over 90% RAM
+docker stats --no-stream --format "{{.Name}}\t{{.MemPerc}}" | awk '$2 > 90 {print "⚠️ RAM ALERT:", $1, $2}'
+```
+
+---
+
 
 ---
 
