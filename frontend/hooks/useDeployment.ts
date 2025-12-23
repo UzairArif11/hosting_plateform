@@ -142,6 +142,13 @@ export function useDeployment(deploymentId: string | null) {
         }
     }, [deploymentId]);
 
+    // Fetch initial state (logs, status) immediately
+    useEffect(() => {
+        if (deploymentId) {
+            refresh();
+        }
+    }, [deploymentId, refresh]);
+
     return {
         status,
         isConnected,

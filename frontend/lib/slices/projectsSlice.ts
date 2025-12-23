@@ -10,6 +10,14 @@ interface Project {
     deploymentUrl: string;
     productionDeployment: string;
     stats: any;
+    deploymentCount: number;
+    environmentVariables?: Record<string, string>;
+    latestDeployment?: {
+        _id: string;
+        status: string;
+        createdAt: string;
+        deploymentUrl?: string;
+    };
     createdAt: string;
     updatedAt: string;
 }

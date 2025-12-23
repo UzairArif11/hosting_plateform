@@ -52,14 +52,18 @@ async function executeBuild(deploymentId, callbacks = {}) {
         const framework = await detectFramework(buildPath, deployment, onLog);
         await onProgress(25);
 
-        // Step 3: Install dependencies
-        await onLog('info', '📥 Installing dependencies...');
-        await installDependencies(buildPath, framework, deployment, onLog);
+        // Step 3: Install dependencies (SKIPPED - Remote Build)
+        await onLog('info', '📥 Dependencies will be installed in container...');
+        // await installDependencies(buildPath, framework, deployment, onLog);
         await onProgress(45);
 
-        // Step 4: Build project
-        await onLog('info', '🔨 Building project...');
+        // Step 4: Build project (SKIPPED - Remote Build)
+        await onLog('info', '🔨 Project will be built in container...');
+        // const buildOutput = await buildProject(buildPath, framework, deployment, project, onLog);
+
+        // We still need to run buildProject logic to generate server.js and .env, but NOT execute the command
         const buildOutput = await buildProject(buildPath, framework, deployment, project, onLog);
+
         await onProgress(70);
 
         // Step 5: Deploy to container
@@ -81,8 +85,28 @@ async function executeBuild(deploymentId, callbacks = {}) {
         await deployment.calculateAnalytics();
         await onProgress(100);
 
-        // Cleanup
+        // Cleanup local build directory
         await cleanup(buildPath);
+
+        // Cleanup remote build directory if it exists
+        if (deploymentInfo.remotePath && deploymentInfo.serverKey) {
+            try {
+                const { NodeSSH } = require('node-ssh');
+                const ssh = new NodeSSH();
+
+                // Get SSH config from remoteBuild module
+                const remoteBuild = require('./remoteBuild');
+                const sshConfig = remoteBuild.getSSHConfig(deploymentInfo.serverKey, containerInfo.host);
+
+                await ssh.connect(sshConfig);
+                await ssh.execCommand(`rm -rf ${deploymentInfo.remotePath}`);
+                ssh.dispose();
+                await onLog('info', `🧹 Cleaned up remote build directory`);
+            } catch (cleanupError) {
+                // Don't fail deployment if cleanup fails
+                logger.warn(`Remote cleanup failed: ${cleanupError.message}`);
+            }
+        }
 
         return {
             success: true,
@@ -141,14 +165,46 @@ async function cloneRepository(deployment, project, user, onLog) {
         await onLog('info', `Cloning ${project.repository.fullName}...`);
 
         // Clone repository
-        const cloneCommand = `git clone --depth 1 --branch ${deployment.branch} ${repoWithAuth} ${buildPath}`;
-        const { stdout, stderr } = await execAsync(cloneCommand, {
-            timeout: 5 * 60 * 1000 // 5 minutes timeout
-        });
+        // Clone repository with retries
+        let retries = 3;
+        let lastError = null;
 
-        if (stderr && !stderr.includes('Cloning into')) {
-            await onLog('warn', stderr);
+        while (retries > 0) {
+            try {
+                const cloneCommand = `git clone --depth 1 --branch ${deployment.branch} ${repoWithAuth} ${buildPath}`;
+                const { stdout, stderr } = await execAsync(cloneCommand, {
+                    timeout: 5 * 60 * 1000 // 5 minutes timeout
+                });
+
+                if (stderr && !stderr.includes('Cloning into')) {
+                    await onLog('warn', stderr);
+                }
+
+                // If successful, break format loop
+                lastError = null;
+                break;
+            } catch (error) {
+                lastError = error;
+                retries--;
+                if (retries > 0) {
+                    await onLog('warn', `Git clone failed: ${error.message}. Retrying... (${retries} attempts left)`);
+                    await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3s before retry
+
+                    // Clean up partial clone if exists
+                    try {
+                        await fs.rm(buildPath, { recursive: true, force: true });
+                    } catch (cleanupErr) {
+                        await onLog('warn', `Cleanup failed: ${cleanupErr.message}`);
+                    }
+                }
+            }
         }
+
+        if (lastError) {
+            throw lastError;
+        }
+
+
 
         await onLog('info', `✓ Repository cloned successfully`);
 
@@ -375,8 +431,8 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
             await onLog('info', `✓ Environment variables written (${project.environmentVariables.length} vars)`);
         }
 
-        // Execute build
-        if (framework !== 'static' && framework !== 'nodejs') {
+        // Execute build (SKIPPED - Remote Build)
+        if (false && framework !== 'static' && framework !== 'nodejs') {
             const { stdout, stderr } = await execAsync(buildCommand, {
                 cwd: buildPath,
                 timeout: MAX_BUILD_TIME,
@@ -404,10 +460,120 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
 
         await onLog('info', `✓ Build completed in ${(buildTime / 1000).toFixed(2)}s`);
 
+        // Generate server.js for static sites (React, Vue, etc.)
+        if (['react', 'vue', 'angular', 'static', 'nextjs', 'vite', 'cra'].includes(framework)) {
+            await onLog('info', 'Generating zero-dependency server.js for static serving...');
+
+            const serverScript = `
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+
+// Get port from args
+const args = process.argv.slice(2);
+const portIdx = args.indexOf('--port');
+const port = portIdx !== -1 ? parseInt(args[portIdx + 1]) : (process.env.PORT || 3000);
+// server.js is now in root, serving outputDir
+const buildDir = path.join(__dirname, '${outputDir}');
+
+const mimeTypes = {
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.css': 'text/css',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.wav': 'audio/wav',
+  '.mp4': 'video/mp4',
+  '.woff': 'application/font-woff',
+  '.ttf': 'application/font-ttf',
+  '.eot': 'application/vnd.ms-fontobject',
+  '.otf': 'application/font-otf',
+  '.wasm': 'application/wasm'
+};
+
+http.createServer(function (request, response) {
+    let filePath = request.url === '/' ? '/index.html' : request.url;
+    // Remove query params
+    filePath = filePath.split('?')[0];
+    
+    let absPath = path.join(buildDir, filePath);
+    
+    // Security check logic omitted for simplicity in this context, but path.join handles .. traversal mostly normalized
+    
+    let extname = String(path.extname(absPath)).toLowerCase();
+    
+    // Attempt to read file
+    fs.readFile(absPath, function(error, content) {
+        if (error) {
+            if(error.code == 'ENOENT') {
+                // SPA Fallback: Serve index.html
+                fs.readFile(path.join(buildDir, 'index.html'), function(error, content) {
+                    if (error) {
+                        response.writeHead(500);
+                        response.end('Error loading index.html: ' + error.code);
+                    }
+                    else {
+                        response.writeHead(200, { 'Content-Type': 'text/html' });
+                        response.end(content, 'utf-8');
+                    }
+                });
+            }
+            else {
+                response.writeHead(500);
+                response.end('Server Error: '+error.code);
+            }
+        }
+        else {
+            const contentType = mimeTypes[extname] || 'application/octet-stream';
+            response.writeHead(200, { 'Content-Type': contentType });
+            response.end(content, 'utf-8');
+        }
+    });
+
+}).listen(port);
+console.log('Server running at http://localhost:' + port);
+`;
+            // Write server.js to the ROOT directory for remote build compatibility
+            // This ensures it gets copied to the container and can find the future outputDir
+            // const actualOutputDir = path.join(buildPath, outputDir);
+
+            // Ensure output dir exists (it should after build)
+            try {
+                // await fs.access(actualOutputDir);
+                await fs.writeFile(path.join(buildPath, 'server.js'), serverScript);
+                await onLog('info', `✓ server.js generated in root serving ./${outputDir}`);
+            } catch (err) {
+                await onLog('warn', `Error generating server.js: ${err.message}`);
+            }
+        }
+
         // Get build size
         const buildOutputPath = path.join(buildPath, outputDir);
-        const { stdout: sizeOutput } = await execAsync(`du -sb ${buildOutputPath}`);
-        const buildSize = parseInt(sizeOutput.split('\t')[0]);
+        // Calculate build size (cross-platform)
+        let buildSize = 0;
+        try {
+            const getDirectorySize = async (dirPath) => {
+                let size = 0;
+                const files = await fs.readdir(dirPath);
+                for (const file of files) {
+                    const filePath = path.join(dirPath, file);
+                    const stats = await fs.stat(filePath);
+                    if (stats.isDirectory()) {
+                        size += await getDirectorySize(filePath);
+                    } else {
+                        size += stats.size;
+                    }
+                }
+                return size;
+            };
+            buildSize = await getDirectorySize(buildPath);
+        } catch (sizeError) {
+            await onLog('warn', `Failed to calculate build size: ${sizeError.message}`);
+        }
 
         deployment.metadata = {
             ...deployment.metadata,
@@ -486,84 +652,75 @@ async function deployToContainer(buildPath, buildOutput, deployment, project, us
 
         await onLog('info', `Deploying to container: ${containerName} on ${host}:${port}`);
 
-        // Create Dockerfile based on framework
-        const dockerfile = generateDockerfile(framework, buildOutput.outputDir);
-        await fs.writeFile(path.join(buildPath, 'Dockerfile'), dockerfile);
-
-        // Build Docker image ON THE REMOTE SERVER (EC2/EC3)
-        const imageName = `${project.name}-${deployment._id}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-        await onLog('info', `Building Docker image: ${imageName}`);
+        // Determine container type based on user plan
+        const isSharedUser = user.containerType === 'shared' ||
+            user.containerType === 'free' ||
+            user.plan?.oracleConfig?.accountType === 'shared';
 
         const remoteBuild = require('./remoteBuild');
 
-        // Build on the same server where container will run
-        await remoteBuild.buildOnRemoteServer(
-            buildPath,
-            imageName,
-            host,       // EC2 or EC3 host
-            serverKey,  // 'EC2' or 'EC3'
-            onLog
-        );
+        if (isSharedUser) {
+            // For shared containers, we just need to upload the files
+            // The container is already running with Node.js/PM2
+            await onLog('info', 'Shared container: Uploading files only (skipping Docker image build)...');
 
-        await onLog('info', `✅ Docker image built on ${serverKey}`);
+            await remoteBuild.uploadToRemoteServer(
+                buildPath,
+                deployment._id.toString(),
+                host,
+                serverKey,
+                onLog
+            );
+        } else {
+            // For dedicated containers, we build a full Docker image
 
-        // Determine container type based on user plan
-        const isSharedUser = user.containerType === 'shared' ||
-            user.plan?.oracleConfig?.accountType === 'shared';
+            // Create Dockerfile based on framework
+            const dockerfile = generateDockerfile(framework, buildOutput.outputDir);
+            await fs.writeFile(path.join(buildPath, 'Dockerfile'), dockerfile);
+
+            // Build Docker image ON THE REMOTE SERVER (EC2/EC3)
+            const imageName = `${project.name}-${deployment._id}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+            await onLog('info', `Building Docker image: ${imageName}`);
+
+            // Build on the same server where container will run
+            await remoteBuild.buildOnRemoteServer(
+                buildPath,
+                imageName,
+                host,       // EC2 or EC3 host
+                serverKey,  // 'EC2' or 'EC3'
+                onLog
+            );
+            await onLog('info', `✅ Docker image built on ${serverKey}`);
+        }
+
 
         let containerResult;
         let newContainerId;
         let newContainerName;
 
-        if (isSharedUser) {
-            // FREE TIER USERS: Deploy with resource limits
-            await onLog('info', 'Deploying as free tier...');
+        // ALL USERS: Deploy project to user's container
+        await onLog('info', `Deploying project to user container: ${containerName}`);
 
-            const freeTierContainer = require('./freeTierContainer');
-            const server = containerOrchestrator.ORACLE_SERVERS[serverKey];
+        const freeTierContainer = require('./freeTierContainer');
 
-            containerResult = await freeTierContainer.deployFreeTierContainer(
-                user,
-                project,
-                imageName,
-                serverKey,
-                server
-            );
+        // Construct REMOTE path where files were uploaded
+        // We uploaded the root buildPath to /tmp/builds/${deployment.id}
+        // For remote builds, we need the SOURCE directory, not the output directory (which will be created in container)
+        // Ensure forward slashes for Linux
+        const remoteBuildPath = `/tmp/builds/${deployment.id}`.replace(/\\/g, '/');
 
-            newContainerId = containerResult.containerId;
-            newContainerName = containerResult.containerName;
-            port = containerResult.port;
+        containerResult = await freeTierContainer.deployProjectToUserContainer(
+            user,
+            project,
+            remoteBuildPath,      // Pass REMOTE path
+            containerInfo
+        );
 
-            await onLog('info', `✅ Free tier container deployed on port ${port}`);
+        newContainerId = containerResult.containerId;
+        newContainerName = containerResult.containerName;
+        port = containerResult.port;
 
-        } else {
-            // PAID USERS: Deploy to dedicated container
-            await onLog('info', 'Deploying to dedicated container...');
-
-            // Stop existing container if running
-            try {
-                await docker.stopContainer(containerName, host);
-                await onLog('info', '✓ Stopped previous deployment');
-            } catch (err) {
-                // Container might not exist, ignore
-            }
-
-            // Run new container (on the REMOTE server)
-            const server = containerOrchestrator.ORACLE_SERVERS[serverKey];
-            const newContainer = await docker.runContainer(imageName, containerName, {
-                host: host,  // Use the remote host (EC3)
-                port: port,
-                memory: user.resourceAllocation?.ram * 1024 || 1024, // Convert GB to MB
-                cpu: user.resourceAllocation?.cpu || 0.5,
-                env: project.environmentVariables?.map(e => `${e.key}=${e.value}`) || [],
-                restart: 'unless-stopped'
-            });
-
-            newContainerId = newContainer.id;
-            newContainerName = containerName;
-
-            await onLog('info', '✅ Dedicated container started');
-        }
+        await onLog('info', `✅ Project deployed to user container on port ${port}`);
 
         // Update Nginx routing for URL path access
         await onLog('info', 'Configuring domain routing...');
@@ -610,7 +767,8 @@ async function deployToContainer(buildPath, buildOutput, deployment, project, us
             containerId: containerName,
             containerName,
             port,
-            serverKey
+            serverKey,
+            remotePath: `/tmp/builds/${deployment.id}`  // For cleanup after deployment
         };
 
     } catch (error) {

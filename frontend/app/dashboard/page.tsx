@@ -38,22 +38,26 @@ export default function DashboardPage() {
             icon: RocketLaunchIcon,
             color: 'text-green-500',
             bg: 'bg-green-500/10',
-        },
-        {
+        }
+    ];
+
+    // Only show resource usage if data is provided by backend (admin controlled)
+    if ((user as any)?.currentResourceUsage) {
+        stats.push({
             name: 'CPU Usage',
             value: `${(user as any)?.currentResourceUsage?.cpuPercent || 0}%`,
             icon: ClockIcon,
             color: 'text-purple-500',
             bg: 'bg-purple-500/10',
-        },
-        {
+        });
+        stats.push({
             name: 'RAM Usage',
             value: `${(user as any)?.currentResourceUsage?.ramPercent || 0}%`,
             icon: CheckCircleIcon,
             color: 'text-yellow-500',
             bg: 'bg-yellow-500/10',
-        },
-    ];
+        });
+    }
 
     return (
         <div className="space-y-6">
@@ -129,8 +133,8 @@ export default function DashboardPage() {
                                     <div className="flex items-center space-x-4">
                                         <span
                                             className={`px-3 py-1 rounded-full text-xs font-medium ${project.status === 'active'
-                                                    ? 'bg-green-500/10 text-green-500'
-                                                    : 'bg-gray-500/10 text-gray-500'
+                                                ? 'bg-green-500/10 text-green-500'
+                                                : 'bg-gray-500/10 text-gray-500'
                                                 }`}
                                         >
                                             {project.status}

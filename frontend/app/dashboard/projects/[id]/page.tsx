@@ -17,6 +17,7 @@ import {
     CheckCircleIcon,
     XCircleIcon,
     ArrowPathIcon,
+    GlobeAltIcon,
 } from '@heroicons/react/24/outline';
 
 export default function ProjectDetailPage() {
@@ -29,13 +30,24 @@ export default function ProjectDetailPage() {
     const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>([]);
     const [activeDeploymentId, setActiveDeploymentId] = useState<string | null>(null);
     const [isDeploying, setIsDeploying] = useState(false);
+    const [selectedBranch, setSelectedBranch] = useState<string>('main');
+    const [showBranchDropdown, setShowBranchDropdown] = useState(false);
+
+    // Mock branches - in production, fetch from GitHub API
+    const availableBranches = ['main', 'master', 'develop', 'staging'];
 
     useEffect(() => {
         if (params.id) {
             dispatch(fetchProject(params.id as string));
-            dispatch(fetchDeployments({ projectId: params.id as string }));
+            dispatch(fetchDeployments(params.id as string));  // Pass string directly
         }
     }, [params.id, dispatch]);
+
+    useEffect(() => {
+        if (currentProject?.repository?.branch) {
+            setSelectedBranch(currentProject.repository.branch);
+        }
+    }, [currentProject]);
 
     useEffect(() => {
         if (currentProject?.environmentVariables) {
@@ -72,18 +84,22 @@ export default function ProjectDetailPage() {
             return;
         }
 
+        // Lock immediately to prevent double submissions
+        setIsDeploying(true);
+
         try {
             const result = await dispatch(createDeployment({
                 projectId: params.id as string,
-                branch: currentProject?.repository?.branch || 'main',
+                branch: selectedBranch,
             })).unwrap();
 
             // Set the new deployment as active
             setActiveDeploymentId(result._id);
             setIsDeploying(true);
 
-            toast.success('Deployment started!');
+            toast.success(`Deployment started from ${selectedBranch} branch!`);
         } catch (error: any) {
+            setIsDeploying(false);
             toast.error(error || 'Failed to start deployment');
         }
     };
@@ -151,17 +167,90 @@ export default function ProjectDetailPage() {
                     </p>
                 </div>
                 <div className="flex items-center space-x-3">
-                    <button
-                        onClick={handleDeploy}
-                        disabled={isDeploying}
-                        className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${isDeploying
-                                ? 'bg-gray-600 cursor-not-allowed text-gray-400'
-                                : 'bg-purple-600 hover:bg-purple-700 text-white'
-                            }`}
-                    >
-                        <RocketLaunchIcon className="h-5 w-5" />
-                        <span>{isDeploying ? 'Deploying...' : 'Deploy Now'}</span>
-                    </button>
+                    {/* Visit Site Button */}
+                    {(currentProject.deploymentUrl || currentProject.latestDeployment?.deploymentUrl) && (
+                        <a
+                            href={
+                                (currentProject.deploymentUrl || currentProject.latestDeployment?.deploymentUrl)?.startsWith('http')
+                                    ? (currentProject.deploymentUrl || currentProject.latestDeployment?.deploymentUrl)
+                                    : `https://${currentProject.deploymentUrl || currentProject.latestDeployment?.deploymentUrl}`
+                            }
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center space-x-2 bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-lg transition-colors border border-gray-700 text-white"
+                        >
+                            <GlobeAltIcon className="h-5 w-5" />
+                            <span>Visit</span>
+                        </a>
+                    )}
+
+                    {/* Branch Selector Dropdown */}
+                    <div className="relative">
+                        <button
+                            onClick={() => setShowBranchDropdown(!showBranchDropdown)}
+                            className="flex items-center space-x-2 bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-lg transition-colors border border-gray-700"
+                        >
+                            <span className="text-sm text-gray-400">Branch:</span>
+                            <span className="text-white font-medium">{selectedBranch}</span>
+                            <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                        </button>
+                        {showBranchDropdown && (
+                            <>
+                                <div
+                                    className="fixed inset-0 z-10"
+                                    onClick={() => setShowBranchDropdown(false)}
+                                />
+                                <div className="absolute right-0 mt-2 w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-20 py-1">
+                                    {availableBranches.map((branch) => (
+                                        <button
+                                            key={branch}
+                                            onClick={() => {
+                                                setSelectedBranch(branch);
+                                                setShowBranchDropdown(false);
+                                            }}
+                                            className={`w-full text-left px-4 py-2 text-sm transition-colors ${branch === selectedBranch
+                                                ? 'bg-purple-600 text-white'
+                                                : 'text-gray-300 hover:bg-gray-700'
+                                                }`}
+                                        >
+                                            {branch}
+                                            {branch === selectedBranch && (
+                                                <span className="float-right">✓</span>
+                                            )}
+                                        </button>
+                                    ))}
+                                </div>
+                            </>
+                        )}
+                    </div>
+
+                    {/* Calculate active build status */
+                        (() => {
+                            const isBuildInProgress = deployments.some(d => ['queued', 'building', 'deploying'].includes(d.status));
+
+                            return (
+                                <button
+                                    onClick={handleDeploy}
+                                    disabled={isDeploying || isBuildInProgress}
+                                    className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${isDeploying || isBuildInProgress
+                                        ? 'bg-gray-600 cursor-not-allowed text-gray-400'
+                                        : 'bg-purple-600 hover:bg-purple-700 text-white'
+                                        }`}
+                                    title={isBuildInProgress ? 'A deployment is currently in progress' : 'Start a new deployment'}
+                                >
+                                    <RocketLaunchIcon className="h-5 w-5" />
+                                    <span>
+                                        {isDeploying
+                                            ? 'Deploying...'
+                                            : isBuildInProgress
+                                                ? 'Build in Progress'
+                                                : 'Deploy Now'}
+                                    </span>
+                                </button>
+                            );
+                        })()}
                     <button
                         onClick={handleDeleteProject}
                         className="flex items-center space-x-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
@@ -282,20 +371,29 @@ export default function ProjectDetailPage() {
                                                     </a>
                                                 )}
                                                 {/* Show error for failed deployments */}
+                                                {/* Show error for failed deployments */}
                                                 {deployment.status === 'failed' && deployment.error && (
                                                     <p className="text-xs text-red-400 mt-1">
-                                                        Error: {deployment.error.substring(0, 100)}{deployment.error.length > 100 ? '...' : ''}
+                                                        Error: {(() => {
+                                                            const errorMsg = typeof deployment.error === 'string'
+                                                                ? deployment.error
+                                                                : deployment.error?.message || JSON.stringify(deployment.error);
+                                                            return errorMsg.substring(0, 100) + (errorMsg.length > 100 ? '...' : '');
+                                                        })()}
                                                     </p>
                                                 )}
                                             </div>
                                         </div>
-                                        <div className="text-right">
-                                            <p className="text-sm text-gray-400">
-                                                {new Date(deployment.createdAt).toLocaleString()}
-                                            </p>
-                                            <p className="text-xs text-gray-500">
-                                                {deployment.buildTime ? `${deployment.buildTime}ms` : 'Building...'}
-                                            </p>
+                                        <div className="flex flex-col items-end space-y-2">
+                                            <div className="text-right">
+                                                <p className="text-sm text-gray-400">
+                                                    {new Date(deployment.createdAt).toLocaleString()}
+                                                </p>
+                                                <p className="text-xs text-gray-500">
+                                                    {deployment.buildTime ? `${deployment.buildTime}ms` : 'Building...'}
+                                                </p>
+                                            </div>
+                                            {/* Quick Redeploy Button Removed as requested */}
                                         </div>
                                     </div>
                                 </Link>
@@ -389,6 +487,6 @@ export default function ProjectDetailPage() {
                     </div>
                 )}
             </div>
-        </div>
+        </div >
     );
 }

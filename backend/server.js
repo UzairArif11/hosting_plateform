@@ -134,6 +134,40 @@ app.use('/api/settings', settingsRoutes); // Settings (public domain lookup, adm
 app.use('/api/test', require('./routes/test')); // Test endpoints (no auth required)
 app.use('/api/webhooks', webhookRoutes);
 
+// User self-service routes
+const userRoutes = require('./routes/user');
+app.use('/api/user', userRoutes);
+
+// Resource monitoring routes
+const resourceRoutes = require('./routes/resources');
+app.use('/api/resources', resourceRoutes);
+
+// IP restrictions routes
+const ipRestrictionsRoutes = require('./routes/ipRestrictions');
+app.use('/api/ip-restrictions', ipRestrictionsRoutes);
+
+// Start account lifecycle cron jobs
+const { startCronJobs } = require('./cron/accountLifecycleCron');
+try {
+  startCronJobs();
+  logger.info('✅ Account lifecycle cron jobs started');
+} catch (error) {
+  logger.error('Failed to start cron jobs:', error);
+}
+
+// Start resource monitoring
+const resourceMonitoring = require('./services/resourceMonitoring');
+setInterval(async () => {
+  try {
+    await resourceMonitoring.monitorResources();
+  } catch (error) {
+    logger.error('Resource monitoring error:', error);
+  }
+}, 5 * 60 * 1000); // Every 5 minutes
+
+logger.info('✅ Resource monitoring started (every 5 minutes)');
+
+
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({ error: 'Route not found' });

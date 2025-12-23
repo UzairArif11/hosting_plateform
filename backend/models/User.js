@@ -31,6 +31,22 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+
+  // IP Tracking for account restrictions
+  signupIP: {
+    type: String,
+    index: true,
+    description: 'IP address used during signup'
+  },
+  lastLoginIP: {
+    type: String,
+    description: 'IP address of last login'
+  },
+  ipHistory: [{
+    ip: String,
+    timestamp: { type: Date, default: Date.now },
+    action: { type: String, enum: ['signup', 'login'] }
+  }],
   profileUrl: {
     type: String,
     default: ''
@@ -64,6 +80,12 @@ const userSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Plan',
     default: null
+  },
+  planType: {
+    type: String,
+    enum: ['free', 'pro', 'enterprise'],
+    default: 'free',
+    index: true
   },
   trialStarted: {
     type: Date,
@@ -171,6 +193,31 @@ const userSchema = new mongoose.Schema({
     lastChecked: { type: Date, default: Date.now }
   },
 
+  // Storage violation tracking
+  storageViolations: [{
+    timestamp: { type: Date, default: Date.now },
+    storageUsed: { type: Number }, // MB
+    limit: { type: Number }, // MB
+    action: { type: String, enum: ['stopped', 'warned'], default: 'stopped' }
+  }],
+  deploymentBlocked: {
+    type: Boolean,
+    default: false
+  },
+  deploymentBlockedReason: {
+    type: String,
+    default: ''
+  },
+  deploymentBlockedAt: {
+    type: Date
+  },
+
+  // Admin controlled visibility settings
+  showResourceStats: {
+    type: Boolean,
+    default: false
+  },
+
   // What user SEES in UI
   displayedResources: {
     cpu: { type: Number },
@@ -230,6 +277,11 @@ const userSchema = new mongoose.Schema({
     enum: ['shared', 'dedicated', 'free', null],
     default: null, // shared: Free users, dedicated: Paid users, free: Small dedicated containers
     description: 'Container allocation type (shared vs dedicated vs free)'
+  },
+  containerId: {
+    type: String,
+    default: null,
+    description: 'Docker container ID for user\'s main container'
   },
   serverAssignmentHistory: [{
     server: {
@@ -294,6 +346,74 @@ const userSchema = new mongoose.Schema({
   adminNotes: {
     type: String,
     default: ''
+  },
+
+  // Suspension tracking
+  suspendedAt: {
+    type: Date,
+    default: null
+  },
+  suspendedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  suspensionReason: {
+    type: String,
+    default: ''
+  },
+  unsuspendedAt: {
+    type: Date,
+    default: null
+  },
+  unsuspendedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+
+  // Lifecycle tracking
+  autoSuspended: {
+    type: Boolean,
+    default: false
+  },
+  resourcesDeleted: {
+    type: Boolean,
+    default: false
+  },
+  resourcesDeletedAt: {
+    type: Date,
+    default: null
+  },
+  deletedAt: {
+    type: Date,
+    default: null
+  },
+  deletedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  deletionReason: {
+    type: String,
+    default: ''
+  },
+  recoveryDeadline: {
+    type: Date,
+    default: null
+  },
+  recoveredAt: {
+    type: Date,
+    default: null
+  },
+  recoveredBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  subscriptionExpiry: {
+    type: Date,
+    default: null
   },
 
 }, {

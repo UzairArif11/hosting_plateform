@@ -87,6 +87,29 @@ const runContainer = async (imageName, containerName, options = {}) => {
     const docker = createDockerClient(options.host);
     logger.info('✅ Step 2: Docker client created');
 
+    // Pull image first
+    logger.info(`⬇️ Pulling image ${imageName}...`);
+    try {
+      await new Promise((resolve, reject) => {
+        docker.pull(imageName, (err, stream) => {
+          if (err) return reject(err);
+          docker.modem.followProgress(stream, onFinished, onProgress);
+
+          function onFinished(err, output) {
+            if (err) return reject(err);
+            resolve(output);
+          }
+
+          function onProgress(event) {
+            // Optional: log progress
+          }
+        });
+      });
+      logger.info(`✅ Image ${imageName} pulled successfully`);
+    } catch (pullError) {
+      logger.warn(`⚠️ Failed to pull image ${imageName}: ${pullError.message}. Trying to run anyway (might exist locally)...`);
+    }
+
     const containerConfig = {
       Image: imageName,
       name: containerName,
@@ -99,7 +122,9 @@ const runContainer = async (imageName, containerName, options = {}) => {
           '80/tcp': [{ HostPort: String(options.port || '3000') }]  // Map nginx port 80 to host port
         },
         Memory: (options.memory || 512) * 1024 * 1024, // Convert MB to bytes
-        CpuShares: Math.round((options.cpu || 1) * 1024), // CPU shares - must be integer!
+        CpuShares: Math.round((options.cpu || 1) * 1024), // CPU shares (Soft Limit)
+        NanoCpus: Math.round((options.cpu || 1) * 1000000000), // CPU Hard Limit (1 CPU = 1e9 NanoCPU)
+        // StorageOpt: options.storage ? { size: `${options.storage}G` } : undefined, // DISABLED due to fs incompatibility
         RestartPolicy: {
           Name: options.restart || 'unless-stopped'
         }
@@ -108,6 +133,17 @@ const runContainer = async (imageName, containerName, options = {}) => {
       WorkingDir: '/app'
       // NOTE: Do NOT set Cmd - use the image's default CMD (nginx)
     };
+
+    // Support for Host Networking (crucial for multi-project PM2 with unique ports)
+    if (options.networkMode) {
+      containerConfig.HostConfig.NetworkMode = options.networkMode;
+      if (options.networkMode === 'host') {
+        containerConfig.HostConfig.PortBindings = {};
+        // Keep ExposedPorts empty if host mode (ports are exposed by process binding)
+      }
+    }
+
+    // Only set Cmd if explicitly provided
 
     // Only set Cmd if explicitly provided
     if (options.cmd) {
@@ -350,6 +386,46 @@ const execInContainer = async (containerName, command, host = null) => {
   }
 };
 
+/**
+ * Copy files/directory to container
+ */
+const copyToContainer = async (containerName, sourcePath, destPath, host = null) => {
+  try {
+    const docker = createDockerClient(host);
+    const container = docker.getContainer(containerName);
+
+    const tar = require('tar-fs');
+    const fs = require('fs');
+    const path = require('path');
+
+    // Create tar stream from source
+    const tarStream = tar.pack(sourcePath);
+
+    // Put archive to container
+    await container.putArchive(tarStream, {
+      path: path.dirname(destPath)
+    });
+
+    logger.info('Files copied to container', {
+      container: containerName,
+      source: sourcePath,
+      dest: destPath
+    });
+
+    return {
+      success: true
+    };
+
+  } catch (error) {
+    logger.error('Failed to copy files to container:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
+
 // Deploy application to container
 const deployToContainer = async (deploymentConfig) => {
   try {
@@ -380,6 +456,9 @@ const deployToContainer = async (deploymentConfig) => {
 
     // Wait for container to be ready
     await new Promise(resolve => setTimeout(resolve, 5000));
+
+    // Get container stats (CPU, RAM, Storage)
+
 
     // Check if container is running
     const status = await getContainerStatus(containerName, host);
@@ -687,7 +766,70 @@ const runContainerWithVolumes = async (imageName, containerName, options = {}) =
   }
 };
 
+// Get container stats (CPU, RAM, Storage)
+const getContainerStats = async (containerName, host = null) => {
+  try {
+    const docker = createDockerClient(host);
+    const container = docker.getContainer(containerName);
+
+    // Get Docker stats (snapshot, not stream)
+    const stats = await container.stats({ stream: false });
+
+    // CPU Calculation
+    // Based on: https://docs.docker.com/engine/api/v1.41/#operation/ContainerStats
+    const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
+    const systemCpuDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
+    const numberCpus = stats.cpu_stats.online_cpus || stats.cpu_stats.cpu_usage.percpu_usage?.length || 1;
+
+    let cpuPercent = 0.0;
+    if (systemCpuDelta > 0.0 && cpuDelta > 0.0) {
+      cpuPercent = (cpuDelta / systemCpuDelta) * numberCpus * 100.0;
+    }
+
+    // Memory Calculation
+    // usage - cache is the "real" usage often shown in docker stats, but 'usage' is safer hard limit check
+    const memoryUsage = stats.memory_stats.usage || 0;
+    const memoryUsageMB = memoryUsage / (1024 * 1024);
+
+    // Storage Calculation (via exec)
+    // We already have checkStorageUsage in containerOrchestrator but that's internal.
+    // We can run exec here directly.
+    let storageMB = 0;
+    try {
+      const exec = await container.exec({
+        Cmd: ['du', '-sk', '/app'],
+        AttachStdout: true,
+        AttachStderr: true
+      });
+      const stream = await exec.start({ hijack: true, stdin: true });
+      let output = '';
+      stream.on('data', chunk => output += chunk.toString());
+      await new Promise(resolve => stream.on('end', resolve));
+
+      const kbytes = parseInt(output.split('\t')[0]);
+      if (!isNaN(kbytes)) {
+        storageMB = kbytes / 1024;
+      }
+    } catch (e) {
+      // Ignore storage error, return 0
+    }
+
+    return {
+      success: true,
+      cpu: cpuPercent / 100, // Return as "cores used" (e.g. 0.5 for 50%)
+      cpuPercent: cpuPercent,
+      memory: memoryUsageMB, // MB
+      storage: storageMB // MB
+    };
+
+  } catch (error) {
+    // Container might not be running
+    return null;
+  }
+};
+
 module.exports = {
+  getContainerStats,
   buildImage,
   runContainer,
   runContainerWithVolumes,
@@ -699,6 +841,7 @@ module.exports = {
   getContainerLogs,
   updateContainerResources,
   execInContainer,
+  copyToContainer,
   execCommand,
   deployToContainer,
   cleanupOldContainers,
@@ -707,3 +850,4 @@ module.exports = {
   backupContainerData,
   restoreContainerData
 };
+

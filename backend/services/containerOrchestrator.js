@@ -14,7 +14,7 @@ const SHARED_RESOURCE_CAPS = {
     perUserCap: {
       cpu: 0.2,           // 10% of total CPU
       ram: 1228,          // 10% of total RAM (MB)
-      storage: 10,
+      storage: 2,
       bandwidth: 100
     },
     perUserMin: {
@@ -31,7 +31,7 @@ const SHARED_RESOURCE_CAPS = {
     perUserCap: {
       cpu: 0.3,           // 10% of total CPU
       ram: 1843,          // 10% of total RAM (MB)
-      storage: 10,
+      storage: 2,
       bandwidth: 100
     },
     perUserMin: {
@@ -204,60 +204,83 @@ const allocateContainer = async (user, plan) => {
   }
 };
 
-// Allocate shared container for free users
+// Allocate container for user (one per user, resources based on plan)
 const allocateSharedContainer = async (user, serverKey, server) => {
   try {
-    const containerName = `${serverKey}-shared-user-${user.username}-${Date.now()}`;
+    const containerName = `${serverKey}-user-${user.username}-${Date.now()}`;
     const port = await getAvailablePort(serverKey);
 
-    // Get resource caps for this server
-    const resourceCaps = SHARED_RESOURCE_CAPS[serverKey];
-    if (!resourceCaps) {
-      throw new Error(`No resource caps defined for server ${serverKey}`);
-    }
+    // Get user's plan to determine resources
+    const Plan = require('../models/Plan');
+    const userPlan = await Plan.findById(user.plan);
 
-    // NOTE: We do NOT create the container here!
-    // Container creation happens in buildExecutor.js using the built Docker image
-    // This function only allocates resources and updates the database
+    // Default resources if no plan found
+    const resources = userPlan?.resources || {
+      cpu: 0.5,
+      ram: 1,
+      storage: 2,
+      bandwidth: 100
+    };
 
-    // Update user assignment with allocated resources
-    const User = require('../models/User');
-    await User.findByIdAndUpdate(user._id || user.id, {
-      assignedServer: serverKey,
-      containerName: containerName,
-      assignedPort: port,
-      containerType: 'shared',
-      resourceAllocation: {
-        cpu: resourceCaps.perUserCap.cpu,
-        ram: resourceCaps.perUserCap.ram / 1024,
-        storage: resourceCaps.perUserCap.storage,
-        bandwidth: resourceCaps.perUserCap.bandwidth,
-        maxCpu: resourceCaps.perUserCap.cpu,
-        maxRam: resourceCaps.perUserCap.ram / 1024,
-        guaranteedCpu: resourceCaps.perUserMin.cpu,
-        guaranteedRam: resourceCaps.perUserMin.ram / 1024
-      }
-    });
-
-    logger.info('Shared container allocated', {
+    logger.info('Creating user container with PM2', {
       userId: user._id || user.id,
       username: user.username,
       server: serverKey,
       containerName,
-      port,
-      type: 'shared'
+      resources
     });
 
-    // Return allocation info for buildExecutor to use
+    // Create the actual container with PM2
+    const freeTierContainer = require('./freeTierContainer');
+    const containerResult = await freeTierContainer.createUserContainer(
+      user,
+      serverKey,
+      server,
+      resources
+    );
+
+    if (!containerResult.success) {
+      throw new Error(`Failed to create user container: ${containerResult.error}`);
+    }
+
+    // Update user assignment with container info
+    const User = require('../models/User');
+    await User.findByIdAndUpdate(user._id || user.id, {
+      assignedServer: serverKey,
+      containerName: containerResult.containerName,
+      containerId: containerResult.containerId,
+      assignedPort: port,
+      containerType: user.planType || 'free',
+      resourceAllocation: {
+        cpu: resources.cpu,
+        ram: resources.ram,
+        storage: resources.storage,
+        bandwidth: resources.bandwidth,
+        maxCpu: resources.cpu,
+        maxRam: resources.ram
+      }
+    });
+
+    logger.info('User container created successfully', {
+      userId: user._id || user.id,
+      username: user.username,
+      server: serverKey,
+      containerName: containerResult.containerName,
+      containerId: containerResult.containerId,
+      resources
+    });
+
+    // Return allocation info
     return {
-      containerName: containerName,
+      containerName: containerResult.containerName,
+      containerId: containerResult.containerId,
       port: port,
       serverKey: serverKey,
       host: server.host
     };
 
   } catch (error) {
-    logger.error('Shared container allocation failed:', error);
+    logger.error('User container creation failed:', error);
     throw error;
   }
 };
@@ -266,36 +289,46 @@ const allocateSharedContainer = async (user, serverKey, server) => {
 const allocateDedicatedContainer = async (user, plan, serverKey, server) => {
   try {
     const planResources = plan.resources || { cpu: 1, ram: 4, storage: 50 };
-    const containerName = `${serverKey}-dedicated-user-${user.username}-${planResources.cpu}cpu-${planResources.ram}ram-${Date.now()}`;
-    const port = await getAvailablePort(serverKey);
+    // Dedicated name generated by createUserContainer logic or passed? 
+    // createUserContainer generates name. We should probably let it, or pass distinct prefix.
 
-    const result = await docker.runContainer('node:18-alpine', containerName, {
-      host: server.host,
-      port: port,
-      memory: planResources.ram * 1024, // GB to MB
-      cpu: planResources.cpu,
-      env: [
-        `USER_ID=${user._id || user.id}`,
-        `USER_NAME=${user.username}`,
-        `CONTAINER_TYPE=dedicated`,
-        `SERVER=${serverKey}`,
-        `PLAN=${plan.name}`,
-        `ALLOCATED_CPU=${planResources.cpu}`,
-        `ALLOCATED_RAM=${planResources.ram}`
-      ]
-    });
+    // Actually, createUserContainer takes (user, serverKey, server, resources) and handles creation.
+    // It generates name: `${serverKey}-user-${user.username}-${Date.now()}`
 
-    if (result.success) {
+    // We want dedicated name: `${serverKey}-dedicated-user-...`
+    // Let's modify createUserContainer to accept a name override or type?
+    // Or just let it be standard name.
+
+    // For now, let's just use createUserContainer as is, it's robust.
+    const freeTierContainer = require('./freeTierContainer');
+
+    // We can inject the dedicated naming/resources logic into createUserContainer if needed, 
+    // but for now let's just use it.
+
+    const containerResult = await freeTierContainer.createUserContainer(
+      user,
+      serverKey,
+      server,
+      planResources
+    );
+
+    if (containerResult.success) {
       // Update user assignment
       const User = require('../models/User');
       await User.findByIdAndUpdate(user._id || user.id, {
-        oracleAccountId: serverKey,
+        assignedServer: serverKey, // Standardize on assignedServer
+        oracleAccountId: serverKey, // Keep legacy
+        containerName: containerResult.containerName,
+        containerId: containerResult.containerId,
+        assignedPort: containerResult.port, // Use the dynamic port
         containerType: 'dedicated',
         resourceAllocation: {
           cpu: planResources.cpu,
           ram: planResources.ram,
           storage: planResources.storage,
-          bandwidth: planResources.bandwidth || 1024
+          bandwidth: planResources.bandwidth || 1024,
+          maxCpu: planResources.cpu,
+          maxRam: planResources.ram
         }
       });
 
@@ -303,7 +336,7 @@ const allocateDedicatedContainer = async (user, plan, serverKey, server) => {
         userId: user._id || user.id,
         username: user.username,
         server: serverKey,
-        containerName,
+        containerName: containerResult.containerName,
         type: 'dedicated',
         resources: planResources
       });
@@ -311,16 +344,16 @@ const allocateDedicatedContainer = async (user, plan, serverKey, server) => {
       return {
         success: true,
         container: {
-          name: containerName,
+          name: containerResult.containerName,
           server: serverKey,
           type: 'dedicated',
           resources: planResources,
-          url: `http://${server.host}:${port}`
+          url: `http://${server.host}:${containerResult.port}`
         }
       };
     }
 
-    return result;
+    return { success: false, error: containerResult.error };
   } catch (error) {
     logger.error('Dedicated container allocation failed:', error);
     return { success: false, error: error.message };
@@ -596,107 +629,107 @@ const recreateContainerWithDataPreservation = async (userId, newResources) => {
       oldContainer: container.name
     });
 
-    // Step 1: Create data backup volume
-    const backupVolumeName = `${user.username}-backup-${Date.now()}`;
-    const createVolumeResult = await docker.createDataVolume(backupVolumeName, server.host);
+    // Step 1: Save PM2 state in old container
+    const { NodeSSH } = require('node-ssh');
+    const ssh = new NodeSSH();
 
-    if (!createVolumeResult.success) {
-      return { success: false, error: 'Failed to create backup volume' };
-    }
+    // Get SSH config for the server
+    const remoteBuild = require('./remoteBuild');
+    // We can't import remoteBuild if it's circular, but let's assume it's fine or implement connection manually.
+    // Actually, containerOrchestrator imports docker, which imports ... 
+    // Let's just use the known SSH keys env vars directly to be safe.
 
-    // Step 2: Backup user data from current container
-    const backupResult = await docker.backupContainerData(container.name, backupVolumeName, server.host);
-    if (!backupResult.success) {
-      return { success: false, error: 'Failed to backup container data' };
-    }
+    const keyPath = user.oracleAccountId === 'EC2' ? process.env.SSH_EC2_KEY : process.env.SSH_EC3_KEY;
+    const fs = require('fs');
+    const keyContent = fs.readFileSync(keyPath, 'utf8');
 
-    // Step 3: Stop current container (but don't remove yet)
-    await docker.stopContainer(container.name, server.host);
-
-    // Step 4: Create new container with updated resources
-    const newContainerName = generateContainerName(user, newResources, user.oracleAccountId);
-    const port = await getAvailablePort(user.oracleAccountId);
-
-    const createResult = await docker.runContainerWithVolumes('node:18-alpine', newContainerName, {
-      host: server.host,
-      port: port,
-      memory: newResources.ram * 1024, // GB to MB
-      cpu: newResources.cpu,
-      volumes: [`${backupVolumeName}:/app/data`], // Mount backup volume
-      env: [
-        `USER_ID=${userId}`,
-        `USER_NAME=${user.username}`,
-        `CONTAINER_TYPE=${user.containerType}`,
-        `SERVER=${user.oracleAccountId}`,
-        `ALLOCATED_CPU=${newResources.cpu}`,
-        `ALLOCATED_RAM=${newResources.ram}`,
-        `RESTORED_FROM_BACKUP=true`
-      ]
-    });
-
-    if (!createResult.success) {
-      // Rollback: restart old container
-      await docker.startContainer(container.name, server.host);
-      return { success: false, error: 'Failed to create new container, rolled back to old container' };
-    }
-
-    // Step 5: Restore data to new container
-    const restoreResult = await docker.restoreContainerData(newContainerName, backupVolumeName, server.host);
-    if (!restoreResult.success) {
-      logger.warn('Data restore failed, but container is running', {
-        userId,
-        newContainer: newContainerName,
-        error: restoreResult.error
+    try {
+      await ssh.connect({
+        host: server.host,
+        username: process.env.SSH_USERNAME || 'ubuntu',
+        privateKey: keyContent
       });
-    }
 
-    // Step 6: Verify new container is running properly
-    const healthCheck = await docker.getContainerStatus(newContainerName, server.host);
-    if (!healthCheck.success || !healthCheck.running) {
-      // Rollback: restart old container and remove new one
-      await docker.stopContainer(newContainerName, server.host);
-      await docker.startContainer(container.name, server.host);
-      return { success: false, error: 'New container failed health check, rolled back' };
-    }
+      // PM2 Save
+      await ssh.execCommand(`docker exec ${container.name} pm2 save`);
 
-    // Step 7: Clean up old container and backup
-    await docker.removeContainer(container.name, server.host);
-    await docker.removeDataVolume(backupVolumeName, server.host);
+      // Prepare backup directory on host
+      const backupPath = `/tmp/backup_${userId}_${Date.now()}`;
+      await ssh.execCommand(`mkdir -p ${backupPath}`);
 
-    // Step 8: Update user's resource allocation in database
-    const User = require('../models/User');
-    await User.findByIdAndUpdate(userId, {
-      resourceAllocation: {
-        cpu: newResources.cpu,
-        ram: newResources.ram,
-        storage: newResources.storage,
-        bandwidth: newResources.bandwidth || user.resourceAllocation.bandwidth
+      // Backup Projects and PM2 config directly from container filesystem
+      logger.info('Backing up data via docker cp...');
+      await ssh.execCommand(`docker cp ${container.name}:/app/projects ${backupPath}/projects`);
+      await ssh.execCommand(`docker cp ${container.name}:/root/.pm2 ${backupPath}/pm2_state`);
+
+      // Step 2: Stop old container
+      await docker.stopContainer(container.name, server.host);
+
+      // Step 3: Create new container
+      // Use createUserContainer logic via allocateDedicated/Shared logic
+      // But here we are manually calling Docker or reusing allocation logic?
+      // The original code used docker.runContainerWithVolumes.
+      // We should use freeTierContainer.createUserContainer to ensure PM2 setup!
+
+      const freeTierContainer = require('./freeTierContainer');
+      const containerResult = await freeTierContainer.createUserContainer(
+        user,
+        user.oracleAccountId, // Keep same server?
+        server,
+        newResources
+      );
+
+      if (!containerResult.success) {
+        // Rollback
+        await docker.startContainer(container.name, server.host);
+        await ssh.execCommand(`rm -rf ${backupPath}`);
+        ssh.dispose();
+        return { success: false, error: 'Failed to create new container' };
       }
-    });
 
-    logger.info('Container recreated successfully with data preservation', {
-      userId,
-      username: user.username,
-      oldContainer: container.name,
-      newContainer: newContainerName,
-      newResources
-    });
+      const newContainerName = containerResult.containerName;
 
-    return {
-      success: true,
-      method: 'recreate-with-backup',
-      container: {
-        name: newContainerName,
-        server: user.oracleAccountId,
-        resources: newResources,
-        url: `http://${server.host}:${port}`
-      },
-      message: 'Container recreated with data preservation'
-    };
+      // Step 4: Restore Data
+      logger.info('Restoring data via docker cp...');
+      await ssh.execCommand(`docker cp ${backupPath}/projects/. ${newContainerName}:/app/projects/`);
+      // Restore PM2 state is trickier, we need to put it in /root/.pm2
+      await ssh.execCommand(`docker cp ${backupPath}/pm2_state/. ${newContainerName}:/root/.pm2/`);
 
-  } catch (error) {
-    logger.error('Container recreation with data preservation failed:', error);
-    return { success: false, error: error.message };
+      // Cleanup backup
+      await ssh.execCommand(`rm -rf ${backupPath}`);
+
+      // Step 5: Resurrect PM2
+      logger.info('Resurrecting PM2 processes...');
+      await ssh.execCommand(`docker exec ${newContainerName} pm2 resurrect`);
+
+      ssh.dispose();
+
+      logger.info('Container recreated and data preserved', {
+        userId,
+        newContainer: newContainerName
+      });
+
+      return {
+        success: true,
+        container: {
+          name: newContainerName,
+          server: user.oracleAccountId,
+          resources: newResources,
+          url: `http://${server.host}:${containerResult.port}`
+        },
+        method: 'manual-copy-migration'
+      };
+
+    } catch (err) {
+      logger.error('Migration failed:', err);
+      if (ssh) ssh.dispose();
+      // Try to restart old container just in case
+      try { await docker.startContainer(container.name, server.host); } catch (e) { }
+      return { success: false, error: err.message };
+    }
+  } catch (outerError) {
+    logger.error('Container recreation outer failed:', outerError);
+    return { success: false, error: outerError.message };
   }
 };
 
@@ -786,21 +819,20 @@ const assignUserToServer = async (userId, planName) => {
       return { success: false, error: 'User not found' };
     }
 
-    // Allocate container for user
+    // Allocate container for user (throws error on failure)
     const allocation = await allocateContainer(user, plan);
 
-    if (allocation.success) {
-      return {
-        success: true,
-        serverId: user.oracleAccountId,
-        serverName: ORACLE_SERVERS[user.oracleAccountId]?.name,
-        containerType: user.containerType,
-        resources: user.resourceAllocation,
-        container: allocation.container
-      };
-    }
+    // If we get here, allocation succeeded
+    return {
+      success: true,
+      serverId: user.assignedServer || user.oracleAccountId,
+      serverName: ORACLE_SERVERS[user.assignedServer || user.oracleAccountId]?.name,
+      containerType: user.containerType,
+      resources: user.resourceAllocation,
+      containerName: allocation.containerName,
+      containerId: allocation.containerId
+    };
 
-    return allocation;
   } catch (error) {
     logger.error('User server assignment failed:', error);
     return { success: false, error: error.message };
@@ -893,8 +925,21 @@ const monitorUserResourceUsage = async (containerName, userId) => {
     return {
       success: false,
       error: error.message,
-      usage: { cpu: { usage: 0 }, memory: { usage: 0, percentage: 0 } }
+      usage: { cpu: { usage: 0 }, memory: { usage: 0, percentage: 0 }, storage: { usage: 0 } }
     };
+  }
+};
+
+// Check storage usage via DU
+const checkStorageUsage = async (containerName) => {
+  try {
+    // Check size of /app directory (where user data lives)
+    const result = await docker.execCommand(containerName, ['du', '-sk', '/app']);
+    const kbytes = parseInt(result.output.split('\t')[0]);
+    const mbytes = kbytes / 1024;
+    return mbytes; // MB
+  } catch (e) {
+    return 0;
   }
 };
 
@@ -963,6 +1008,13 @@ const startResourceMonitoring = (intervalMs = 60000) => {
           violations.push({ type: 'memory', current: usage.memory.usage, limit: resourceCaps.perUserCap.ram });
         }
 
+        // Check storage violation (Software Limit)
+        const storageUsedMB = await checkStorageUsage(containerInfo.container.name);
+        const storageLimitMB = resourceCaps.perUserCap.storage * 1024; // GB to MB
+        if (storageUsedMB > storageLimitMB) {
+          violations.push({ type: 'storage', current: storageUsedMB, limit: storageLimitMB });
+        }
+
         // Handle violations
         if (violations.length > 0) {
           logger.warn('Resource violation detected', { userId: user._id, violations });
@@ -972,6 +1024,13 @@ const startResourceMonitoring = (intervalMs = 60000) => {
               await throttleUserCPU(containerInfo.container.name, user._id, resourceCaps.perUserCap.cpu);
             } else if (violation.type === 'memory') {
               await reclaimUserMemory(containerInfo.container.name, user._id);
+            } else if (violation.type === 'storage') {
+              // Track storage violation
+              await trackStorageViolation(user._id, violation.current, violation.limit);
+
+              // Enforce storage limit by stopping container (Soft Limit Action)
+              logger.warn(`🛑 Stopping container ${containerInfo.container.name} due to storage violation (${violation.current.toFixed(2)}MB > ${violation.limit}MB)`);
+              await docker.execCommand(containerInfo.container.name, ['pm2', 'stop', 'all']);
             }
           }
         }
@@ -993,7 +1052,141 @@ const startResourceMonitoring = (intervalMs = 60000) => {
   }, intervalMs);
 };
 
+// Track storage violations and block deployment after 5 in 1 hour
+const trackStorageViolation = async (userId, storageUsed, limit) => {
+  try {
+    const User = require('../models/User');
+    const user = await User.findById(userId);
+
+    if (!user) return;
+
+    // Add new violation
+    user.storageViolations.push({
+      timestamp: new Date(),
+      storageUsed: storageUsed,
+      limit: limit,
+      action: 'stopped'
+    });
+
+    // Count violations in last hour
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const recentViolations = user.storageViolations.filter(
+      v => v.timestamp > oneHourAgo
+    );
+
+    logger.warn(`User ${user.email} has ${recentViolations.length} storage violations in the last hour`);
+
+    // Block deployment after 5 violations
+    if (recentViolations.length >= 5 && !user.deploymentBlocked) {
+      user.deploymentBlocked = true;
+      user.deploymentBlockedReason = `Storage limit (${limit}MB) exceeded ${recentViolations.length} times in 1 hour. Please clean up your files and contact support.`;
+      user.deploymentBlockedAt = new Date();
+
+      await user.save();
+
+      logger.error(`🚫 DEPLOYMENT BLOCKED for user ${user.email} due to repeated storage violations`);
+
+      // TODO: Send email notification
+      // const emailService = require('./emailService');
+      // await emailService.sendStorageViolationEmail(user);
+
+      return;
+    }
+
+    await user.save();
+  } catch (error) {
+    logger.error('Error tracking storage violation:', error);
+  }
+};
+
+// Get remote system stats (Host CPU, RAM, Storage)
+const getRemoteSystemStats = async (serverKey) => {
+  try {
+    const server = ORACLE_SERVERS[serverKey];
+    if (!server) return null;
+
+    const { NodeSSH } = require('node-ssh');
+    const fs = require('fs');
+    const ssh = new NodeSSH();
+
+    // Get SSH key
+    const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
+      : serverKey === 'EC3' ? process.env.SSH_EC3_KEY
+        : process.env.SSH_EC3_KEY;
+
+    // Connect
+    await ssh.connect({
+      host: server.host,
+      username: 'ubuntu',
+      privateKey: fs.readFileSync(keyPath, 'utf8')
+    });
+
+    // 1. Get Memory Usage (free -m)
+    const memResult = await ssh.execCommand("free -m");
+    // Output:
+    //               total        used        free      shared  buff/cache   available
+    // Mem:          23925        1135       15494           1        7295       22453
+    const memLines = memResult.stdout.split('\n');
+    const memParts = memLines[1].replace(/\s+/g, ' ').split(' ');
+    const totalMem = parseInt(memParts[1]);
+    const usedMem = parseInt(memParts[2]);
+    const memPercent = (usedMem / totalMem) * 100;
+
+    // 2. Get Disk Usage (df -h /)
+    const diskResult = await ssh.execCommand("df -h /");
+    // Output:
+    // Filesystem      Size  Used Avail Use% Mounted on
+    // /dev/sda1        45G   12G   33G  26% /
+    const diskLines = diskResult.stdout.split('\n');
+    const diskParts = diskLines[1].replace(/\s+/g, ' ').split(' ');
+    const totalDisk = diskParts[1];
+    const usedDisk = diskParts[2];
+    const diskPercent = parseInt(diskParts[4].replace('%', ''));
+
+    // 3. Get CPU Load (top -bn1)
+    // Grep 'Cpu(s)' line: %Cpu(s):  0.5 us,  0.2 sy,  0.0 ni, 99.3 id...
+    const cpuResult = await ssh.execCommand("top -bn1 | grep 'Cpu(s)'");
+    // %Cpu(s):  0.3 us,  0.3 sy,  0.0 ni, 99.3 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st
+    const cpuOutput = cpuResult.stdout;
+    // Calculate used = 100 - idle
+    const idleStr = cpuOutput.split('id,')[0].split(',').pop(); // " 99.3 "
+    const idle = parseFloat(idleStr);
+    const cpuPercent = 100 - idle;
+
+    // 4. Uptime
+    const uptimeResult = await ssh.execCommand("uptime -p");
+    const uptime = uptimeResult.stdout;
+
+    ssh.dispose();
+
+    return {
+      success: true,
+      server: serverKey,
+      cpu: {
+        percent: cpuPercent.toFixed(1),
+        cores: server.totalCPU
+      },
+      memory: {
+        total: totalMem, // MB
+        used: usedMem,   // MB
+        percent: memPercent.toFixed(1)
+      },
+      disk: {
+        total: totalDisk,
+        used: usedDisk,
+        percent: diskPercent
+      },
+      uptime: uptime
+    };
+
+  } catch (error) {
+    logger.error('Error getting remote system stats:', error);
+    return null;
+  }
+};
+
 module.exports = {
+  getRemoteSystemStats,
   ORACLE_SERVERS,
   SHARED_RESOURCE_CAPS,
   getServerUtilization,

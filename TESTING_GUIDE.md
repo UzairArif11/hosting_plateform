@@ -1,563 +1,514 @@
-# 🧪 TESTING GUIDE - Vercel Clone Platform
+# 🧪 TESTING GUIDE - SSH Container Logic Verification
 
-Complete guide for testing all backend functionality and using the Postman collection.
-
----
-
-## 📋 TABLE OF CONTENTS
-
-1. [Prerequisites](#prerequisites)
-2. [Backend Testing](#backend-testing)
-3. [Postman Collection Usage](#postman-collection-usage)
-4. [Manual Testing Steps](#manual-testing-steps)
-5. [Automated Tests](#automated-tests)
-6. [Common Issues](#common-issues)
+**Date:** 2025-12-19  
+**Purpose:** Test ONE container + PM2 architecture via SSH
 
 ---
 
-## 🔧 PREREQUISITES
+## 📋 **PRE-REQUISITES:**
 
-### **Required Services**
+1. ✅ Backend server running
+2. ✅ SSH access to EC2/EC3 servers
+3. ✅ Docker installed on servers
+4. ✅ Test user account created
 
+---
+
+## 🔧 **TEST 1: Verify Container Creation on Signup**
+
+### **Step 1: Create Test User**
+
+**Via API or Frontend:**
 ```bash
-# 1. MongoDB
-docker run -d -p 27017:27017 --name mongodb mongo
+# Signup a new user
+# This should trigger container creation
+```
 
-# 2. Redis
-docker run -d -p 6379:6379 --name redis redis
+**Or via MongoDB:**
+```bash
+# Connect to MongoDB
+mongo
 
-# 3. Docker (for builds)
-# Make sure Docker is running
+# Check user was created
+db.users.findOne({ email: "test@example.com" })
+
+# Should have:
+# - assignedServer: "EC2" or "EC3"
+# - containerName: "EC2-user-testuser-1234567890"
+# - containerId: "abc123..."
+# - resourceAllocation: { cpu: 0.5, ram: 1, ... }
+```
+
+---
+
+### **Step 2: SSH to Server and Verify Container**
+
+**SSH to EC2/EC3:**
+```bash
+# SSH to server (replace with your server IP)
+ssh -i /path/to/key.pem ubuntu@<EC2_IP>
+
+# Or for EC3
+ssh -i /path/to/key.pem ubuntu@<EC3_IP>
+```
+
+**List Docker Containers:**
+```bash
+# List all running containers
 docker ps
+
+# Expected output:
+# CONTAINER ID   IMAGE            COMMAND                  CREATED          STATUS          PORTS                    NAMES
+# abc123def456   node:18-alpine   "sh -c 'apk add --n…"   2 minutes ago    Up 2 minutes    0.0.0.0:3000->80/tcp     EC2-user-testuser-1234567890
+
+# Verify container name matches database
 ```
 
-### **Environment Setup**
-
+**Check Container Details:**
 ```bash
-# Backend .env
-cd backend
-cp .env.example .env
-# Edit .env with your credentials
+# Get container name from database (e.g., EC2-user-testuser-1234567890)
+CONTAINER_NAME="EC2-user-testuser-1234567890"
+
+# Inspect container
+docker inspect $CONTAINER_NAME
+
+# Check:
+# - Memory limit: Should be 1GB (1073741824 bytes)
+# - CPU shares: Should be 512 (0.5 * 1024)
+# - Restart policy: "unless-stopped"
+# - Status: "running"
 ```
 
-**Required credentials**:
-- ✅ `GITHUB_API_TOKEN` - Your GitHub personal access token
-- ✅ `GITHUB_CLIENT_ID` - GitHub OAuth app client ID
-- ✅ `GITHUB_CLIENT_SECRET` - GitHub OAuth app secret
-- ⚠️ `GOOGLE_CLIENT_ID` - (Optional) Google OAuth
-- ⚠️ `GOOGLE_CLIENT_SECRET` - (Optional) Google OAuth
-
----
-
-## 🧪 BACKEND TESTING
-
-### **1. Verify Backend Setup**
-
+**Verify PM2 is Installed:**
 ```bash
-cd backend
+# Execute command inside container
+docker exec $CONTAINER_NAME pm2 --version
 
-# Install dependencies
-npm install
+# Expected output:
+# 5.x.x (or latest PM2 version)
 
-# Run verification script
-node verify-backend.js
+# List PM2 processes
+docker exec $CONTAINER_NAME pm2 list
+
+# Expected output:
+# ┌────┬────────────┬─────────────┬─────────┬─────────┬──────────┬────────┬──────┬───────────┬──────────┬──────────┬──────────┐
+# │ id │ name       │ namespace   │ version │ mode    │ pid      │ uptime │ ↺    │ status    │ cpu      │ mem      │ user     │
+# ├────┼────────────┼─────────────┼─────────┼─────────┼──────────┼────────┼──────┼───────────┼──────────┼──────────┼──────────┤
+# │ 0  │ keepalive  │ default     │ N/A     │ fork    │ 123      │ 2m     │ 0    │ online    │ 0%       │ 10.0mb   │ root     │
+# └────┴────────────┴─────────────┴─────────┴─────────┴──────────┴────────┴──────┴───────────┴──────────┴──────────┴──────────┘
+
+# Should show "keepalive" process running
 ```
 
-**Expected output**:
-```
-✅ All files exist
-✅ All imports valid
-✅ All dependencies installed
-✅ No syntax errors
-✅ Backend is ready!
-```
-
-### **2. Start Backend**
-
+**Verify Container File Structure:**
 ```bash
-# Development mode
-npm run dev
+# Check if /app directory exists
+docker exec $CONTAINER_NAME ls -la /app
 
-# Production mode
-npm start
-```
+# Expected output:
+# total 8
+# drwxr-xr-x    2 root     root          4096 Dec 19 10:00 .
+# drwxr-xr-x    1 root     root          4096 Dec 19 10:00 ..
 
-**Expected output**:
-```
-✅ MongoDB connected
-✅ Redis connected
-✅ Server running on port 5000
-✅ Socket.IO initialized
-```
+# Check if /app/projects directory will be created
+docker exec $CONTAINER_NAME mkdir -p /app/projects
+docker exec $CONTAINER_NAME ls -la /app/projects
 
-### **3. Test Health Endpoint**
-
-```bash
-curl http://localhost:5000/health
-```
-
-**Expected response**:
-```json
-{
-  "status": "ok",
-  "timestamp": "2025-11-21T10:00:00.000Z",
-  "services": {
-    "mongodb": "connected",
-    "redis": "connected"
-  }
-}
+# Should be empty (no projects yet)
 ```
 
 ---
 
-## 📮 POSTMAN COLLECTION USAGE
+### **✅ TEST 1 VERIFICATION:**
 
-### **1. Import Collection**
+- [ ] Container created with correct name
+- [ ] Container running with correct resources (1GB RAM, 0.5 CPU)
+- [ ] PM2 installed and working
+- [ ] PM2 keepalive process running
+- [ ] /app directory exists
+- [ ] Container restart policy set
 
-1. Open Postman
-2. Click "Import"
-3. Select `Vercel_Clone_Platform.postman_collection.json`
-4. Collection imported! ✅
+---
 
-### **2. Setup Environment**
+## 🔧 **TEST 2: Verify Project Deployment as PM2 Process**
 
-Create a new environment with these variables:
+### **Step 1: Create Test Project**
 
-```
-base_url = http://localhost:5000
-jwt_token = (will be set automatically after login)
-project_id = (will be set automatically after creating project)
-deployment_id = (will be set automatically after deployment)
-```
-
-### **3. Authentication Flow**
-
-**Step 1: Login via Browser**
-
-Since OAuth requires browser interaction, you need to:
-
-1. Open browser
-2. Go to: `http://localhost:5000/api/auth/github`
-3. Authorize with GitHub
-4. You'll be redirected to frontend with cookies set
-
-**Step 2: Get JWT Token**
-
-After OAuth login, open browser console and run:
-
-```javascript
-// Get cookies
-document.cookie
+**Via API or Frontend:**
+```bash
+# Create a new project
+# This should deploy to existing container as PM2 process
 ```
 
-Or use the "Get Current User" endpoint in Postman (cookies will be sent automatically).
+**Check Database:**
+```bash
+# Connect to MongoDB
+mongo
 
-### **4. Testing Workflow**
+# Find project
+db.projects.findOne({ name: "My Test Project" })
 
-**Complete Test Flow**:
-
-```
-1. Authentication
-   └─ GET /api/auth/me (verify login)
-
-2. Create Project
-   └─ POST /api/projects
-   └─ (project_id auto-saved)
-
-3. Get Project
-   └─ GET /api/projects/:id
-
-4. Create Deployment
-   └─ POST /api/deployments
-   └─ (deployment_id auto-saved)
-
-5. Watch Deployment
-   └─ GET /api/deployments/:id
-   └─ GET /api/deployments/:id/logs
-
-6. Check Billing
-   └─ GET /api/billing/plans
-
-7. Admin (if admin user)
-   └─ GET /api/admin/stats
-   └─ GET /api/admin/servers
+# Should have:
+# - containerName: "EC2-user-testuser-1234567890" (same as user)
+# - port: 3001 (or other unique port)
+# - server: "EC2"
+# - processName: "project_id_here"
+# - status: "running"
 ```
 
 ---
 
-## 🔍 MANUAL TESTING STEPS
+### **Step 2: Verify PM2 Process in Container**
 
-### **Test 1: Authentication**
-
+**SSH to Server:**
 ```bash
-# 1. GitHub OAuth (Browser)
-Open: http://localhost:5000/api/auth/github
+ssh -i /path/to/key.pem ubuntu@<EC2_IP>
 
-# 2. Get current user
-curl http://localhost:5000/api/auth/me \
-  -H "Cookie: connect.sid=YOUR_SESSION_COOKIE"
+# Get container name
+CONTAINER_NAME="EC2-user-testuser-1234567890"
 
-# Expected: User object with GitHub info
+# List PM2 processes
+docker exec $CONTAINER_NAME pm2 list
+
+# Expected output:
+# ┌────┬──────────────────┬─────────────┬─────────┬─────────┬──────────┬────────┬──────┬───────────┬──────────┬──────────┐
+# │ id │ name             │ namespace   │ version │ mode    │ pid      │ uptime │ ↺    │ status    │ cpu      │ mem      │
+# ├────┼──────────────────┼─────────────┼─────────┼─────────┼──────────┼────────┼──────┼───────────┼──────────┼──────────┤
+# │ 0  │ keepalive        │ default     │ N/A     │ fork    │ 123      │ 10m    │ 0    │ online    │ 0%       │ 10.0mb   │
+# │ 1  │ 67890abcdef123   │ default     │ 1.0.0   │ fork    │ 456      │ 2m     │ 0    │ online    │ 5%       │ 50.0mb   │
+# └────┴──────────────────┴─────────────┴─────────┴─────────┴──────────┴────────┴──────┴───────────┴──────────┴──────────┘
+
+# Should show project process (ID from database)
 ```
 
-### **Test 2: Create Project**
-
+**Check Project Files:**
 ```bash
-curl -X POST http://localhost:5000/api/projects \
-  -H "Content-Type: application/json" \
-  -H "Cookie: connect.sid=YOUR_SESSION_COOKIE" \
-  -d '{
-    "name": "test-project",
-    "repository": {
-      "url": "https://github.com/username/repo",
-      "owner": "username",
-      "name": "repo",
-      "branch": "main"
-    },
-    "framework": "nextjs"
-  }'
+# Get project ID from database
+PROJECT_ID="67890abcdef123"
 
-# Expected: 201 Created with project object
+# List project files
+docker exec $CONTAINER_NAME ls -la /app/projects/$PROJECT_ID
+
+# Expected output:
+# total 100
+# drwxr-xr-x    5 root     root          4096 Dec 19 10:05 .
+# drwxr-xr-x    3 root     root          4096 Dec 19 10:05 ..
+# -rw-r--r--    1 root     root          1234 Dec 19 10:05 package.json
+# drwxr-xr-x  100 root     root          4096 Dec 19 10:05 node_modules
+# -rw-r--r--    1 root     root          5678 Dec 19 10:05 server.js
+# ... (other project files)
+
+# Files should be present
 ```
 
-### **Test 3: Create Deployment**
-
+**Check Process is Listening on Port:**
 ```bash
-curl -X POST http://localhost:5000/api/deployments \
-  -H "Content-Type: application/json" \
-  -H "Cookie: connect.sid=YOUR_SESSION_COOKIE" \
-  -d '{
-    "projectId": "PROJECT_ID_HERE",
-    "branch": "main"
-  }'
+# Get port from database (e.g., 3001)
+PORT=3001
 
-# Expected: 201 Created with deployment object
-# Build will start in background
+# Check if port is listening inside container
+docker exec $CONTAINER_NAME netstat -tlnp | grep $PORT
+
+# Expected output:
+# tcp        0      0 0.0.0.0:3001            0.0.0.0:*               LISTEN      456/node
+
+# Or use ss command
+docker exec $CONTAINER_NAME ss -tlnp | grep $PORT
 ```
 
-### **Test 4: Watch Deployment Logs**
-
+**Test Project Accessibility:**
 ```bash
-# Get deployment status
-curl http://localhost:5000/api/deployments/DEPLOYMENT_ID \
-  -H "Cookie: connect.sid=YOUR_SESSION_COOKIE"
+# From host machine, test if project responds
+curl http://localhost:$PORT
 
-# Get deployment logs
-curl http://localhost:5000/api/deployments/DEPLOYMENT_ID/logs \
-  -H "Cookie: connect.sid=YOUR_SESSION_COOKIE"
-
-# Expected: Array of log lines
+# Should return project response
 ```
 
-### **Test 5: Billing**
-
+**Check PM2 Logs:**
 ```bash
-# List plans
-curl http://localhost:5000/api/billing/plans \
-  -H "Cookie: connect.sid=YOUR_SESSION_COOKIE"
+# View PM2 logs for project
+docker exec $CONTAINER_NAME pm2 logs $PROJECT_ID --lines 50
 
-# Expected: Array of plans (Free, Starter, Pro, Enterprise)
-```
-
-### **Test 6: Admin (Admin users only)**
-
-```bash
-# Get platform stats
-curl http://localhost:5000/api/admin/stats \
-  -H "Cookie: connect.sid=YOUR_SESSION_COOKIE"
-
-# Get server status
-curl http://localhost:5000/api/admin/servers \
-  -H "Cookie: connect.sid=YOUR_SESSION_COOKIE"
-
-# Expected: Server info for EC1, EC2, EC3
+# Should show project startup logs
 ```
 
 ---
 
-## 🤖 AUTOMATED TESTS
+### **✅ TEST 2 VERIFICATION:**
 
-### **Run All Tests**
+- [ ] PM2 process created with project ID as name
+- [ ] Project files copied to /app/projects/{projectId}/
+- [ ] node_modules installed
+- [ ] Process running and listening on port
+- [ ] PM2 shows process as "online"
+- [ ] Project accessible via port
 
+---
+
+## 🔧 **TEST 3: Verify Multiple Projects in Same Container**
+
+### **Step 1: Create Second Project**
+
+**Via API or Frontend:**
 ```bash
-cd backend
-npm test
+# Create another project for same user
 ```
 
-### **Test Coverage**
-
+**Check Database:**
 ```bash
-npm run test:coverage
-```
-
-### **Test Specific Module**
-
-```bash
-# Test auth
-npm test -- auth
-
-# Test projects
-npm test -- projects
-
-# Test deployments
-npm test -- deployments
+# Both projects should have:
+# - Same containerName
+# - Different ports (3001, 3002)
+# - Different processNames
 ```
 
 ---
 
-## 🔥 REAL DEPLOYMENT TEST
+### **Step 2: Verify Both PM2 Processes**
 
-### **Test Complete Deployment Flow**
-
-**Prerequisites**:
-- Have a real GitHub repository
-- Repository should have a `package.json`
-- Framework should be supported (Next.js, React, etc.)
-
-**Steps**:
-
-1. **Create Project** (via Postman or curl)
-   ```json
-   {
-     "name": "my-nextjs-app",
-     "repository": {
-       "url": "https://github.com/yourusername/your-nextjs-repo",
-       "owner": "yourusername",
-       "name": "your-nextjs-repo",
-       "branch": "main"
-     }
-   }
-   ```
-
-2. **Trigger Deployment**
-   ```json
-   {
-     "projectId": "PROJECT_ID_FROM_STEP_1",
-     "branch": "main"
-   }
-   ```
-
-3. **Watch Build Progress**
-   - Check deployment status every 5 seconds
-   - Watch logs in real-time
-   - Wait for status: "success" or "failed"
-
-4. **Verify Deployment**
-   - If successful, deployment URL will be provided
-   - Visit URL to see your deployed app
-   - Check Docker containers: `docker ps`
-
----
-
-## 📊 TESTING CHECKLIST
-
-### **Authentication** ✅
-- [ ] GitHub OAuth login works
-- [ ] Google OAuth login works (if configured)
-- [ ] JWT tokens are issued
-- [ ] Session cookies are set
-- [ ] Logout works
-- [ ] Token refresh works
-
-### **Projects** ✅
-- [ ] Can create project
-- [ ] Can list projects
-- [ ] Can get project details
-- [ ] Can update project
-- [ ] Can delete project
-- [ ] Framework detection works
-
-### **Deployments** ✅
-- [ ] Can create deployment
-- [ ] Build queue processes jobs
-- [ ] Repository cloning works
-- [ ] Dependency installation works
-- [ ] Build execution works
-- [ ] Docker image creation works
-- [ ] Container deployment works
-- [ ] Logs are captured
-- [ ] Status updates work
-- [ ] Can cancel deployment
-
-### **Billing** ✅
-- [ ] Can list plans
-- [ ] Can subscribe to plan
-- [ ] Payment processing works
-- [ ] Resource allocation updates
-- [ ] Trial period works
-
-### **Admin** ✅
-- [ ] Can view platform stats
-- [ ] Can view all users
-- [ ] Can view server status
-- [ ] Can allocate resources
-- [ ] Can track payments
-
-### **Real-time** ✅
-- [ ] Socket.IO connects
-- [ ] Deployment logs stream
-- [ ] Status updates broadcast
-- [ ] Notifications work
-
----
-
-## 🐛 COMMON ISSUES
-
-### **Issue 1: MongoDB Connection Failed**
-
-**Error**: `MongoNetworkError: connect ECONNREFUSED`
-
-**Solution**:
+**SSH to Server:**
 ```bash
-# Start MongoDB
-docker run -d -p 27017:27017 --name mongodb mongo
+ssh -i /path/to/key.pem ubuntu@<EC2_IP>
 
-# Or if using local MongoDB
-sudo systemctl start mongod
+CONTAINER_NAME="EC2-user-testuser-1234567890"
+
+# List PM2 processes
+docker exec $CONTAINER_NAME pm2 list
+
+# Expected output:
+# ┌────┬──────────────────┬─────────────┬─────────┬─────────┬──────────┬────────┬──────┬───────────┬──────────┬──────────┐
+# │ id │ name             │ namespace   │ version │ mode    │ pid      │ uptime │ ↺    │ status    │ cpu      │ mem      │
+# ├────┼──────────────────┼─────────────┼─────────┼─────────┼──────────┼────────┼──────┼───────────┼──────────┼──────────┤
+# │ 0  │ keepalive        │ default     │ N/A     │ fork    │ 123      │ 20m    │ 0    │ online    │ 0%       │ 10.0mb   │
+# │ 1  │ project1_id      │ default     │ 1.0.0   │ fork    │ 456      │ 12m    │ 0    │ online    │ 5%       │ 50.0mb   │
+# │ 2  │ project2_id      │ default     │ 1.0.0   │ fork    │ 789      │ 2m     │ 0    │ online    │ 3%       │ 40.0mb   │
+# └────┴──────────────────┴─────────────┴─────────┴─────────┴──────────┴────────┴──────┴───────────┴──────────┴──────────┘
+
+# Should show 3 processes: keepalive + 2 projects
 ```
 
-### **Issue 2: Redis Connection Failed**
-
-**Error**: `Error: connect ECONNREFUSED 127.0.0.1:6379`
-
-**Solution**:
+**Check Resource Usage:**
 ```bash
-# Start Redis
-docker run -d -p 6379:6379 --name redis redis
+# Check container resource usage
+docker stats $CONTAINER_NAME --no-stream
 
-# Or if using local Redis
-sudo systemctl start redis
+# Expected output:
+# CONTAINER ID   NAME                              CPU %     MEM USAGE / LIMIT     MEM %     NET I/O           BLOCK I/O
+# abc123def456   EC2-user-testuser-1234567890     8.5%      100MiB / 1GiB         9.77%     1.2kB / 0B        0B / 0B
+
+# Memory should be under 1GB limit
+# CPU should be under 50% (0.5 CPU)
 ```
 
-### **Issue 3: GitHub API Token Invalid**
-
-**Error**: `401 Unauthorized`
-
-**Solution**:
+**Verify Both Projects Accessible:**
 ```bash
-# Test your token
-curl -H "Authorization: Bearer YOUR_TOKEN" \
-  https://api.github.com/user
+# Test project 1
+curl http://localhost:3001
 
-# If fails, regenerate token at:
-# https://github.com/settings/tokens
-```
+# Test project 2
+curl http://localhost:3002
 
-### **Issue 4: Docker Permission Denied**
-
-**Error**: `Error: connect EACCES /var/run/docker.sock`
-
-**Solution**:
-```bash
-# Add user to docker group
-sudo usermod -aG docker $USER
-
-# Restart session
-newgrp docker
-```
-
-### **Issue 5: Build Fails**
-
-**Error**: `Build failed: npm install failed`
-
-**Solution**:
-- Check repository has `package.json`
-- Check GitHub token has repo access
-- Check Docker is running
-- Check build logs for specific error
-
----
-
-## 📈 PERFORMANCE TESTING
-
-### **Load Testing**
-
-```bash
-# Install Apache Bench
-sudo apt-get install apache2-utils
-
-# Test API endpoint
-ab -n 1000 -c 10 http://localhost:5000/api/auth/me
-
-# Expected: < 100ms average response time
-```
-
-### **Stress Testing**
-
-```bash
-# Create multiple deployments simultaneously
-for i in {1..10}; do
-  curl -X POST http://localhost:5000/api/deployments \
-    -H "Content-Type: application/json" \
-    -d '{"projectId":"PROJECT_ID","branch":"main"}' &
-done
-
-# Monitor queue
-redis-cli LLEN bull:build-queue:wait
+# Both should respond
 ```
 
 ---
 
-## ✅ SUCCESS CRITERIA
+### **✅ TEST 3 VERIFICATION:**
 
-### **Backend is working if**:
-- ✅ All services connect (MongoDB, Redis, Docker)
-- ✅ Authentication works (GitHub/Google OAuth)
-- ✅ Projects can be created
-- ✅ Deployments execute successfully
-- ✅ Real-time logs stream via Socket.IO
-- ✅ Docker containers are created
-- ✅ Admin endpoints return data
-- ✅ No errors in console
-
-### **Production ready if**:
-- ✅ All tests pass
-- ✅ No memory leaks
-- ✅ Response times < 200ms
-- ✅ Error rate < 1%
-- ✅ Uptime > 99%
-- ✅ Security headers present
-- ✅ Rate limiting works
+- [ ] Both projects in same container
+- [ ] Both PM2 processes running
+- [ ] Different ports (3001, 3002)
+- [ ] Total memory under 1GB
+- [ ] Both projects accessible
+- [ ] Resources shared dynamically
 
 ---
 
-## 🎯 NEXT STEPS
+## 🔧 **TEST 4: Verify Project Deletion**
 
-After successful testing:
+### **Step 1: Delete Project**
 
-1. **Deploy to Staging**
-   - Setup Oracle Cloud servers
-   - Deploy backend to EC1
-   - Deploy frontend to Vercel/Netlify
-
-2. **Monitor**
-   - Setup logging (Winston)
-   - Setup monitoring (PM2)
-   - Setup alerts
-
-3. **Optimize**
-   - Add caching
-   - Optimize queries
-   - Add CDN
-
-4. **Scale**
-   - Add more servers
-   - Setup load balancer
-   - Add database replication
+**Via API or Frontend:**
+```bash
+# Delete one project
+```
 
 ---
 
-## 📞 SUPPORT
+### **Step 2: Verify PM2 Process Removed**
 
-If you encounter issues:
+**SSH to Server:**
+```bash
+ssh -i /path/to/key.pem ubuntu@<EC2_IP>
 
-1. Check logs: `pm2 logs` or `docker logs`
-2. Check this guide's Common Issues section
-3. Check GitHub Issues
-4. Contact support
+CONTAINER_NAME="EC2-user-testuser-1234567890"
+
+# List PM2 processes
+docker exec $CONTAINER_NAME pm2 list
+
+# Expected output:
+# ┌────┬──────────────────┬─────────────┬─────────┬─────────┬──────────┬────────┬──────┬───────────┬──────────┬──────────┐
+# │ id │ name             │ namespace   │ version │ mode    │ pid      │ uptime │ ↺    │ status    │ cpu      │ mem      │
+# ├────┼──────────────────┼─────────────┼─────────┼─────────┼──────────┼────────┼──────┼───────────┼──────────┼──────────┤
+# │ 0  │ keepalive        │ default     │ N/A     │ fork    │ 123      │ 30m    │ 0    │ online    │ 0%       │ 10.0mb   │
+# │ 1  │ project2_id      │ default     │ 1.0.0   │ fork    │ 789      │ 12m    │ 0    │ online    │ 3%       │ 40.0mb   │
+# └────┴──────────────────┴─────────────┴─────────┴─────────┴──────────┴────────┴──────┴───────────┴──────────┴──────────┘
+
+# Deleted project should be gone
+```
+
+**Verify Files Removed:**
+```bash
+# Check if project directory removed
+DELETED_PROJECT_ID="project1_id"
+
+docker exec $CONTAINER_NAME ls -la /app/projects/$DELETED_PROJECT_ID
+
+# Expected output:
+# ls: /app/projects/project1_id: No such file or directory
+
+# Files should be deleted
+```
 
 ---
 
-**Happy Testing! 🚀**
+### **✅ TEST 4 VERIFICATION:**
 
-**All 67 endpoints are ready to test!**
+- [ ] PM2 process stopped and deleted
+- [ ] Project files removed
+- [ ] Other projects still running
+- [ ] Container still running
+
+---
+
+## 🔧 **TEST 5: Verify IP Restrictions**
+
+### **Step 1: Create Multiple Free Accounts from Same IP**
+
+**Create 3 accounts:**
+```bash
+# Account 1: test1@example.com
+# Account 2: test2@example.com
+# Account 3: test3@example.com
+# All from same IP
+```
+
+**Check Database:**
+```bash
+mongo
+
+# Count free accounts from IP
+db.users.count({ signupIP: "192.168.1.1", planType: "free" })
+
+# Should return: 3
+```
+
+---
+
+### **Step 2: Try to Create Project with 4th Account**
+
+**Create 4th account:**
+```bash
+# Account 4: test4@example.com (same IP)
+```
+
+**Try to create project:**
+```bash
+# Should be BLOCKED
+# Error: "You have already used free resources multiple times..."
+```
+
+**Check Logs:**
+```bash
+# Backend logs should show:
+# "Project creation blocked - IP free account limit"
+```
+
+---
+
+### **✅ TEST 5 VERIFICATION:**
+
+- [ ] First 3 accounts can create projects
+- [ ] 4th account blocked from creating projects
+- [ ] Error message shown
+- [ ] Upgrade prompt displayed
+
+---
+
+## 📊 **COMPLETE TEST CHECKLIST:**
+
+### **Container Creation:**
+- [ ] Container created on signup
+- [ ] Correct name format
+- [ ] PM2 installed
+- [ ] Resource limits set
+- [ ] Restart policy configured
+
+### **Project Deployment:**
+- [ ] PM2 process created
+- [ ] Files copied to container
+- [ ] Dependencies installed
+- [ ] Process listening on port
+- [ ] Database updated
+
+### **Multiple Projects:**
+- [ ] Multiple PM2 processes in same container
+- [ ] Different ports
+- [ ] Resources shared
+- [ ] All accessible
+
+### **Project Deletion:**
+- [ ] PM2 process stopped
+- [ ] PM2 process deleted
+- [ ] Files removed
+- [ ] Database cleaned
+
+### **IP Restrictions:**
+- [ ] Counts free accounts correctly
+- [ ] Blocks after limit
+- [ ] Shows upgrade message
+- [ ] Paid accounts exempt
+
+---
+
+## 🎯 **QUICK TEST COMMANDS:**
+
+```bash
+# 1. SSH to server
+ssh -i /path/to/key.pem ubuntu@<SERVER_IP>
+
+# 2. List containers
+docker ps
+
+# 3. Get container name (from database or docker ps)
+CONTAINER_NAME="EC2-user-testuser-1234567890"
+
+# 4. Check PM2 processes
+docker exec $CONTAINER_NAME pm2 list
+
+# 5. Check container resources
+docker stats $CONTAINER_NAME --no-stream
+
+# 6. Check project files
+docker exec $CONTAINER_NAME ls -la /app/projects/
+
+# 7. Check PM2 logs
+docker exec $CONTAINER_NAME pm2 logs --lines 50
+
+# 8. Test project accessibility
+curl http://localhost:3001
+```
+
+---
+
+## ✅ **SUCCESS CRITERIA:**
+
+**All tests pass:** ✅  
+**Container logic works:** ✅  
+**PM2 processes work:** ✅  
+**Resource sharing works:** ✅  
+**IP restrictions work:** ✅  
+
+---
+
+**READY TO TEST!** 🧪🚀

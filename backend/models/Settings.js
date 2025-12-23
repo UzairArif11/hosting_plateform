@@ -68,6 +68,32 @@ const settingsSchema = new mongoose.Schema({
         }
     },
 
+    // IP-based Container/Resource Restrictions
+    ipRestrictions: {
+        enabled: {
+            type: Boolean,
+            default: true,
+            description: 'Enable IP-based container creation limits'
+        },
+        maxFreeAccountsPerIP: {
+            type: Number,
+            default: 3,
+            min: 1,
+            max: 10,
+            description: 'Maximum number of free containers/projects allowed per IP address'
+        },
+        blockDeletedEmailReuse: {
+            type: Boolean,
+            default: true,
+            description: 'Prevent deleted email addresses from being reused for account creation'
+        },
+        exemptPaidAccounts: {
+            type: Boolean,
+            default: true,
+            description: 'Paid accounts can create unlimited containers (not counted towards IP limit)'
+        }
+    },
+
     // Metadata
     updatedBy: {
         type: mongoose.Schema.Types.ObjectId,

@@ -159,6 +159,20 @@ const projectSchema = new mongoose.Schema({
     default: true
   },
 
+  // Deployment References
+  latestDeployment: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Deployment'
+  },
+  productionDeployment: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Deployment'
+  },
+  deploymentCount: {
+    type: Number,
+    default: 0
+  },
+
   // Resource usage tracking
   currentUsage: {
     storage: {
@@ -206,6 +220,10 @@ const projectSchema = new mongoose.Schema({
   latestDeployment: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Deployment',
+    default: null
+  },
+  deploymentUrl: {
+    type: String,
     default: null
   },
   productionDeployment: {
@@ -291,9 +309,9 @@ projectSchema.index({ owner: 1, createdAt: -1 });
 
 // Virtual for default domain
 projectSchema.virtual('defaultDomain').get(function () {
-  const primaryDomain = this.domains.find(d => d.isPrimary);
-  if (primaryDomain) {
-    return primaryDomain.domain;
+  if (this.domains && Array.isArray(this.domains)) {
+    const primaryDomain = this.domains.find(d => d.isPrimary);
+    if (primaryDomain) return primaryDomain.domain;
   }
 
   // Return the generated subdomain

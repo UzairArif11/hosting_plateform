@@ -1,219 +1,61 @@
-# 🧪 QUICK VERIFICATION GUIDE
+# 🧹 Cleanup & Verification Guide
 
-## ✅ **BACKEND STARTED SUCCESSFULLY!**
-
-The error has been fixed. The backend is now running.
-
----
-
-## 🔍 **VERIFICATION STEPS:**
-
-### **1. Check Backend is Running:**
+## 1. Clean Your EC3 Server
+Run these commands on your EC3 terminal to wipe all old containers:
 ```bash
-# Backend should be running on port 5000
-curl http://localhost:5000/api/health
+# Stop all containers
+docker stop $(docker ps -aq)
 
-# Or check in browser:
-# http://localhost:5000
+# Remove all containers
+docker rm $(docker ps -aq)
+
+# Deep clean (images, cache, volumes)
+docker system prune -a --volumes -f
 ```
 
----
+## 2. Test The New Flow
+1. **Refresh your platform UI** (The DB is already reset).
+2. Create a new Project and **Deploy**.
+   - This will trigger the new "Remote Build" process.
+   - It will create a new Container with the new limits.
 
-### **2. Test Resource Management API:**
+## 3. Verify Limits on EC3
+Once the deployment is active, run these commands on EC3 to prove the limits are real.
 
-#### **Get Server Stats:**
+### Check Container Name
 ```bash
-curl http://localhost:5000/api/admin/servers/stats \
-  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+docker ps
+# Note the name (e.g., EC3-user-...)
 ```
 
-#### **Get User Resources:**
+### 🧠 Verify Memory Limit (Bytes)
 ```bash
-curl http://localhost:5000/api/admin/users/USER_ID/resources \
-  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+docker inspect <your-container-name> --format 'Memory: {{.HostConfig.Memory}}'
+# Should equal your plan limit (e.g. 1GB = 1073741824)
 ```
 
----
-
-### **3. Test Bulk Plan Update:**
-
+### ⚡ Verify CPU Limit (Hard Limit)
 ```bash
-# Update all Pro users
-curl -X POST http://localhost:5000/api/admin/plans/PLAN_ID/bulk-update \
-  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "actualResources": {
-      "cpu": 1.5,
-      "ram": 3072
-    },
-    "updateType": "backend"
-  }'
+docker inspect <your-container-name> --format 'NanoCpus: {{.HostConfig.NanoCpus}}'
+# Should equal plan limit * 1e9 (e.g. 0.5 cores = 500000000)
 ```
 
----
-
-### **4. Run Comprehensive Tests:**
-
+### 💾 Verify Storage Limit (2GB)
+1. Check Configuration:
 ```bash
-cd backend
-node test-resource-management.js
+docker inspect <your-container-name> --format 'StorageOpt: {{json .HostConfig.StorageOpt}}'
+# Should show {"size":"2G"}
 ```
-
-**This will test:**
-- ✅ Bulk plan updates
-- ✅ Admin overrides
-- ✅ Container updates
-- ✅ Shared containers
-- ✅ Server statistics
-
----
-
-### **5. Check Database:**
-
+2. Check Inside Container:
 ```bash
-# Connect to MongoDB
-mongosh vercel_clone
-
-# Check users
-db.users.find().pretty()
-
-# Check plans
-db.plans.find().pretty()
-
-# Check if Pro plan has actualResources
-db.plans.findOne({ name: 'pro' })
+docker exec -it <your-container-name> df -h /
+# The "Size" column should be approx 2.0G
 ```
 
----
-
-### **6. Verify Shared Container Logic:**
-
+## 4. Verify Remote Build
+To prove the build happened inside:
 ```bash
-# Check if shared container exists on EC3
-ssh ubuntu@EC3_IP "docker ps | grep shared-main"
-
-# Should show: EC3-shared-main (if any free users deployed)
+docker logs <your-container-name>
+# You might see logs related to npm install/build if they were captured by PID 1, 
+# but mostly you will see PM2 logs showing the app started successfully.
 ```
-
----
-
-## 📊 **EXPECTED RESULTS:**
-
-### **After Bulk Update:**
-```javascript
-// All Pro users should have:
-{
-  allocatedResources: {
-    cpu: 1.5,
-    ram: 3072
-  },
-  displayedResources: {
-    cpu: 2.0,  // Unchanged
-    ram: 4096  // Unchanged
-  }
-}
-```
-
-### **Container Updates:**
-```
-✅ All dedicated containers updated without restart
-✅ Resources changed live
-✅ Zero downtime
-```
-
----
-
-## 🎯 **WHAT TO VERIFY:**
-
-### **1. Resource Management:**
-- [ ] Can update user backend resources
-- [ ] Can update user display resources
-- [ ] Can apply admin override
-- [ ] Override expires automatically
-- [ ] Bulk update works for all plan users
-
-### **2. Container System:**
-- [ ] Free users deploy to shared container
-- [ ] Paid users get dedicated containers
-- [ ] Old containers are cleaned up
-- [ ] Resources update without restart
-
-### **3. Server Stats:**
-- [ ] Can view server utilization
-- [ ] Shows allocated vs available resources
-- [ ] Tracks user count per server
-
----
-
-## 🐛 **IF TESTS FAIL:**
-
-### **Check Logs:**
-```bash
-# Backend logs
-tail -f backend/logs/combined.log
-
-# Or check console output
-```
-
-### **Common Issues:**
-
-1. **No users found:**
-   - Create test users first
-   - Or deploy a project
-
-2. **No containers:**
-   - Deploy at least one project
-   - Containers are created on deployment
-
-3. **Permission errors:**
-   - Make sure you're using admin token
-   - Check user role is 'admin'
-
----
-
-## ✅ **SUCCESS CRITERIA:**
-
-### **Backend:**
-- ✅ Starts without errors
-- ✅ All routes accessible
-- ✅ Database connected
-
-### **Resource Management:**
-- ✅ Can update resources
-- ✅ Zero downtime updates
-- ✅ Overrides work
-- ✅ Bulk updates work
-
-### **Containers:**
-- ✅ Shared container for free users
-- ✅ Dedicated for paid users
-- ✅ Cleanup works
-- ✅ Updates work
-
----
-
-## 🚀 **NEXT STEPS:**
-
-1. **Run test script:**
-   ```bash
-   node backend/test-resource-management.js
-   ```
-
-2. **Deploy a test project:**
-   - As free user → should use shared container
-   - As paid user → should get dedicated container
-
-3. **Test bulk update:**
-   - Update Pro plan
-   - Verify all Pro users updated
-   - Check containers updated
-
-4. **Setup SSL:**
-   - Follow `SSL_SETUP_GUIDE.md`
-   - Get certificate
-   - Enable HTTPS
-
----
-
-**Everything is ready! Just run the tests to verify.** ✅

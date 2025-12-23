@@ -17,7 +17,7 @@ export default function AdminProjectsPage() {
 
     const fetchProjects = async () => {
         try {
-            const response = await api.get('/api/projects?limit=1000');
+            const response = await api.get('/api/admin/projects?limit=1000');
             setProjects(response.data.projects || []);
         } catch (error) {
             console.error('Failed to fetch projects:', error);
@@ -130,8 +130,8 @@ export default function AdminProjectsPage() {
                                 <div className="flex items-center justify-between text-sm">
                                     <span className="text-gray-400">Status</span>
                                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${project.status === 'active' ? 'bg-green-500/10 text-green-500' :
-                                            project.status === 'deploying' ? 'bg-blue-500/10 text-blue-500' :
-                                                'bg-gray-500/10 text-gray-500'
+                                        project.status === 'deploying' ? 'bg-blue-500/10 text-blue-500' :
+                                            'bg-gray-500/10 text-gray-500'
                                         }`}>
                                         {project.status}
                                     </span>

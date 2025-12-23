@@ -65,16 +65,18 @@ async function buildOnRemoteServer(buildPath, imageName, serverHost, serverKey, 
         const verifyResult = await ssh.execCommand(`docker images ${imageName} --format "{{.Repository}}:{{.Tag}}"`);
         await onLog('info', `✅ Image verified: ${verifyResult.stdout}`);
 
-        // Cleanup remote build directory
-        await ssh.execCommand(`rm -rf ${remotePath}`);
-        await onLog('info', `🧹 Cleaned up remote build directory`);
+        // DON'T cleanup yet - files are needed for docker cp during deployment
+        // Cleanup will happen in buildExecutor after deployment completes
+        // await ssh.execCommand(`rm -rf ${remotePath}`);
+        // await onLog('info', `🧹 Cleaned up remote build directory`);
 
         ssh.dispose();
 
         return {
             success: true,
             imageName: imageName,
-            server: serverHost
+            server: serverHost,
+            remotePath: remotePath  // Return path so it can be cleaned later
         };
 
     } catch (error) {
@@ -158,7 +160,49 @@ async function testSSHConnection(serverHost, serverKey) {
     }
 }
 
+/**
+ * Upload build files to remote server (without building Docker image)
+ * Used for shared container deployments
+ */
+async function uploadToRemoteServer(buildPath, deploymentId, serverHost, serverKey, onLog) {
+    const ssh = new NodeSSH();
+    try {
+        await onLog('info', `📡 Connecting to ${serverHost} via SSH...`);
+
+        // Get SSH credentials
+        const sshConfig = getSSHConfig(serverKey, serverHost);
+
+        await ssh.connect(sshConfig);
+        await onLog('info', `✅ SSH connection established to ${serverHost}`);
+
+        // Create remote directory using deployment ID
+        const remotePath = `/tmp/builds/${deploymentId}`;
+        await ssh.execCommand(`mkdir -p ${remotePath}`);
+        await onLog('info', `📁 Created remote directory: ${remotePath}`);
+
+        await onLog('info', `📤 Copying build files to ${serverHost}...`);
+
+        // Upload the build directory
+        await ssh.putDirectory(buildPath, remotePath, {
+            recursive: true,
+            concurrency: 10,
+            validate: (itemPath) => !itemPath.includes('node_modules')
+        });
+
+        await onLog('info', `✅ Files copied successfully`);
+        ssh.dispose();
+        return { success: true, remotePath };
+
+    } catch (error) {
+        logger.error(`Upload failed:`, error);
+        ssh.dispose();
+        throw error;
+    }
+}
+
 module.exports = {
     buildOnRemoteServer,
-    testSSHConnection
+    testSSHConnection,
+    uploadToRemoteServer,
+    getSSHConfig
 };

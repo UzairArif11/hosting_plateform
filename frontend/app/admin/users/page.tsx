@@ -1,316 +1,420 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
-import { MagnifyingGlassIcon, UserIcon, ShieldCheckIcon, XCircleIcon } from '@heroicons/react/24/outline';
-import toast from 'react-hot-toast';
 
-export default function AdminUsersPage() {
-    const [users, setUsers] = useState([]);
+interface User {
+    _id: string;
+    email: string;
+    displayName: string;
+    plan: string;
+    status: string;
+    containerType: string;
+    createdAt: string;
+    suspendedAt?: string;
+    suspensionReason?: string;
+    deletedAt?: string;
+    recoveryDeadline?: string;
+}
+
+export default function UserManagement() {
+    const searchParams = useSearchParams();
+    const [users, setUsers] = useState<User[]>([]);
     const [loading, setLoading] = useState(true);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [selectedUser, setSelectedUser] = useState(null);
-    const [showUserModal, setShowUserModal] = useState(false);
+    const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
+    const [filter, setFilter] = useState({
+        status: searchParams?.get('status') || 'all',
+        plan: 'all',
+        search: ''
+    });
+    const [showConfirmDialog, setShowConfirmDialog] = useState<any>(null);
 
     useEffect(() => {
         fetchUsers();
-    }, []);
+    }, [filter]);
 
     const fetchUsers = async () => {
         try {
-            const response = await api.get('/api/admin/users?limit=100');
-            setUsers(response.data.users || []);
+            const params = new URLSearchParams();
+
+            if (filter.status !== 'all') params.append('status', filter.status);
+            if (filter.plan !== 'all') params.append('plan', filter.plan);
+            if (filter.search) params.append('search', filter.search);
+
+            const res = await api.get(`/api/admin/users?${params}`);
+
+            setUsers(res.data.users || []);
+            setLoading(false);
         } catch (error) {
             console.error('Failed to fetch users:', error);
-            toast.error('Failed to load users');
-        } finally {
             setLoading(false);
         }
     };
 
-    const handleSuspendUser = async (userId: string) => {
-        if (!confirm('Are you sure you want to suspend this user?')) return;
-
-        try {
-            await api.put(`/api/admin/users/${userId}`, { status: 'suspended' });
-            toast.success('User suspended successfully');
-            fetchUsers();
-        } catch (error) {
-            toast.error('Failed to suspend user');
+    const handleSelectAll = () => {
+        if (selectedUsers.size === users.length) {
+            setSelectedUsers(new Set());
+        } else {
+            setSelectedUsers(new Set(users.map(u => u._id)));
         }
     };
 
-    const handleActivateUser = async (userId: string) => {
+    const handleSelectUser = (userId: string) => {
+        const newSelected = new Set(selectedUsers);
+        if (newSelected.has(userId)) {
+            newSelected.delete(userId);
+        } else {
+            newSelected.add(userId);
+        }
+        setSelectedUsers(newSelected);
+    };
+
+    const handleSuspendUser = async (userId: string, reason: string) => {
         try {
-            await api.put(`/api/admin/users/${userId}`, { status: 'active' });
-            toast.success('User activated successfully');
+            await api.put(`/api/admin/users/${userId}/suspend`, { reason });
+            alert('User suspended successfully');
             fetchUsers();
         } catch (error) {
-            toast.error('Failed to activate user');
+            alert('Error suspending user');
         }
     };
 
-    const handleMakeAdmin = async (userId: string) => {
-        if (!confirm('Are you sure you want to make this user an admin?')) return;
-
+    const handleUnsuspendUser = async (userId: string) => {
         try {
-            await api.put(`/api/admin/users/${userId}`, { role: 'admin' });
-            toast.success('User promoted to admin');
+            await api.put(`/api/admin/users/${userId}/unsuspend`);
+            alert('User unsuspended successfully');
             fetchUsers();
         } catch (error) {
-            toast.error('Failed to update user role');
+            alert('Error unsuspending user');
         }
     };
 
-    const filteredUsers = users.filter((user: any) =>
-        user.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        user.username?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        user.displayName?.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const handleDeleteUser = async (userId: string) => {
+        try {
+            await api.delete(`/api/admin/users/${userId}`, {
+                data: { confirm: 'DELETE' }
+            });
+            alert('User deleted successfully (15-day recovery period)');
+            fetchUsers();
+        } catch (error) {
+            alert('Error deleting user');
+        }
+    };
+
+    const handleRecoverUser = async (userId: string) => {
+        try {
+            await api.put(`/api/admin/users/${userId}/recover`);
+            alert('User recovered successfully');
+            fetchUsers();
+        } catch (error: any) {
+            const msg = error.response?.data?.error || 'Error recovering user';
+            alert(msg);
+        }
+    };
+
+    const handleChangePlan = async (userId: string, plan: string) => {
+        try {
+            await api.put(`/api/admin/users/${userId}/plan`, {
+                plan,
+                containerType: plan === 'free' ? 'shared' : 'dedicated',
+                upgradeContainers: true
+            });
+            alert(`User plan updated to ${plan} with zero-downtime container migration`);
+            fetchUsers();
+        } catch (error) {
+            alert('Error updating plan');
+        }
+    };
 
     if (loading) {
         return (
-            <div className="text-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500 mx-auto"></div>
+            <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex items-center justify-center">
+                <div className="text-white text-xl">Loading users...</div>
             </div>
         );
     }
 
     return (
-        <div className="space-y-6">
-            <div className="flex justify-between items-center">
-                <div>
-                    <h1 className="text-3xl font-bold text-white">User Management</h1>
-                    <p className="text-gray-400 mt-2">Manage all platform users</p>
+        <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 p-8">
+            <div className="max-w-7xl mx-auto">
+                {/* Header */}
+                <div className="mb-8">
+                    <h1 className="text-4xl font-bold text-white mb-2">User Management</h1>
+                    <p className="text-gray-300">Manage user accounts, plans, and permissions</p>
                 </div>
-                <div className="text-sm text-gray-400">
-                    Total Users: <span className="text-white font-semibold">{users.length}</span>
-                </div>
-            </div>
 
-            {/* Search */}
-            <div className="relative">
-                <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                <input
-                    type="text"
-                    placeholder="Search users by email, username, or name..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-gray-900 border border-gray-800 rounded-lg pl-10 pr-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                />
-            </div>
-
-            {/* Users Table */}
-            <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full">
-                        <thead className="bg-gray-800/50">
-                            <tr>
-                                <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                                    User
-                                </th>
-                                <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                                    Email
-                                </th>
-                                <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                                    Role
-                                </th>
-                                <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                                    Status
-                                </th>
-                                <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                                    Subscription
-                                </th>
-                                <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                                    Actions
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-800">
-                            {filteredUsers.length === 0 ? (
-                                <tr>
-                                    <td colSpan={6} className="px-6 py-12 text-center text-gray-400">
-                                        No users found
-                                    </td>
-                                </tr>
-                            ) : (
-                                filteredUsers.map((user: any) => (
-                                    <tr key={user._id} className="hover:bg-gray-800/50">
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <div className="flex items-center">
-                                                <div className="flex-shrink-0 h-10 w-10">
-                                                    {user.avatar ? (
-                                                        <img className="h-10 w-10 rounded-full" src={user.avatar} alt="" />
-                                                    ) : (
-                                                        <div className="h-10 w-10 rounded-full bg-purple-500/10 flex items-center justify-center">
-                                                            <UserIcon className="h-6 w-6 text-purple-500" />
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <div className="ml-4">
-                                                    <div className="text-sm font-medium text-white">{user.displayName || user.username}</div>
-                                                    <div className="text-sm text-gray-400">@{user.username}</div>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <div className="text-sm text-gray-300">{user.email}</div>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            {user.role === 'admin' ? (
-                                                <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-purple-500/10 text-purple-500">
-                                                    <ShieldCheckIcon className="h-4 w-4 mr-1" />
-                                                    Admin
-                                                </span>
-                                            ) : (
-                                                <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-500/10 text-gray-400">
-                                                    User
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${user.status === 'active' ? 'bg-green-500/10 text-green-500' :
-                                                    user.status === 'suspended' ? 'bg-red-500/10 text-red-500' :
-                                                        user.status === 'trial' ? 'bg-blue-500/10 text-blue-500' :
-                                                            'bg-gray-500/10 text-gray-400'
-                                                }`}>
-                                                {user.status}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <div className="text-sm text-gray-300">
-                                                {user.subscriptionStatus || 'trial'}
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                            <div className="flex space-x-2">
-                                                {user.status === 'suspended' ? (
-                                                    <button
-                                                        onClick={() => handleActivateUser(user._id)}
-                                                        className="text-green-400 hover:text-green-300"
-                                                    >
-                                                        Activate
-                                                    </button>
-                                                ) : (
-                                                    <button
-                                                        onClick={() => handleSuspendUser(user._id)}
-                                                        className="text-red-400 hover:text-red-300"
-                                                    >
-                                                        Suspend
-                                                    </button>
-                                                )}
-                                                {user.role !== 'admin' && (
-                                                    <button
-                                                        onClick={() => handleMakeAdmin(user._id)}
-                                                        className="text-purple-400 hover:text-purple-300"
-                                                    >
-                                                        Make Admin
-                                                    </button>
-                                                )}
-                                                <button
-                                                    onClick={() => {
-                                                        setSelectedUser(user);
-                                                        setShowUserModal(true);
-                                                    }}
-                                                    className="text-blue-400 hover:text-blue-300"
-                                                >
-                                                    Details
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            {/* User Details Modal */}
-            {showUserModal && selectedUser && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
-                        <div className="flex justify-between items-start mb-6">
-                            <h2 className="text-2xl font-bold text-white">User Details</h2>
-                            <button
-                                onClick={() => setShowUserModal(false)}
-                                className="text-gray-400 hover:text-white"
+                {/* Filters */}
+                <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg p-6 mb-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label className="block text-gray-300 mb-2">Status</label>
+                            <select
+                                value={filter.status}
+                                onChange={(e) => setFilter({ ...filter, status: e.target.value })}
+                                className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white"
                             >
-                                <XCircleIcon className="h-6 w-6" />
-                            </button>
+                                <option value="all">All Status</option>
+                                <option value="active">Active</option>
+                                <option value="suspended">Suspended</option>
+                                <option value="deleted">Deleted</option>
+                            </select>
                         </div>
-
-                        <div className="space-y-4">
-                            <div className="flex items-center space-x-4">
-                                {selectedUser.avatar ? (
-                                    <img className="h-20 w-20 rounded-full" src={selectedUser.avatar} alt="" />
-                                ) : (
-                                    <div className="h-20 w-20 rounded-full bg-purple-500/10 flex items-center justify-center">
-                                        <UserIcon className="h-10 w-10 text-purple-500" />
-                                    </div>
-                                )}
-                                <div>
-                                    <h3 className="text-xl font-semibold text-white">{selectedUser.displayName}</h3>
-                                    <p className="text-gray-400">@{selectedUser.username}</p>
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="bg-gray-800/50 rounded-lg p-4">
-                                    <p className="text-sm text-gray-400">Email</p>
-                                    <p className="text-white">{selectedUser.email}</p>
-                                </div>
-                                <div className="bg-gray-800/50 rounded-lg p-4">
-                                    <p className="text-sm text-gray-400">Role</p>
-                                    <p className="text-white capitalize">{selectedUser.role}</p>
-                                </div>
-                                <div className="bg-gray-800/50 rounded-lg p-4">
-                                    <p className="text-sm text-gray-400">Status</p>
-                                    <p className="text-white capitalize">{selectedUser.status}</p>
-                                </div>
-                                <div className="bg-gray-800/50 rounded-lg p-4">
-                                    <p className="text-sm text-gray-400">Subscription</p>
-                                    <p className="text-white capitalize">{selectedUser.subscriptionStatus}</p>
-                                </div>
-                                <div className="bg-gray-800/50 rounded-lg p-4">
-                                    <p className="text-sm text-gray-400">Created</p>
-                                    <p className="text-white">{new Date(selectedUser.createdAt).toLocaleDateString()}</p>
-                                </div>
-                                <div className="bg-gray-800/50 rounded-lg p-4">
-                                    <p className="text-sm text-gray-400">Last Login</p>
-                                    <p className="text-white">
-                                        {selectedUser.lastLogin ? new Date(selectedUser.lastLogin).toLocaleDateString() : 'Never'}
-                                    </p>
-                                </div>
-                            </div>
-
-                            {selectedUser.resourceAllocation && (
-                                <div className="bg-gray-800/50 rounded-lg p-4">
-                                    <p className="text-sm text-gray-400 mb-2">Resource Allocation</p>
-                                    <div className="grid grid-cols-2 gap-2 text-sm">
-                                        <div>
-                                            <span className="text-gray-400">CPU:</span>
-                                            <span className="text-white ml-2">{selectedUser.resourceAllocation.cpu} cores</span>
-                                        </div>
-                                        <div>
-                                            <span className="text-gray-400">RAM:</span>
-                                            <span className="text-white ml-2">{selectedUser.resourceAllocation.ram} GB</span>
-                                        </div>
-                                        <div>
-                                            <span className="text-gray-400">Storage:</span>
-                                            <span className="text-white ml-2">{selectedUser.resourceAllocation.storage} GB</span>
-                                        </div>
-                                        <div>
-                                            <span className="text-gray-400">Bandwidth:</span>
-                                            <span className="text-white ml-2">{selectedUser.resourceAllocation.bandwidth} GB</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
+                        <div>
+                            <label className="block text-gray-300 mb-2">Plan</label>
+                            <select
+                                value={filter.plan}
+                                onChange={(e) => setFilter({ ...filter, plan: e.target.value })}
+                                className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white"
+                            >
+                                <option value="all">All Plans</option>
+                                <option value="free">Free</option>
+                                <option value="pro">Pro</option>
+                                <option value="enterprise">Enterprise</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-gray-300 mb-2">Search</label>
+                            <input
+                                type="text"
+                                value={filter.search}
+                                onChange={(e) => setFilter({ ...filter, search: e.target.value })}
+                                placeholder="Search by email..."
+                                className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-400"
+                            />
                         </div>
                     </div>
                 </div>
-            )}
+
+                {/* Bulk Actions */}
+                {selectedUsers.size > 0 && (
+                    <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 mb-6">
+                        <div className="flex items-center justify-between">
+                            <span className="text-white">
+                                {selectedUsers.size} user(s) selected
+                            </span>
+                            <div className="space-x-2">
+                                <button
+                                    onClick={() => setShowConfirmDialog({ type: 'bulk-delete', users: Array.from(selectedUsers) })}
+                                    className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition"
+                                >
+                                    Delete Selected
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Users List */}
+                <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg overflow-hidden">
+                    <div className="p-4 border-b border-white/10 flex items-center">
+                        <input
+                            type="checkbox"
+                            checked={selectedUsers.size === users.length && users.length > 0}
+                            onChange={handleSelectAll}
+                            className="mr-4"
+                        />
+                        <span className="text-white font-semibold">
+                            {users.length} user(s) found
+                        </span>
+                    </div>
+
+                    <div className="divide-y divide-white/10">
+                        {users.map((user) => (
+                            <UserRow
+                                key={user._id}
+                                user={user}
+                                selected={selectedUsers.has(user._id)}
+                                onSelect={() => handleSelectUser(user._id)}
+                                onSuspend={(reason) => handleSuspendUser(user._id, reason)}
+                                onUnsuspend={() => handleUnsuspendUser(user._id)}
+                                onDelete={() => handleDeleteUser(user._id)}
+                                onRecover={() => handleRecoverUser(user._id)}
+                                onChangePlan={(plan) => handleChangePlan(user._id, plan)}
+                            />
+                        ))}
+                    </div>
+                </div>
+
+                {/* Confirmation Dialog */}
+                {showConfirmDialog && (
+                    <ConfirmDialog
+                        dialog={showConfirmDialog}
+                        onConfirm={() => {
+                            // Handle bulk delete
+                            setShowConfirmDialog(null);
+                        }}
+                        onCancel={() => setShowConfirmDialog(null)}
+                    />
+                )}
+            </div>
+        </div>
+    );
+}
+
+function UserRow({ user, selected, onSelect, onSuspend, onUnsuspend, onDelete, onRecover, onChangePlan }: any) {
+    const [showActions, setShowActions] = useState(false);
+
+    const getStatusBadge = () => {
+        const badges = {
+            active: 'bg-green-500/20 text-green-400 border-green-500/30',
+            suspended: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+            deleted: 'bg-red-500/20 text-red-400 border-red-500/30'
+        };
+        return badges[user.status as keyof typeof badges] || badges.active;
+    };
+
+    return (
+        <div className="p-4 hover:bg-white/5 transition">
+            <div className="flex items-start">
+                <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={onSelect}
+                    className="mt-1 mr-4"
+                />
+
+                <div className="flex-1">
+                    <div className="flex items-center justify-between mb-2">
+                        <div>
+                            <h3 className="text-white font-semibold">{user.email}</h3>
+                            <p className="text-gray-400 text-sm">{user.displayName}</p>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                            <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusBadge()}`}>
+                                {user.status}
+                            </span>
+                            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                                {user.plan || 'free'}
+                            </span>
+                        </div>
+                    </div>
+
+                    {user.status === 'suspended' && (
+                        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded p-2 mb-2">
+                            <p className="text-yellow-400 text-sm">
+                                <strong>Suspended:</strong> {user.suspensionReason}
+                            </p>
+                            <p className="text-gray-400 text-xs">
+                                {new Date(user.suspendedAt!).toLocaleDateString()}
+                            </p>
+                        </div>
+                    )}
+
+                    {user.status === 'deleted' && user.recoveryDeadline && (
+                        <div className="bg-red-500/10 border border-red-500/30 rounded p-2 mb-2">
+                            <p className="text-red-400 text-sm">
+                                <strong>Deleted:</strong> Recovery deadline {new Date(user.recoveryDeadline).toLocaleDateString()}
+                            </p>
+                        </div>
+                    )}
+
+                    <div className="flex items-center space-x-2 mt-2">
+                        {user.status === 'active' && (
+                            <>
+                                <button
+                                    onClick={() => {
+                                        const reason = prompt('Enter suspension reason:');
+                                        if (reason) onSuspend(reason);
+                                    }}
+                                    className="text-xs bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 px-3 py-1 rounded border border-yellow-500/30 transition"
+                                >
+                                    Suspend
+                                </button>
+                                <select
+                                    onChange={(e) => {
+                                        if (e.target.value && confirm(`Change plan to ${e.target.value}?`)) {
+                                            onChangePlan(e.target.value);
+                                        }
+                                        e.target.value = '';
+                                    }}
+                                    className="text-xs bg-purple-500/20 text-purple-400 px-3 py-1 rounded border border-purple-500/30"
+                                >
+                                    <option value="">Change Plan</option>
+                                    <option value="free">Free</option>
+                                    <option value="pro">Pro</option>
+                                    <option value="enterprise">Enterprise</option>
+                                </select>
+                                <button
+                                    onClick={() => {
+                                        if (confirm('Delete this user? (15-day recovery period)')) {
+                                            onDelete();
+                                        }
+                                    }}
+                                    className="text-xs bg-red-500/20 hover:bg-red-500/30 text-red-400 px-3 py-1 rounded border border-red-500/30 transition"
+                                >
+                                    Delete
+                                </button>
+                            </>
+                        )}
+
+                        {user.status === 'suspended' && (
+                            <>
+                                <button
+                                    onClick={() => {
+                                        if (confirm('Unsuspend this user?')) {
+                                            onUnsuspend();
+                                        }
+                                    }}
+                                    className="text-xs bg-green-500/20 hover:bg-green-500/30 text-green-400 px-3 py-1 rounded border border-green-500/30 transition"
+                                >
+                                    Unsuspend
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        if (confirm('Delete this user? (15-day recovery period)')) {
+                                            onDelete();
+                                        }
+                                    }}
+                                    className="text-xs bg-red-500/20 hover:bg-red-500/30 text-red-400 px-3 py-1 rounded border border-red-500/30 transition"
+                                >
+                                    Delete
+                                </button>
+                            </>
+                        )}
+
+                        {user.status === 'deleted' && (
+                            <button
+                                onClick={() => {
+                                    if (confirm('Recover this user account?')) {
+                                        onRecover();
+                                    }
+                                }}
+                                className="text-xs bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 px-3 py-1 rounded border border-blue-500/30 transition"
+                            >
+                                Recover Account
+                            </button>
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function ConfirmDialog({ dialog, onConfirm, onCancel }: any) {
+    return (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="bg-gray-900 border border-white/20 rounded-lg p-6 max-w-md w-full mx-4">
+                <h3 className="text-xl font-bold text-white mb-4">Confirm Action</h3>
+                <p className="text-gray-300 mb-6">
+                    Are you sure you want to delete {dialog.users.length} user(s)?
+                </p>
+                <div className="flex space-x-4">
+                    <button
+                        onClick={onCancel}
+                        className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        onClick={onConfirm}
+                        className="flex-1 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition"
+                    >
+                        Confirm Delete
+                    </button>
+                </div>
+            </div>
         </div>
     );
 }

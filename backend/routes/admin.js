@@ -1,707 +1,385 @@
 const express = require('express');
-const { body, query, validationResult } = require('express-validator');
-const User = require('../models/User');
-const Plan = require('../models/Plan');
-const Project = require('../models/Project');
-const containerOrchestrator = require('../services/containerOrchestrator');
-const logger = require('../utils/logger');
-const { logAdminAction, requirePermission } = require('../middleware/admin');
-
 const router = express.Router();
+const { requireAuth } = require('../middleware/auth');
+const { requireAdmin } = require('../middleware/admin');
+const User = require('../models/User');
+const Project = require('../models/Project');
+const Deployment = require('../models/Deployment');
+const docker = require('../services/docker');
+const logger = require('../utils/logger');
+const { getRemoteSystemStats } = require('../services/containerOrchestrator');
 
-// Helper function for validation errors
-const handleValidationErrors = (req, res, next) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      success: false,
-      error: 'Validation failed',
-      details: errors.array()
-    });
-  }
-  next();
-};
-
-// Dashboard overview
-router.get('/dashboard', logAdminAction('view_dashboard'), async (req, res) => {
+// Get dashboard aggregated stats
+router.get('/dashboard-stats', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const [totalUsers, sharedUsers, dedicatedUsers, totalProjects] = await Promise.all([
-      User.countDocuments(),
-      User.countDocuments({ containerType: 'shared' }),
-      User.countDocuments({ containerType: 'dedicated' }),
-      Project.countDocuments()
-    ]);
-
-    const dashboardData = {
-      overview: {
-        totalUsers,
-        sharedUsers,
-        dedicatedUsers,
-        totalProjects
-      },
-      serverHealth: {
-        status: 'healthy',
-        uptime: process.uptime()
-      }
-    };
-
-    res.json({ success: true, dashboard: dashboardData });
-  } catch (error) {
-    logger.error('Admin dashboard error:', error.message);
-    res.status(500).json({ success: false, error: 'Failed to load dashboard' });
-  }
-});
-
-// Platform statistics
-router.get('/stats', logAdminAction('view_stats'), async (req, res) => {
-  try {
-    const [totalUsers, activeUsers, totalProjects, totalDeployments] = await Promise.all([
-      User.countDocuments(),
+    const [
+      totalUsers,
+      activeUsers,
+      suspendedUsers,
+      deletedUsers,
+      totalProjects,
+      totalDeployments,
+      failedDeployments
+    ] = await Promise.all([
+      User.countDocuments({ status: { $ne: 'deleted' } }),
       User.countDocuments({ status: 'active' }),
-      Project.countDocuments(),
-      require('../models/Deployment').countDocuments({ status: 'success' })
+      User.countDocuments({ status: 'suspended' }),
+      User.countDocuments({ status: 'deleted' }),
+      Project.countDocuments({}),
+      Deployment.countDocuments({}),
+      Deployment.countDocuments({ status: 'failed' })
     ]);
 
+    // Cleanup stats (re-using logic or simplifying)
     const stats = {
       totalUsers,
       activeUsers,
+      suspendedUsers,
+      deletedUsers,
       totalProjects,
-      activeDeployments: totalDeployments,
-      totalRevenue: 0 // Placeholder for billing integration
+      totalDeployments,
+      failedDeployments,
+      cleanupStats: {
+        suspended: suspendedUsers,
+        softDeleted: deletedUsers,
+        totalResourcesCanFree: {
+          users: suspendedUsers + deletedUsers,
+          // Estimates based on averages
+          estimatedContainers: suspendedUsers + deletedUsers,
+        }
+      }
     };
 
-    res.json(stats);
+    res.json({ success: true, stats });
+
   } catch (error) {
-    logger.error('Admin stats error:', error.message);
-    res.status(500).json({ error: 'Failed to load statistics' });
+    logger.error('Error fetching dashboard stats:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch dashboard stats' });
   }
 });
 
-// User management
-router.get('/users', [
-  query('page').optional().isInt({ min: 1 }),
-  query('limit').optional().isInt({ min: 1, max: 100 }),
-  query('containerType').optional().isIn(['shared', 'dedicated']),
-  query('search').optional().isString()
-], requirePermission('user.read'), logAdminAction('list_users'), async (req, res) => {
+// Get system-wide stats (Host CPU, RAM, Disk)
+router.get('/system-stats', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { page = 1, limit = 20, containerType, search } = req.query;
+    // Currently hardcoded to check EC3, but could check all servers
+    const stats = await getRemoteSystemStats('EC3');
 
+    if (!stats) {
+      return res.status(500).json({ success: false, error: 'Failed to retrieve system stats' });
+    }
+
+    res.json({
+      success: true,
+      system: stats,
+      timestamp: new Date()
+    });
+  } catch (error) {
+    logger.error('Error fetching system stats:', error);
+    res.status(500).json({ success: false, error: 'Server error retrieving stats' });
+  }
+});
+
+// Get all containers with their resource usage
+router.get('/containers', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    // Get all users with containers
+    const users = await User.find({
+      containerName: { $exists: true, $ne: null }
+    }).select('_id email username containerName assignedServer resourceAllocation currentResourceUsage storageViolations deploymentBlocked');
+
+    const containersData = [];
+
+    for (const user of users) {
+      try {
+        const containerName = user.containerName;
+        const server = user.assignedServer;
+
+        // Get real-time stats from Docker
+        let stats = {
+          cpu: user.currentResourceUsage?.cpu || 0,
+          ram: user.currentResourceUsage?.ram || 0,
+          storage: 0,
+          status: 'unknown'
+        };
+
+        // Try to get live stats
+        try {
+          const containerStats = await docker.getContainerStats(containerName, server);
+          if (containerStats) {
+            stats = {
+              cpu: containerStats.cpu || 0,
+              ram: containerStats.memory || 0,
+              storage: containerStats.storage || 0,
+              status: 'running'
+            };
+          }
+        } catch (err) {
+          logger.warn(`Failed to get stats for ${containerName}:`, err.message);
+        }
+
+        containersData.push({
+          userId: user._id,
+          email: user.email,
+          username: user.username,
+          containerName: containerName,
+          server: server || 'Unknown',
+
+          // Current usage
+          usage: {
+            cpu: stats.cpu,
+            cpuPercent: user.resourceAllocation?.cpu ? (stats.cpu / user.resourceAllocation.cpu) * 100 : 0,
+            ram: stats.ram,
+            ramPercent: user.resourceAllocation?.ram ? (stats.ram / (user.resourceAllocation.ram * 1024)) * 100 : 0,
+            storage: stats.storage,
+            storagePercent: user.resourceAllocation?.storage ? (stats.storage / (user.resourceAllocation.storage * 1024)) * 100 : 0
+          },
+
+          // Limits
+          limits: {
+            cpu: user.resourceAllocation?.cpu || 0.5,
+            ram: user.resourceAllocation?.ram || 1,
+            storage: user.resourceAllocation?.storage || 2
+          },
+
+          // Violations
+          violations: {
+            count: user.storageViolations?.length || 0,
+            recentCount: user.storageViolations?.filter(v =>
+              v.timestamp > new Date(Date.now() - 60 * 60 * 1000)
+            ).length || 0,
+            lastViolation: user.storageViolations?.[user.storageViolations.length - 1]?.timestamp || null
+          },
+
+          // Status
+          deploymentBlocked: user.deploymentBlocked || false,
+          status: stats.status,
+          lastChecked: user.currentResourceUsage?.lastChecked || new Date()
+        });
+      } catch (error) {
+        logger.error(`Error processing user ${user.email}:`, error);
+      }
+    }
+
+    res.json({
+      success: true,
+      totalContainers: containersData.length,
+      containers: containersData,
+      timestamp: new Date()
+    });
+
+  } catch (error) {
+    logger.error('Error fetching container stats:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch container statistics'
+    });
+  }
+});
+
+// Unblock a user's deployment
+router.post('/containers/:userId/unblock', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    user.deploymentBlocked = false;
+    user.deploymentBlockedReason = '';
+    user.deploymentBlockedAt = null;
+    await user.save();
+
+    logger.info(`Admin ${req.user.email} unblocked deployments for ${user.email}`);
+
+    res.json({
+      success: true,
+      message: `Deployments unblocked for ${user.email}`
+    });
+
+  } catch (error) {
+    logger.error('Error unblocking user:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to unblock user'
+    });
+  }
+});
+
+// Toggle resource stats visibility for a user
+router.post('/users/:userId/toggle-stats', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { show } = req.body; // true or false
+    const user = await User.findById(req.params.userId);
+
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    user.showResourceStats = show === true;
+    await user.save();
+
+    logger.info(`Admin ${req.user.email} set showResourceStats=${show} for ${user.email}`);
+
+    res.json({
+      success: true,
+      message: `Resource stats visibility set to ${show} for ${user.email}`,
+      showResourceStats: user.showResourceStats
+    });
+
+  } catch (error) {
+    logger.error('Error toggling stats visibility:', error);
+    res.status(500).json({ success: false, error: 'Failed to toggle stats' });
+  }
+});
+
+// --- User Management Routes ---
+
+// Get all users
+router.get('/users', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { status, plan, search, limit = 50, page = 1 } = req.query;
     const query = {};
-    if (containerType) query.containerType = containerType;
+    if (status && status !== 'all') query.status = status;
+    if (plan && plan !== 'all') query.planType = plan;
     if (search) {
       query.$or = [
-        { username: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } }
+        { email: { $regex: search, $options: 'i' } },
+        { displayName: { $regex: search, $options: 'i' } }
       ];
     }
 
     const users = await User.find(query)
-      .populate('plan', 'displayName pricing')
-      .select('username email containerType oracleAccountId resourceAllocation')
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(parseInt(limit));
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .sort({ createdAt: -1 });
 
     const total = await User.countDocuments(query);
 
-    res.json({
-      success: true,
-      users,
-      pagination: { page: parseInt(page), limit: parseInt(limit), total }
-    });
+    res.json({ success: true, users, total });
   } catch (error) {
-    logger.error('Admin list users error:', error.message);
+    logger.error('Error fetching users:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch users' });
   }
 });
 
-// Update user plan and resources
-router.put('/users/:id', [
-  body('plan').optional().isMongoId(),
-  body('resourceAllocation.cpu').optional().isFloat({ min: 0.5, max: 4 }),
-  body('resourceAllocation.ram').optional().isInt({ min: 1, max: 24 })
-], requirePermission('user.write'), logAdminAction('update_user'), handleValidationErrors, async (req, res) => {
+// Suspend User
+router.put('/users/:userId/suspend', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
-    const updates = req.body;
-
-    const user = await User.findByIdAndUpdate(id, updates, { new: true })
-      .populate('plan');
-
-    logger.admin('User updated', { adminId: req.user._id, targetUserId: id });
-
-    res.json({ success: true, user });
-  } catch (error) {
-    logger.error('Admin update user error:', error.message);
-    res.status(500).json({ success: false, error: 'Failed to update user' });
-  }
-});
-
-// Plan management
-router.get('/plans', requirePermission('plan.read'), logAdminAction('list_plans'), async (req, res) => {
-  try {
-    const plans = await Plan.find({}).sort({ sortOrder: 1 });
-    res.json({ success: true, plans });
-  } catch (error) {
-    logger.error('Admin list plans error:', error.message);
-    res.status(500).json({ success: false, error: 'Failed to fetch plans' });
-  }
-});
-
-// Create new plan
-router.post('/plans', [
-  body('name').trim().isLength({ min: 1, max: 50 }),
-  body('displayName').trim().isLength({ min: 1, max: 100 }),
-  body('pricing.usd').isFloat({ min: 0 }),
-  body('resources.cpu').isFloat({ min: 0.5, max: 4 }),
-  body('resources.ram').isInt({ min: 1, max: 24 })
-], requirePermission('plan.write'), logAdminAction('create_plan'), handleValidationErrors, async (req, res) => {
-  try {
-    const plan = new Plan(req.body);
-    await plan.save();
-
-    logger.admin('Plan created', { adminId: req.user._id, planId: plan._id });
-    res.status(201).json({ success: true, plan });
-  } catch (error) {
-    logger.error('Admin create plan error:', error.message);
-    res.status(500).json({ success: false, error: 'Failed to create plan' });
-  }
-});
-
-// Server monitoring
-router.get('/servers', requirePermission('server.read'), logAdminAction('view_server_stats'), async (req, res) => {
-  try {
-    const [ec2Status, ec3Status] = await Promise.all([
-      containerOrchestrator.getServerUtilization('EC2'),
-      containerOrchestrator.getServerUtilization('EC3')
-    ]);
-
-    const [totalUsers, sharedUsers, dedicatedUsers] = await Promise.all([
-      User.countDocuments(),
-      User.countDocuments({ containerType: 'shared' }),
-      User.countDocuments({ containerType: 'dedicated' })
-    ]);
-
-    const serverStats = [
-      {
-        id: 'EC1',
-        name: 'EC1 - Main API Server',
-        type: 'api_main',
-        status: 'healthy',
-        description: 'Hosts all backend APIs, admin panel, and frontend'
-      },
-      {
-        id: 'EC2',
-        name: 'EC2 - Mixed Server',
-        type: 'mixed_users',
-        status: ec2Status.success ? 'healthy' : 'error',
-        utilization: ec2Status.success ? ec2Status.utilization : null,
-        error: ec2Status.success ? null : ec2Status.error
-      },
-      {
-        id: 'EC3',
-        name: 'EC3 - Mixed Server',
-        type: 'mixed_users',
-        status: ec3Status.success ? 'healthy' : 'error',
-        utilization: ec3Status.success ? ec3Status.utilization : null,
-        error: ec3Status.success ? null : ec3Status.error
-      }
-    ];
-
-    res.json({
-      success: true,
-      servers: serverStats,
-      summary: { totalUsers, sharedUsers, dedicatedUsers },
-      architecture: {
-        type: 'Load Balanced 3-Server Setup',
-        description: 'EC1: API/Admin, EC2/EC3: Load balanced mixed containers'
-      }
-    });
-  } catch (error) {
-    logger.error('Admin server stats error:', error.message);
-    res.status(500).json({ success: false, error: 'Failed to fetch server statistics' });
-  }
-});
-
-// Resource status
-router.get('/resources/status', requirePermission('server.read'), logAdminAction('view_resource_status'), async (req, res) => {
-  try {
-    const [ec2Status, ec3Status] = await Promise.all([
-      containerOrchestrator.getServerUtilization('EC2'),
-      containerOrchestrator.getServerUtilization('EC3')
-    ]);
-
-    const overallStatus = {
-      ec2: ec2Status.success ? ec2Status.utilization : { error: ec2Status.error },
-      ec3: ec3Status.success ? ec3Status.utilization : { error: ec3Status.error },
-      combined: {
-        totalUsers: (ec2Status.success ? ec2Status.utilization.totalUsers : 0) +
-          (ec3Status.success ? ec3Status.utilization.totalUsers : 0),
-        sharedUsers: (ec2Status.success ? ec2Status.utilization.sharedUsers : 0) +
-          (ec3Status.success ? ec3Status.utilization.sharedUsers : 0),
-        dedicatedUsers: (ec2Status.success ? ec2Status.utilization.dedicatedUsers : 0) +
-          (ec3Status.success ? ec3Status.utilization.dedicatedUsers : 0)
-      }
-    };
-
-    res.json({ success: true, status: overallStatus });
-  } catch (error) {
-    logger.error('Admin resource status error:', error.message);
-    res.status(500).json({ success: false, error: 'Failed to fetch resource status' });
-  }
-});
-
-// Upgrade user to dedicated container
-router.post('/users/:userId/upgrade-dedicated', [
-  body('planId').isMongoId().withMessage('Valid plan ID required')
-], requirePermission('user.write'), logAdminAction('upgrade_user_dedicated'), handleValidationErrors, async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const { planId } = req.body;
-
-    const plan = await Plan.findById(planId);
-    if (!plan) {
-      return res.status(404).json({ success: false, error: 'Plan not found' });
-    }
-
-    const result = await containerOrchestrator.upgradeUserToDedicated(userId, plan);
-
-    if (result.success) {
-      logger.admin('User upgraded to dedicated container', {
-        adminId: req.user._id,
-        targetUserId: userId,
-        planId: planId
-      });
-
-      res.json({
-        success: true,
-        upgrade: result.upgrade,
-        message: 'User successfully upgraded to dedicated container'
-      });
-    } else {
-      res.status(500).json({ success: false, error: result.error });
-    }
-  } catch (error) {
-    logger.error('User upgrade error:', error.message);
-    res.status(500).json({ success: false, error: 'Failed to upgrade user' });
-  }
-});
-
-// Scale user container resources (without data loss)
-router.post('/users/:userId/scale-resources', [
-  body('resources.cpu').isFloat({ min: 0.5, max: 8 }).withMessage('CPU must be between 0.5 and 8'),
-  body('resources.ram').isInt({ min: 1, max: 48 }).withMessage('RAM must be between 1 and 48 GB'),
-  body('resources.storage').optional().isInt({ min: 10, max: 1000 }).withMessage('Storage must be between 10 and 1000 GB'),
-  body('resources.bandwidth').optional().isInt({ min: 100, max: 10000 }).withMessage('Bandwidth must be between 100 and 10000 GB')
-], requirePermission('user.write'), logAdminAction('scale_user_resources'), handleValidationErrors, async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const { resources } = req.body;
-
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ success: false, error: 'User not found' });
-    }
-
-    logger.admin('Starting resource scaling for user', {
-      adminId: req.user._id,
-      targetUserId: userId,
-      currentResources: user.resourceAllocation,
-      newResources: resources
-    });
-
-    const result = await containerOrchestrator.scaleContainerResources(userId, resources);
-
-    if (result.success) {
-      logger.admin('User container resources scaled successfully', {
-        adminId: req.user._id,
-        targetUserId: userId,
-        method: result.method,
-        newResources: resources
-      });
-
-      res.json({
-        success: true,
-        scaling: {
-          method: result.method,
-          container: result.container,
-          resources: resources
-        },
-        message: result.message
-      });
-    } else {
-      logger.error('Resource scaling failed', {
-        adminId: req.user._id,
-        targetUserId: userId,
-        error: result.error
-      });
-      res.status(500).json({ success: false, error: result.error });
-    }
-  } catch (error) {
-    logger.error('Resource scaling error:', error.message);
-    res.status(500).json({ success: false, error: 'Failed to scale user resources' });
-  }
-});
-
-// Upgrade user plan with seamless transition
-router.post('/users/:userId/upgrade-plan', [
-  body('planId').isMongoId().withMessage('Valid plan ID required')
-], requirePermission('user.write'), logAdminAction('upgrade_user_plan'), handleValidationErrors, async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const { planId } = req.body;
-
-    const [user, plan] = await Promise.all([
-      User.findById(userId).populate('plan'),
-      Plan.findById(planId)
-    ]);
-
-    if (!user) {
-      return res.status(404).json({ success: false, error: 'User not found' });
-    }
-    if (!plan) {
-      return res.status(404).json({ success: false, error: 'Plan not found' });
-    }
-
-    logger.admin('Starting plan upgrade for user', {
-      adminId: req.user._id,
-      targetUserId: userId,
-      currentPlan: user.plan?.name || 'None',
-      newPlan: plan.name,
-      currentType: user.containerType
-    });
-
-    const result = await containerOrchestrator.upgradeUserPlan(userId, plan);
-
-    if (result.success) {
-      logger.admin('User plan upgraded successfully', {
-        adminId: req.user._id,
-        targetUserId: userId,
-        upgrade: result.upgrade
-      });
-
-      res.json({
-        success: true,
-        upgrade: result.upgrade,
-        message: 'User plan upgraded successfully with data preservation'
-      });
-    } else {
-      logger.error('Plan upgrade failed', {
-        adminId: req.user._id,
-        targetUserId: userId,
-        error: result.error
-      });
-      res.status(500).json({ success: false, error: result.error });
-    }
-  } catch (error) {
-    logger.error('Plan upgrade error:', error.message);
-    res.status(500).json({ success: false, error: 'Failed to upgrade user plan' });
-  }
-});
-
-// Get user container information
-router.get('/users/:userId/container', requirePermission('user.read'), logAdminAction('view_user_container'), async (req, res) => {
-  try {
-    const { userId } = req.params;
-
-    const containerInfo = await containerOrchestrator.getUserContainer(userId);
-
-    if (containerInfo.success) {
-      res.json({
-        success: true,
-        container: containerInfo.container,
-        user: {
-          username: containerInfo.user.username,
-          containerType: containerInfo.user.containerType,
-          oracleAccountId: containerInfo.user.oracleAccountId,
-          resourceAllocation: containerInfo.user.resourceAllocation
-        }
-      });
-    } else {
-      res.status(404).json({ success: false, error: containerInfo.error });
-    }
-  } catch (error) {
-    logger.error('Get user container error:', error.message);
-    res.status(500).json({ success: false, error: 'Failed to get user container information' });
-  }
-});
-
-// Update user resources in database only (admin override)
-router.put('/users/:userId/resources', [
-  body('resourceAllocation.cpu').optional().isFloat({ min: 0.5, max: 8 }),
-  body('resourceAllocation.ram').optional().isInt({ min: 1, max: 48 }),
-  body('resourceAllocation.storage').optional().isInt({ min: 10, max: 1000 }),
-  body('resourceAllocation.bandwidth').optional().isInt({ min: 100, max: 10000 })
-], requirePermission('user.write'), logAdminAction('update_user_resources_db'), handleValidationErrors, async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const { resourceAllocation } = req.body;
-
-    const user = await User.findByIdAndUpdate(
-      userId,
-      { resourceAllocation },
-      { new: true }
-    ).populate('plan');
-
-    if (!user) {
-      return res.status(404).json({ success: false, error: 'User not found' });
-    }
-
-    logger.admin('User resources updated in database', {
-      adminId: req.user._id,
-      targetUserId: userId,
-      newResources: resourceAllocation
-    });
-
-    res.json({ success: true, user });
-  } catch (error) {
-    logger.error('Update user resources error:', error.message);
-    res.status(500).json({ success: false, error: 'Failed to update user resources' });
-  }
-});
-
-// ==================== RESOURCE MANAGEMENT ====================
-
-const resourceManager = require('../services/resourceManager');
-
-/**
- * GET /api/admin/users/:id/resources
- * Get detailed resource information for a user
- */
-router.get('/users/:id/resources', requirePermission('user.read'), async (req, res) => {
-  try {
-    const user = await User.findById(req.params.id).populate('plan');
-
-    if (!user) {
-      return res.status(404).json({ success: false, error: 'User not found' });
-    }
-
-    const effectiveResources = resourceManager.getEffectiveResources(user);
-
-    res.json({
-      success: true,
-      displayed: user.displayedResources,
-      allocated: user.allocatedResources,
-      effective: effectiveResources,
-      usage: user.currentResourceUsage,
-      containers: user.containers,
-      override: user.adminOverride
-    });
-
-  } catch (error) {
-    logger.error('Get user resources error:', error);
-    res.status(500).json({ success: false, error: 'Failed to get user resources' });
-  }
-});
-
-/**
- * PUT /api/admin/users/:id/resources/backend
- * Update user's backend resources only (what backend enforces)
- */
-router.put('/users/:id/resources/backend', requirePermission('user.update'), async (req, res) => {
-  try {
-    const { cpu, ram, storage, bandwidth, projects } = req.body;
-
-    const result = await resourceManager.updateUserResources(
-      req.params.id,
-      { cpu, ram, storage, bandwidth, projects },
-      'backend'
-    );
-
-    logger.admin('User backend resources updated', {
-      adminId: req.user._id,
-      userId: req.params.id,
-      resources: { cpu, ram, storage, bandwidth, projects }
-    });
-
-    res.json(result);
-
-  } catch (error) {
-    logger.error('Update backend resources error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update backend resources' });
-  }
-});
-
-/**
- * PUT /api/admin/users/:id/resources/display
- * Update user's display resources only (what user sees)
- */
-router.put('/users/:id/resources/display', requirePermission('user.update'), async (req, res) => {
-  try {
-    const { cpu, ram, storage, bandwidth, projects } = req.body;
-
-    const result = await resourceManager.updateUserResources(
-      req.params.id,
-      { cpu, ram, storage, bandwidth, projects },
-      'display'
-    );
-
-    logger.admin('User display resources updated', {
-      adminId: req.user._id,
-      userId: req.params.id,
-      resources: { cpu, ram, storage, bandwidth, projects }
-    });
-
-    res.json(result);
-
-  } catch (error) {
-    logger.error('Update display resources error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update display resources' });
-  }
-});
-
-/**
- * POST /api/admin/users/:id/resources/override
- * Apply temporary resource override with auto-expiration
- */
-router.post('/users/:id/resources/override', requirePermission('user.update'), async (req, res) => {
-  try {
-    const { cpu, ram, storage, bandwidth, duration, reason } = req.body;
-
-    if (!duration || duration < 1) {
-      return res.status(400).json({
-        success: false,
-        error: 'Duration must be at least 1 second'
-      });
-    }
-
-    const result = await resourceManager.applyAdminOverride(
-      req.params.id,
-      { cpu, ram, storage, bandwidth, duration, reason },
-      req.user._id
-    );
-
-    logger.admin('Admin override applied', {
-      adminId: req.user._id,
-      userId: req.params.id,
-      override: { cpu, ram, duration, reason }
-    });
-
-    res.json(result);
-
-  } catch (error) {
-    logger.error('Apply override error:', error);
-    res.status(500).json({ success: false, error: 'Failed to apply override' });
-  }
-});
-
-/**
- * DELETE /api/admin/users/:id/resources/override
- * Remove admin override and revert to normal resources
- */
-router.delete('/users/:id/resources/override', requirePermission('user.update'), async (req, res) => {
-  try {
-    const user = await User.findById(req.params.id);
-
-    if (!user) {
-      return res.status(404).json({ success: false, error: 'User not found' });
-    }
-
-    user.adminOverride.enabled = false;
+    const { reason } = req.body;
+    const user = await User.findById(req.params.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    user.status = 'suspended';
+    user.suspensionReason = reason || 'Admin action';
+    user.suspendedAt = new Date();
     await user.save();
 
-    // Revert to normal resources
-    const effectiveResources = resourceManager.getEffectiveResources(user);
-    for (const container of user.containers || []) {
-      await resourceManager.updateContainerResourcesLive(
-        container.id,
-        effectiveResources,
-        container.type
-      );
-    }
-
-    logger.admin('Admin override removed', {
-      adminId: req.user._id,
-      userId: req.params.id
-    });
-
-    res.json({ success: true, message: 'Override removed' });
-
+    res.json({ success: true, message: 'User suspended' });
   } catch (error) {
-    logger.error('Remove override error:', error);
-    res.status(500).json({ success: false, error: 'Failed to remove override' });
+    logger.error('Suspend user error:', error);
+    res.status(500).json({ error: 'Failed to suspend user' });
   }
 });
 
-/**
- * POST /api/admin/plans/:id/bulk-update
- * Bulk update all users on a plan
- */
-router.post('/plans/:id/bulk-update', requirePermission('plan.update'), async (req, res) => {
+// Unsuspend User
+router.put('/users/:userId/unsuspend', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { displayResources, actualResources, updateType = 'both' } = req.body;
+    const user = await User.findById(req.params.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const resources = updateType === 'display' ? displayResources :
-      updateType === 'backend' ? actualResources :
-        actualResources || displayResources;
+    user.status = 'active';
+    user.suspendedAt = null;
+    await user.save();
 
-    const result = await resourceManager.bulkUpdatePlanUsers(
-      req.params.id,
-      resources,
-      updateType
-    );
-
-    logger.admin('Plan bulk update', {
-      adminId: req.user._id,
-      planId: req.params.id,
-      updateType,
-      resources,
-      affectedUsers: result.affectedUsers
-    });
-
-    res.json(result);
-
+    res.json({ success: true, message: 'User unsuspended' });
   } catch (error) {
-    logger.error('Bulk update plan error:', error);
-    res.status(500).json({ success: false, error: 'Failed to bulk update plan' });
+    logger.error('Unsuspend user error:', error);
+    res.status(500).json({ error: 'Failed to unsuspend user' });
   }
 });
 
-/**
- * GET /api/admin/servers/stats
- * Get statistics for all servers
- */
-router.get('/servers/stats', requirePermission('server.read'), async (req, res) => {
+// Change Plan
+router.put('/users/:userId/plan', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const servers = [];
+    const { plan } = req.body; // 'free', 'pro', etc.
+    const user = await User.findById(req.params.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
 
-    for (const [key, caps] of Object.entries(containerOrchestrator.SHARED_RESOURCE_CAPS)) {
-      const users = await User.find({ oracleAccountId: key });
+    user.planType = plan;
+    await user.save();
 
-      const totalAllocated = users.reduce((sum, u) => ({
-        cpu: sum.cpu + (u.allocatedResources?.cpu || u.resourceAllocation?.cpu || 0),
-        ram: sum.ram + (u.allocatedResources?.ram || u.resourceAllocation?.ram || 0)
-      }), { cpu: 0, ram: 0 });
+    res.json({ success: true, message: `Plan updated to ${plan}` });
+  } catch (error) {
+    logger.error('Change plan error:', error);
+    res.status(500).json({ error: 'Failed to update plan' });
+  }
+});
 
-      servers.push({
-        key,
-        name: containerOrchestrator.ORACLE_SERVERS[key]?.name || key,
-        physical: {
-          cpu: caps.totalCPU,
-          ram: caps.totalRAM
-        },
-        allocated: totalAllocated,
-        available: {
-          cpu: caps.totalCPU - totalAllocated.cpu,
-          ram: caps.totalRAM - totalAllocated.ram
-        },
-        users: users.length,
-        maxUsers: caps.maxUsers,
-        utilization: {
-          cpu: ((totalAllocated.cpu / caps.totalCPU) * 100).toFixed(2),
-          ram: ((totalAllocated.ram / caps.totalRAM) * 100).toFixed(2)
-        }
-      });
+// Delete User (Soft)
+router.delete('/users/:userId', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    user.status = 'deleted';
+    user.deletedAt = new Date();
+    user.recoveryDeadline = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000); // 15 days
+    await user.save();
+
+    res.json({ success: true, message: 'User deleted (soft)' });
+  } catch (error) {
+    logger.error('Delete user error:', error);
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
+});
+
+// Get all projects
+router.get('/projects', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { limit = 50, page = 1, search } = req.query;
+    const query = {};
+
+    if (search) {
+      query.name = { $regex: search, $options: 'i' };
     }
 
-    res.json({ success: true, servers });
+    const projects = await Project.find(query)
+      .populate('owner', 'email username')
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .sort({ createdAt: -1 });
 
+    const total = await Project.countDocuments(query);
+
+    res.json({ success: true, projects, total });
   } catch (error) {
-    logger.error('Get server stats error:', error);
-    res.status(500).json({ success: false, error: 'Failed to get server stats' });
+    logger.error('Error fetching all projects:', error);
+    res.status(500).json({ error: 'Failed to fetch projects' });
+  }
+});
+
+// Recover User
+router.put('/users/:userId/recover', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    if (user.status !== 'deleted') return res.status(400).json({ error: 'User is not deleted' });
+
+    user.status = 'active';
+    user.deletedAt = null;
+    user.recoveryDeadline = null;
+    await user.save();
+
+    res.json({ success: true, message: 'User recovered' });
+  } catch (error) {
+    logger.error('Recover user error:', error);
+    res.status(500).json({ error: 'Failed to recover user' });
   }
 });
 
 module.exports = router;
-

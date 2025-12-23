@@ -228,7 +228,30 @@ deploymentSchema.methods.updateStatus = async function (status, additionalData =
   }
 
   Object.assign(this, additionalData);
-  return this.save();
+  const savedDeployment = await this.save();
+
+  // Update Project stats and references if status changed to success/failed
+  if (status === 'success') {
+    const Project = mongoose.model('Project');
+    await Project.findByIdAndUpdate(this.projectId, {
+      $set: {
+        latestDeployment: this._id,
+        productionDeployment: this.environment === 'production' ? this._id : undefined,
+        deploymentUrl: this.deploymentUrl
+      },
+      $inc: {
+        deploymentCount: 1, // Keep sync with root field
+        'stats.successfulDeployments': 1
+      }
+    });
+  } else if (status === 'failed') {
+    const Project = mongoose.model('Project');
+    await Project.findByIdAndUpdate(this.projectId, {
+      $inc: { 'stats.failedDeployments': 1 }
+    });
+  }
+
+  return savedDeployment;
 };
 
 // Set error

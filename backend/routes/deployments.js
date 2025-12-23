@@ -150,6 +150,32 @@ router.post('/', [
       });
     }
 
+    // Check for ANY active deployment for this USER (Global Lock)
+    const activeDeployment = await Deployment.findOne({
+      userId: req.user._id,
+      status: { $in: ['queued', 'building', 'deploying'] }
+    });
+
+    if (activeDeployment) {
+      return res.status(409).json({
+        success: false,
+        error: 'You already have a deployment in progress. Please wait for it to complete.',
+        activeDeploymentId: activeDeployment._id,
+        projectId: activeDeployment.projectId
+      });
+    }
+
+    // Check if deployment is blocked due to storage violations
+    if (req.user.deploymentBlocked) {
+      return res.status(403).json({
+        success: false,
+        error: 'Deployment blocked',
+        message: req.user.deploymentBlockedReason || 'Your deployments have been blocked due to repeated storage limit violations.',
+        blockedAt: req.user.deploymentBlockedAt,
+        action: 'Please clean up your files and contact support to unblock'
+      });
+    }
+
     // Create deployment
     const deployment = await Deployment.create({
       projectId,
@@ -172,6 +198,7 @@ router.post('/', [
 
     // Update project stats
     project.stats.totalDeployments += 1;
+    project.deploymentCount = (project.deploymentCount || 0) + 1; // Sync new field
     await project.save();
 
     // Update user usage

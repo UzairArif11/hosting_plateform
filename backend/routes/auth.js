@@ -54,6 +54,7 @@ const createUserFromGitHubProfile = async (profile) => {
       avatar: profile.photos?.[0]?.value || '',
       profileUrl: profile.profileUrl || '',
       plan: defaultPlan?._id || null,
+      planType: 'free',
       status: 'trial',
       subscriptionStatus: 'trial',
       isTrialActive: true,
@@ -115,7 +116,7 @@ const createPayoneerCustomerForUser = async (user) => {
   }
 };
 
-const handleGitHubAuthentication = async (accessToken, refreshToken, profile, done) => {
+const handleGitHubAuthentication = async (accessToken, refreshToken, profile, done, req) => {
   try {
     // Check if user already exists
     let user = await User.findByGithubId(profile.id);
@@ -124,17 +125,60 @@ const handleGitHubAuthentication = async (accessToken, refreshToken, profile, do
       // Update existing user data
       user = await updateExistingUser(user, profile);
 
+      // Track login IP
+      const ipAddress = req.ip || req.connection.remoteAddress;
+      const ipRestrictions = require('../services/ipRestrictions');
+      await ipRestrictions.trackIP(user._id, ipAddress, 'login');
+
       logger.security('User logged in', {
         userId: user._id,
         username: user.username,
-        loginCount: user.loginCount
+        loginCount: user.loginCount,
+        ip: ipAddress
       });
 
       return done(null, user);
     }
 
+    // Get IP address
+    const ipAddress = req.ip || req.connection.remoteAddress;
+    const email = profile.emails?.[0]?.value || `${profile.username}@github.local`;
+
+    // Check email restrictions (not IP - users can create accounts)
+    const ipRestrictions = require('../services/ipRestrictions');
+    const signupCheck = await ipRestrictions.canSignup(email, ipAddress);
+
+    if (!signupCheck.allowed) {
+      logger.warn('Signup blocked - Email restriction', {
+        email,
+        ip: ipAddress,
+        reason: signupCheck.reason
+      });
+      return done(new Error(signupCheck.reason), null);
+    }
+
+    // Check capacity before creating new user
+    const resourceMonitoring = require('../services/resourceMonitoring');
+    const capacityCheck = await resourceMonitoring.canSignupForPlan('free');
+
+    if (!capacityCheck.allowed) {
+      logger.warn('Signup blocked - capacity reached', {
+        reason: capacityCheck.reason
+      });
+      return done(new Error(capacityCheck.reason), null);
+    }
+
     // Create new user
     user = await createUserFromGitHubProfile(profile);
+
+    // Set signup IP
+    user.signupIP = ipAddress;
+    user.ipHistory = [{
+      ip: ipAddress,
+      timestamp: new Date(),
+      action: 'signup'
+    }];
+    await user.save();
 
     // Assign new user to EC2 (shared server) by default
     try {
@@ -223,6 +267,7 @@ const handleGoogleAuthentication = async (accessToken, refreshToken, profile, do
       displayName: profile.displayName || profile.name?.givenName || 'User',
       avatar: profile.photos?.[0]?.value || '',
       plan: defaultPlan?._id || null,
+      planType: 'free',
       status: 'trial',
       subscriptionStatus: 'trial',
       isTrialActive: true,
@@ -292,9 +337,10 @@ const handleGitHubCallback = async (req, res) => {
       ip: req.ip
     });
 
-    // Redirect to dashboard
+    // Redirect to dashboard or admin panel based on role
     const frontendURL = process.env.FRONTEND_URL || 'http://localhost:3000';
-    res.redirect(`${frontendURL}/dashboard`);
+    const targetPath = req.user.role === 'admin' ? '/admin' : '/dashboard';
+    res.redirect(`${frontendURL}${targetPath}`);
   } catch (error) {
     logger.error('Authentication callback error:', error.message);
     res.redirect('/login?error=callback_failed');
@@ -331,6 +377,9 @@ const getCurrentUser = async (req, res) => {
       await user.save();
     }
 
+    // Conditional resource hiding
+    const showResources = user.showResourceStats || user.role === 'admin';
+
     res.json({
       success: true,
       user: {
@@ -345,9 +394,14 @@ const getCurrentUser = async (req, res) => {
         plan: user.plan,
         trialDaysRemaining: user.trialDaysRemaining,
         isTrialActive: user.isTrialActive,
-        resourceAllocation: user.resourceAllocation,
-        currentUsage: user.currentUsage,
-        resourceUsagePercentage: user.resourceUsagePercentage,
+
+        // Resources: Hide usage if not allowed
+        resourceAllocation: user.resourceAllocation, // Limits stay visible usually
+        currentUsage: showResources ? user.currentUsage : null,
+        currentResourceUsage: showResources ? user.currentResourceUsage : null, // Added this one
+        resourceUsagePercentage: showResources ? user.resourceUsagePercentage : null,
+        displayedResources: showResources ? user.displayedResources : null, // Added this
+
         createdAt: user.createdAt
       }
     });
@@ -571,6 +625,7 @@ const handleDirectRegistration = async (req, res) => {
       email,
       password: hashedPassword,
       plan,
+      planType: plan || 'free',
       createdAt: new Date()
     });
 
@@ -670,6 +725,7 @@ const handleLogin = async (req, res) => {
         id: user._id,
         email: user.email,
         displayName: user.displayName,
+        role: user.role, // Added for frontend redirection
         plan: user.plan?.name || 'free'
       }
     });

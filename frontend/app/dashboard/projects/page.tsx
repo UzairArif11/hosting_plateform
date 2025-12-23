@@ -10,8 +10,10 @@ import {
     PlusIcon,
     MagnifyingGlassIcon,
     TrashIcon,
+    RocketLaunchIcon,
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import ProjectCardSkeleton from '@/components/ProjectCardSkeleton';
 
 export default function ProjectsPage() {
     const dispatch = useDispatch<AppDispatch>();
@@ -27,6 +29,17 @@ export default function ProjectsPage() {
     useEffect(() => {
         dispatch(fetchProjects({ page: 1, limit: 100 }));
     }, [dispatch]);
+
+    useEffect(() => {
+        if (projects.length > 0) {
+            console.log('Project Data Debug:', {
+                count: projects.length,
+                firstProject: projects[0],
+                stats: projects[0]?.deploymentCount,
+                latest: projects[0]?.latestDeployment
+            });
+        }
+    }, [projects]);
 
 
     const handleCreateProject = async (e: React.FormEvent) => {
@@ -148,8 +161,10 @@ export default function ProjectsPage() {
 
             {/* Projects Grid */}
             {loading ? (
-                <div className="text-center py-12">
-                    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500 mx-auto"></div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {[...Array(6)].map((_, i) => (
+                        <ProjectCardSkeleton key={i} />
+                    ))}
                 </div>
             ) : filteredProjects.length === 0 ? (
                 <div className="bg-gray-900 border border-gray-800 rounded-xl p-12 text-center">
@@ -198,21 +213,44 @@ export default function ProjectsPage() {
                                     <TrashIcon className="h-5 w-5" />
                                 </button>
                             </div>
-                            <div className="flex items-center justify-between">
-                                <span
-                                    className={`px-3 py-1 rounded-full text-xs font-medium ${project.status === 'active'
-                                        ? 'bg-green-500/10 text-green-500'
-                                        : 'bg-gray-500/10 text-gray-500'
-                                        }`}
-                                >
-                                    {project.status}
-                                </span>
-                                <Link
-                                    href={`/dashboard/projects/${project._id}`}
-                                    className="text-sm text-purple-400 hover:text-purple-300"
-                                >
-                                    View →
-                                </Link>
+                            <div className="mt-4 space-y-3">
+                                {/* Framework & Stats Row */}
+                                <div className="flex items-center justify-between text-sm">
+                                    <div className="flex items-center space-x-4">
+                                        <span className="text-gray-400">
+                                            {project.framework || 'Auto-detect'}
+                                        </span>
+                                        <div className="flex items-center space-x-1 text-gray-400">
+                                            <RocketLaunchIcon className="h-4 w-4" />
+                                            <span>{project.deploymentCount || 0}</span>
+                                        </div>
+                                    </div>
+                                    {project.latestDeployment?.createdAt && (
+                                        <span className="text-xs text-gray-500">
+                                            Last: {new Date(project.latestDeployment.createdAt).toLocaleDateString()}
+                                        </span>
+                                    )}
+                                </div>
+
+                                {/* Actions Row */}
+                                <div className="flex items-center justify-between pt-2 border-t border-gray-800">
+                                    <span
+                                        className={`px-3 py-1 rounded-full text-xs font-medium ${project.status === 'active'
+                                            ? 'bg-green-500/10 text-green-500'
+                                            : 'bg-gray-500/10 text-gray-500'
+                                            }`}
+                                    >
+                                        {project.status}
+                                    </span>
+                                    <div className="flex items-center space-x-2">
+                                        <Link
+                                            href={`/dashboard/projects/${project._id}`}
+                                            className="text-sm text-purple-400 hover:text-purple-300 transition-colors"
+                                        >
+                                            View →
+                                        </Link>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     ))}

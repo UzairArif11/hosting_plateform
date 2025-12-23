@@ -68,6 +68,19 @@ router.get('/', async (req, res) => {
 
     const allProjects = [...ownProjects, ...collaboratorProjects];
 
+    // Debug log for data visibility issues
+    if (allProjects.length > 0) {
+      logger.info('Sending projects data:', {
+        count: allProjects.length,
+        firstProject: {
+          id: allProjects[0]._id,
+          deploymentCount: allProjects[0].deploymentCount,
+          latestDeployment: allProjects[0].latestDeployment ? 'Present' : 'Missing',
+          status: allProjects[0].status
+        }
+      });
+    }
+
     res.json({
       success: true,
       projects: allProjects,
@@ -95,6 +108,12 @@ router.get('/:id', requireProjectAccess('viewer'), async (req, res) => {
       { path: 'productionDeployment' }
     ]);
 
+    logger.info('Sending single project data:', {
+      id: project._id,
+      deploymentCount: project.deploymentCount,
+      latestDeployment: project.latestDeployment ? 'Present' : 'Missing'
+    });
+
     res.json({
       success: true,
       project
@@ -113,6 +132,30 @@ router.post('/',
   async (req, res) => {
     try {
       const { name, repository, framework, buildConfig = {}, environmentVariables = [] } = req.body;
+
+      // Check if user can use free resources based on IP history
+      const ipRestrictions = require('../services/ipRestrictions');
+      const ipAddress = req.ip || req.connection.remoteAddress;
+      const resourceCheck = await ipRestrictions.canUseFreeResources(ipAddress, req.user._id);
+
+      if (!resourceCheck.allowed) {
+        logger.warn('Project creation blocked - IP free account limit', {
+          userId: req.user._id,
+          ip: ipAddress,
+          reason: resourceCheck.reason,
+          currentCount: resourceCheck.currentCount,
+          maxAllowed: resourceCheck.maxAllowed
+        });
+
+        return res.status(403).json({
+          success: false,
+          error: resourceCheck.reason,
+          upgradeRequired: resourceCheck.upgradeRequired,
+          currentCount: resourceCheck.currentCount,
+          maxAllowed: resourceCheck.maxAllowed,
+          message: resourceCheck.message || 'You already used free resources multiple times. Upgrade to use resources again.'
+        });
+      }
 
       // Check if user has access to the repository
       const accessCheck = await githubService.checkRepositoryAccess(
@@ -245,6 +288,31 @@ router.put('/:id',
 router.delete('/:id', requireProjectAccess('admin'), async (req, res) => {
   try {
     const project = req.project;
+
+    // Stop and remove project container
+    if (project.containerName && project.server) {
+      try {
+        const freeTierContainer = require('../services/freeTierContainer');
+        const containerOrchestrator = require('../services/containerOrchestrator');
+        const server = containerOrchestrator.ORACLE_SERVERS[project.server];
+
+        if (server) {
+          await freeTierContainer.removeProjectFromUserContainer(
+            project,
+            project.containerName,
+            server.host,
+            project.server  // Pass serverKey for SSH
+          );
+          logger.info('Project PM2 process removed', {
+            projectId: project._id,
+            containerName: project.containerName
+          });
+        }
+      } catch (containerError) {
+        logger.error('Failed to remove PM2 process:', containerError);
+        // Continue with project deletion even if PM2 cleanup fails
+      }
+    }
 
     // Update user's project count
     if (project.owner.toString() === req.user._id.toString()) {

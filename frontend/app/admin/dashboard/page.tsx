@@ -19,8 +19,17 @@ export default function AdminDashboardPage() {
 
     const fetchStats = async () => {
         try {
-            const response = await api.get('/api/admin/stats');
-            setStats(response.data);
+            const response = await api.get('/api/admin/dashboard-stats');
+            if (response.data.success) {
+                const s = response.data.stats;
+                setStats({
+                    totalUsers: s.totalUsers,
+                    activeUsers: s.activeUsers,
+                    totalProjects: s.totalProjects,
+                    activeDeployments: s.totalDeployments, // Using total for now
+                    totalRevenue: 0, // Not implemented
+                });
+            }
         } catch (error) {
             console.error('Failed to fetch stats:', error);
         } finally {

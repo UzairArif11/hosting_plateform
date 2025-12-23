@@ -9,17 +9,20 @@ import { AppDispatch, RootState } from '@/lib/store';
 export default function LoginPage() {
     const router = useRouter();
     const dispatch = useDispatch<AppDispatch>();
-    const { isAuthenticated, loading } = useSelector((state: RootState) => state.auth);
+    const { isAuthenticated, loading, user } = useSelector((state: RootState) => state.auth);
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
-    // Only redirect if already authenticated (from existing Redux state)
-    // Don't fetch user on login page to avoid CORS issues
+    // Check authentication and redirect based on role
     useEffect(() => {
-        if (isAuthenticated) {
-            router.push('/dashboard');
+        if (isAuthenticated && user) {
+            if (user.role === 'admin') {
+                router.push('/admin');
+            } else {
+                router.push('/dashboard');
+            }
         }
-    }, [isAuthenticated, router]);
+    }, [isAuthenticated, user, router]);
 
     const handleGitHubLogin = () => {
         window.location.href = `${API_URL}/api/auth/github`;
