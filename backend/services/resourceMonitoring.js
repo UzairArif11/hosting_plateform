@@ -14,22 +14,22 @@ const execAsync = promisify(exec);
 // Oracle Free Tier Limits
 const TOTAL_RESOURCES = {
     cpu: 4,      // 4 cores
-    ram: 24,     // 24 GB
-    storage: 45  // 45 GB
+    ram: 28,     // 28 GB (including swap)
+    storage: 240 // 240 GB
 };
 
 // Reserve 25% for system
 const SYSTEM_RESERVED = {
-    cpu: 1,      // 1 core
-    ram: 6,      // 6 GB
-    storage: 15  // 15 GB
+    cpu: 0.5,    // 0.5 core
+    ram: 4,      // 4 GB
+    storage: 40  // 40 GB
 };
 
-// Available for users (75%)
+// Available for users
 const AVAILABLE_FOR_USERS = {
-    cpu: 3,      // 3 cores
-    ram: 18,     // 18 GB
-    storage: 30  // 30 GB
+    cpu: 3.5,    // 3.5 cores
+    ram: 24,     // 24 GB
+    storage: 200 // 200 GB
 };
 
 // Alert threshold (70% of available)
@@ -125,9 +125,10 @@ async function getCurrentResourceUsage() {
                     usedStorage = 10; // Fallback value
                 }
             } else {
-                // Linux/Unix: Use df
-                const { stdout } = await execAsync("df -BG / | tail -1 | awk '{print $3}'");
-                usedStorage = parseInt(stdout.replace('G', ''));
+                // Linux/Unix: Use df (more robust parsing)
+                const { stdout } = await execAsync("df -BG / | tail -1");
+                const parts = stdout.trim().split(/\s+/);
+                usedStorage = parseInt(parts[2].replace('G', ''));
             }
 
             usage.storage.used = usedStorage;

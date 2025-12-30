@@ -114,10 +114,24 @@ buildQueue.on('failed', (job, error) => {
     });
 });
 
-buildQueue.on('stalled', (job) => {
+buildQueue.on('stalled', async (job) => {
     logger.warn(`Job stalled: ${job.id}`, {
         deploymentId: job.data.deploymentId
     });
+
+    try {
+        const Deployment = require('../models/Deployment');
+        const deployment = await Deployment.findById(job.data.deploymentId);
+        if (deployment && ['queued', 'building', 'deploying'].includes(deployment.status)) {
+            await deployment.updateStatus('failed', { error: { message: 'Job stalled (process likely crashed)' } });
+            websocket.emitDeploymentStatus(deployment._id, 'failed', {
+                error: 'Build process was interrupted',
+                message: 'Internal error: The build process was interrupted. Please try again.'
+            });
+        }
+    } catch (e) {
+        logger.error('Failed to handle stalled job cleanup:', e);
+    }
 });
 
 buildQueue.on('error', (error) => {

@@ -398,9 +398,9 @@ const getCurrentUser = async (req, res) => {
         // Resources: Hide usage if not allowed
         resourceAllocation: user.resourceAllocation, // Limits stay visible usually
         currentUsage: showResources ? user.currentUsage : null,
-        currentResourceUsage: showResources ? user.currentResourceUsage : null, // Added this one
+        currentResourceUsage: showResources ? user.currentResourceUsage : null,
         resourceUsagePercentage: showResources ? user.resourceUsagePercentage : null,
-        displayedResources: showResources ? user.displayedResources : null, // Added this
+        displayedResources: user.displayedResources || user.resourceAllocation, // Always show limits
 
         createdAt: user.createdAt
       }

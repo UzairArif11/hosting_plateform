@@ -152,6 +152,14 @@ export default function AdminDashboard() {
                         href="/admin/capacity"
                         color="purple"
                     />
+                    {/* Plan Management */}
+                    <ActionCard
+                        title="Plan Management"
+                        description="Configure resource limits, pricing, and sync user containers"
+                        icon="💳"
+                        href="/admin/plans"
+                        color="indigo"
+                    />
                     <ActionCard
                         title="IP Restrictions"
                         description="Manage IP-based account limits and restrictions"

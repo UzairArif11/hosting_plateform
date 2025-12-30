@@ -317,8 +317,54 @@ router.delete('/:id', requireProjectAccess('admin'), async (req, res) => {
     // Update user's project count
     if (project.owner.toString() === req.user._id.toString()) {
       req.user.currentUsage.projects = Math.max(0, req.user.currentUsage.projects - 1);
+
+      // Auto-cleanup container if no projects left (Frees resources immediately)
+      if (req.user.currentUsage.projects === 0) {
+        try {
+          const User = require('../models/User');
+          const freshUser = await User.findById(req.user._id);
+
+          const freeTierContainer = require('../services/freeTierContainer');
+          const cleanupResult = await freeTierContainer.removeUserContainer(freshUser || req.user);
+
+          if (cleanupResult.success) {
+            // Reset user resource tracking only if physically removed
+            req.user.assignedServer = null;
+            req.user.containerName = null;
+            req.user.containerId = null;
+            logger.info(`[AUTO-CLEANUP] Physically removed empty container for user ${req.user.email}`);
+          } else {
+            logger.info(`[AUTO-CLEANUP] No container found to remove for user ${req.user.email} (Already clean)`);
+          }
+        } catch (e) {
+          logger.warn(`Failed to cleanup empty container: ${e.message}`);
+        }
+      }
+
       await req.user.save();
     }
+
+    // 1. Find all active or queued deployments for this project
+    const Deployment = require('../models/Deployment');
+    const activeDeployments = await Deployment.find({
+      projectId: project._id,
+      status: { $in: ['queued', 'building', 'deploying'] }
+    });
+
+    // 2. Cancel them in the build queue to stop background processes
+    const buildQueue = require('../services/buildQueue');
+    for (const dep of activeDeployments) {
+      try {
+        await buildQueue.cancelDeployment(dep._id.toString());
+        logger.info(`Cancelled active job for deployment: ${dep._id}`);
+      } catch (err) {
+        // Job might already be finished or not in queue, ignore
+      }
+    }
+
+    // 3. Delete all deployment records from DB
+    await Deployment.deleteMany({ projectId: project._id });
+    logger.info(`Deleted all deployment records for project: ${project._id}`);
 
     await Project.findByIdAndDelete(project._id);
 

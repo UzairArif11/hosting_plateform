@@ -52,16 +52,13 @@ async function executeBuild(deploymentId, callbacks = {}) {
         const framework = await detectFramework(buildPath, deployment, onLog);
         await onProgress(25);
 
-        // Step 3: Install dependencies (SKIPPED - Remote Build)
-        await onLog('info', '📥 Dependencies will be installed in container...');
-        // await installDependencies(buildPath, framework, deployment, onLog);
+        // Step 3: Install dependencies (Local Build)
+        await onLog('info', '📥 Installing dependencies locally...');
+        await installDependencies(buildPath, framework, deployment, onLog);
         await onProgress(45);
 
-        // Step 4: Build project (SKIPPED - Remote Build)
-        await onLog('info', '🔨 Project will be built in container...');
-        // const buildOutput = await buildProject(buildPath, framework, deployment, project, onLog);
-
-        // We still need to run buildProject logic to generate server.js and .env, but NOT execute the command
+        // Step 4: Build project (Local Build)
+        await onLog('info', '🔨 Building project locally...');
         const buildOutput = await buildProject(buildPath, framework, deployment, project, onLog);
 
         await onProgress(70);
@@ -88,23 +85,33 @@ async function executeBuild(deploymentId, callbacks = {}) {
         // Cleanup local build directory
         await cleanup(buildPath);
 
-        // Cleanup remote build directory if it exists
+        // Cleanup remote build directory and Docker cache if it exists
         if (deploymentInfo.remotePath && deploymentInfo.serverKey) {
             try {
                 const { NodeSSH } = require('node-ssh');
                 const ssh = new NodeSSH();
 
-                // Get SSH config from remoteBuild module
                 const remoteBuild = require('./remoteBuild');
-                const sshConfig = remoteBuild.getSSHConfig(deploymentInfo.serverKey, containerInfo.host);
+                const serverHost = deploymentInfo.host || (deploymentInfo.serverKey === 'EC2' ? '129.154.255.90' : '152.67.11.146');
+                const sshConfig = remoteBuild.getSSHConfig(deploymentInfo.serverKey, serverHost);
 
-                await ssh.connect(sshConfig);
-                await ssh.execCommand(`rm -rf ${deploymentInfo.remotePath}`);
-                ssh.dispose();
-                await onLog('info', `🧹 Cleaned up remote build directory`);
+                if (sshConfig) {
+                    await ssh.connect(sshConfig);
+
+                    // Cleanup files
+                    await ssh.execCommand(`rm -rf ${deploymentInfo.remotePath}`);
+                    await onLog('info', `🧹 Cleaned up remote build directory`);
+
+                    // NEW: Prune dangling images to keep storage low (as requested)
+                    await ssh.execCommand('docker image prune -f');
+                    await ssh.execCommand('docker builder prune -af'); // Clear build cache too
+                    await onLog('info', `🧹 Pruned dangling Docker images and build cache on ${deploymentInfo.serverKey}`);
+
+                    ssh.dispose();
+                }
             } catch (cleanupError) {
-                // Don't fail deployment if cleanup fails
                 logger.warn(`Remote cleanup failed: ${cleanupError.message}`);
+                await onLog('warn', `Remote cleanup warning: ${cleanupError.message}`);
             }
         }
 
@@ -126,6 +133,27 @@ async function executeBuild(deploymentId, callbacks = {}) {
         if (buildPath) {
             await cleanup(buildPath);
         }
+
+        // Feature: Also prune build cache on remote server if it failed to free ROM
+        try {
+            const Project = require('../models/Project');
+            const project = await Project.findById(deployment?.projectId);
+            const User = require('../models/User');
+            const user = await User.findById(deployment?.userId);
+
+            if (user?.assignedServer) {
+                const remoteBuild = require('./remoteBuild');
+                const serverHost = process.env[`${user.assignedServer}_SERVER_IP`] || '129.154.255.90';
+                const sshConfig = remoteBuild.getSSHConfig(user.assignedServer, serverHost);
+                if (sshConfig) {
+                    const { NodeSSH } = require('node-ssh');
+                    const ssh = new NodeSSH();
+                    await ssh.connect(sshConfig);
+                    await ssh.execCommand('docker image prune -f && docker builder prune -af');
+                    ssh.dispose();
+                }
+            }
+        } catch (e) { /* ignore cleanup error */ }
 
         throw error;
     }
@@ -431,8 +459,8 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
             await onLog('info', `✓ Environment variables written (${project.environmentVariables.length} vars)`);
         }
 
-        // Execute build (SKIPPED - Remote Build)
-        if (false && framework !== 'static' && framework !== 'nodejs') {
+        // Execute build (Local Build)
+        if (framework !== 'static' && framework !== 'nodejs') {
             const { stdout, stderr } = await execAsync(buildCommand, {
                 cwd: buildPath,
                 timeout: MAX_BUILD_TIME,
@@ -661,15 +689,21 @@ async function deployToContainer(buildPath, buildOutput, deployment, project, us
 
         if (isSharedUser) {
             // For shared containers, we just need to upload the files
-            // The container is already running with Node.js/PM2
             await onLog('info', 'Shared container: Uploading files only (skipping Docker image build)...');
+
+            // Optimization: For frontend sites (React/Vue/Angular), we ONLY need the production build folder and 'server.js'
+            // Exclude node_modules, src and .git to make transfer lighting fast (usually < 1MB)
+            // Note: We keep 'public' for Svelte since its build output is often inside public/build
+            const isCompiledFrontend = ['react', 'vue', 'angular', 'nextjs', 'vite', 'cra', 'nuxtjs'].includes(deployment.framework);
+            const options = isCompiledFrontend ? { exclude: ['node_modules', 'src', 'public', '.git', '.github'] } : { exclude: 'node_modules' };
 
             await remoteBuild.uploadToRemoteServer(
                 buildPath,
                 deployment._id.toString(),
                 host,
                 serverKey,
-                onLog
+                onLog,
+                options
             );
         } else {
             // For dedicated containers, we build a full Docker image

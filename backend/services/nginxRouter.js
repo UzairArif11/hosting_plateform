@@ -1,8 +1,8 @@
 const { NodeSSH } = require('node-ssh');
 const fs = require('fs');
-const logger = require('../utils/logger');
 const path = require('path');
 const os = require('os');
+const logger = require('../utils/logger');
 const Settings = require('../models/Settings');
 
 /**
@@ -49,7 +49,10 @@ async function updateNginxRouting(projectName, port, serverHost, serverKey, depl
         logger.info(`Using domain: ${domain} for server ${serverKey}`);
 
         // Read existing config
-        const readResult = await ssh.execCommand('cat /etc/nginx/sites-available/default');
+        const readResult = await ssh.execCommand('sudo cat /etc/nginx/sites-available/default');
+        if (readResult.code !== 0) {
+            throw new Error(`Failed to read Nginx config: ${readResult.stderr}`);
+        }
         let config = readResult.stdout;
 
         // Create location block
@@ -79,7 +82,9 @@ async function updateNginxRouting(projectName, port, serverHost, serverKey, depl
             const line = lines[i];
             const trimmed = line.trim();
 
-            // Track server block
+            const openBraces = (line.match(/{/g) || []).length;
+            const closeBraces = (line.match(/}/g) || []).length;
+
             if (trimmed.startsWith('server {')) {
                 inServerBlock = true;
                 currentServerHasDomain = false;
@@ -88,38 +93,27 @@ async function updateNginxRouting(projectName, port, serverHost, serverKey, depl
                 continue;
             }
 
-            // Check if this server block has our domain
-            if (inServerBlock && trimmed.includes('server_name') &&
+            if (inServerBlock && trimmed.startsWith('server_name') &&
                 (trimmed.includes(domain) || trimmed.includes(`www.${domain}`))) {
                 currentServerHasDomain = true;
             }
 
-            // Track location blocks to avoid nesting
             if (trimmed.startsWith('location ')) {
                 inLocationBlock = true;
                 bracketDepth = 0;
             }
 
-            // Count braces to track nesting
-            const openBraces = (line.match(/{/g) || []).length;
-            const closeBraces = (line.match(/}/g) || []).length;
-
             if (inLocationBlock) {
                 bracketDepth += openBraces - closeBraces;
-                if (bracketDepth <= 0) {
-                    inLocationBlock = false;
-                }
+                if (bracketDepth <= 0) inLocationBlock = false;
             }
 
             if (inServerBlock) {
                 serverBracketDepth += openBraces - closeBraces;
             }
 
-            // Add location block before server block closes
             if (inServerBlock && currentServerHasDomain && !inLocationBlock &&
                 trimmed === '}' && serverBracketDepth === 0) {
-                // This is the closing brace of the server block
-                // Add our location block before it
                 newLines.push(locationBlock);
                 newLines.push('');
                 inServerBlock = false;
@@ -130,54 +124,33 @@ async function updateNginxRouting(projectName, port, serverHost, serverKey, depl
         }
 
         const newConfig = newLines.join('\n');
-
-        // Write to local temp file
         const tempFile = path.join(os.tmpdir(), `nginx-${Date.now()}.conf`);
         fs.writeFileSync(tempFile, newConfig);
 
-        // Upload to remote
         await ssh.putFile(tempFile, '/tmp/nginx-default.conf');
-
-        // Move to correct location
         await ssh.execCommand('sudo mv /tmp/nginx-default.conf /etc/nginx/sites-available/default');
+        try { fs.unlinkSync(tempFile); } catch (e) { }
 
-        // Clean up local temp file
-        fs.unlinkSync(tempFile);
-
-        // Test config
         const testResult = await ssh.execCommand('sudo nginx -t 2>&1');
-        if (testResult.code !== 0) {
-            logger.error(`Nginx test failed: ${testResult.stdout}`);
+        if (!testResult.stdout.includes('successful') && !testResult.stdout.includes('syntax is ok')) {
             throw new Error(`Nginx config test failed: ${testResult.stdout}`);
         }
 
-        // Reload Nginx
         await ssh.execCommand('sudo systemctl reload nginx');
 
-        // Get protocol from settings
         const settings = await Settings.getSettings();
         const protocol = settings.protocol;
         const fullUrl = `${protocol}://${domain}/${urlPath}/`;
         logger.info(`✅ Nginx routing updated: ${fullUrl} → localhost:${port}`);
 
         ssh.dispose();
-
-        return {
-            success: true,
-            url: fullUrl,
-            urlPath: urlPath
-        };
+        return { success: true, url: fullUrl, urlPath: urlPath };
 
     } catch (error) {
         logger.error(`Failed to update Nginx routing: ${error.message}`);
         ssh.dispose();
-        return {
-            success: false,
-            error: error.message
-        };
+        return { success: false, error: error.message };
     }
 }
 
-module.exports = {
-    updateNginxRouting
-};
+module.exports = { updateNginxRouting };

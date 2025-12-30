@@ -157,12 +157,21 @@ router.post('/', [
     });
 
     if (activeDeployment) {
-      return res.status(409).json({
-        success: false,
-        error: 'You already have a deployment in progress. Please wait for it to complete.',
-        activeDeploymentId: activeDeployment._id,
-        projectId: activeDeployment.projectId
-      });
+      // PRO-ACTIVE FIX: Check if the project for this "active" deployment still exists
+      const activeProjectExists = await Project.exists({ _id: activeDeployment.projectId });
+
+      if (!activeProjectExists) {
+        logger.warn(`Found ghost deployment ${activeDeployment._id} for non-existent project. Cleaning up.`);
+        await activeDeployment.updateStatus('failed', { error: { message: 'Project deleted during deployment' } });
+        // Allow the current request to proceed
+      } else {
+        return res.status(409).json({
+          success: false,
+          error: 'You already have a deployment in progress. Please wait for it to complete.',
+          activeDeploymentId: activeDeployment._id,
+          projectId: activeDeployment.projectId
+        });
+      }
     }
 
     // Check if deployment is blocked due to storage violations

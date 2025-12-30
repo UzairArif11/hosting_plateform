@@ -15,6 +15,15 @@ interface User {
     isTrialActive: boolean;
     resourceAllocation: any;
     currentUsage: any;
+    currentResourceUsage: any;
+    displayedResources: {
+        cpu: number;
+        ram: number;
+        storage: number;
+        bandwidth: number;
+        projects: number;
+        containers: number;
+    } | null;
     resourceUsagePercentage: any;
     createdAt: string;
 }

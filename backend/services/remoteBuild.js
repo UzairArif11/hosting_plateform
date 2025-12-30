@@ -1,5 +1,8 @@
 const { NodeSSH } = require('node-ssh');
 const path = require('path');
+const { exec } = require('child_process');
+const { promisify } = require('util');
+const execAsync = promisify(exec);
 const logger = require('../utils/logger');
 const fsPromises = require('fs').promises;
 const fs = require('fs');
@@ -164,7 +167,7 @@ async function testSSHConnection(serverHost, serverKey) {
  * Upload build files to remote server (without building Docker image)
  * Used for shared container deployments
  */
-async function uploadToRemoteServer(buildPath, deploymentId, serverHost, serverKey, onLog) {
+async function uploadToRemoteServer(buildPath, deploymentId, serverHost, serverKey, onLog, options = {}) {
     const ssh = new NodeSSH();
     try {
         await onLog('info', `📡 Connecting to ${serverHost} via SSH...`);
@@ -180,16 +183,46 @@ async function uploadToRemoteServer(buildPath, deploymentId, serverHost, serverK
         await ssh.execCommand(`mkdir -p ${remotePath}`);
         await onLog('info', `📁 Created remote directory: ${remotePath}`);
 
-        await onLog('info', `📤 Copying build files to ${serverHost}...`);
+        // Create a compressed archive of the build directory for MUCH faster transfer
+        const tarFileName = `build-${deploymentId}.tar.gz`;
+        const localTarPath = path.join(path.dirname(buildPath), tarFileName);
+        const remoteTarPath = `/tmp/${tarFileName}`;
 
-        // Upload the build directory
-        await ssh.putDirectory(buildPath, remotePath, {
-            recursive: true,
-            concurrency: 10,
-            validate: (itemPath) => !itemPath.includes('node_modules')
-        });
+        await onLog('info', `📦 Compressing build files for fast transfer...`);
 
-        await onLog('info', `✅ Files copied successfully`);
+        // Use system tar
+        // Handle exclusions if provided (to skip node_modules for static sites)
+        let excludeCmd = '';
+        if (options.exclude) {
+            const excludes = Array.isArray(options.exclude) ? options.exclude : [options.exclude];
+            excludeCmd = excludes.map(ex => `--exclude="${ex}"`).join(' ') + ' ';
+        }
+
+        await execAsync(`tar ${excludeCmd}-czf "${localTarPath}" -C "${buildPath}" .`);
+
+        // Get compressed size for logging
+        const stats = await fsPromises.stat(localTarPath);
+        const compressedSizeMB = (stats.size / 1024 / 1024).toFixed(2);
+        await onLog('info', `📤 Uploading compressed archive (${compressedSizeMB} MB) to ${serverHost}...`);
+
+        // Upload the single tarball
+        await ssh.putFile(localTarPath, remoteTarPath);
+
+        await onLog('info', `🔓 Extracting files on ${serverKey}...`);
+
+        // Extract archive remotely
+        // -x: extract, -z: uncompress, -f: file, -C: destination directory
+        await ssh.execCommand(`tar -xzf ${remoteTarPath} -C ${remotePath}`);
+
+        // Cleanup
+        await ssh.execCommand(`rm ${remoteTarPath}`);
+        try {
+            await fsPromises.unlink(localTarPath);
+        } catch (e) {
+            logger.warn(`Failed to delete local tarball: ${e.message}`);
+        }
+
+        await onLog('info', `✅ Files copied and extracted successfully`);
         ssh.dispose();
         return { success: true, remotePath };
 

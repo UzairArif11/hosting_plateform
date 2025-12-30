@@ -8,6 +8,7 @@
     "dev": "nodemon server.js",
     "test": "jest",
     "build": "echo 'Backend build complete'",
+    "seed:plans": "node seeders/planSeeder.js",
     "pm2:start": "pm2 start ecosystem.config.js",
     "pm2:stop": "pm2 stop all",
     "pm2:restart": "pm2 restart all",

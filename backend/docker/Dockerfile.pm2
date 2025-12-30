@@ -1,0 +1,29 @@
+# Custom Node.js Alpine Image with PM2 Pre-installed
+# This eliminates the 20+ second PM2 installation wait on each container creation
+
+FROM node:18-alpine
+
+# Install PM2 globally with optimized flags
+RUN npm install -g pm2@latest \
+    --no-audit \
+    --no-fund \
+    --silent \
+    --prefer-offline \
+    --no-optional
+
+# Verify PM2 installation
+RUN pm2 --version
+
+# Create app directory
+WORKDIR /app
+
+# Set environment variables
+ENV NODE_ENV=production
+ENV PM2_PUBLIC_KEY=
+ENV PM2_SECRET_KEY=
+
+# Expose default port (will be overridden by host networking)
+EXPOSE 3000
+
+# Keep container running
+CMD ["pm2-runtime", "start", "ecosystem.config.js"]

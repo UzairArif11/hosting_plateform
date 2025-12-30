@@ -24,9 +24,9 @@ const handleValidationErrors = (req, res, next) => {
 router.get('/plans', async (req, res) => {
   try {
     const { currency = 'usd' } = req.query;
-    
+
     const plans = await Plan.findActivePlans();
-    
+
     // Format plans with pricing for requested currency
     const formattedPlans = plans.map(plan => ({
       id: plan._id,
@@ -35,7 +35,8 @@ router.get('/plans', async (req, res) => {
       description: plan.description,
       price: plan.getPricingForCurrency(currency),
       formattedPrice: plan.formattedPricing[currency.toLowerCase()],
-      resources: plan.resources,
+      resources: plan.displayResources || plan.resources, // Use display resources for frontend
+      actualResources: plan.resources, // Keep actual resources if needed for debugging
       features: plan.features.filter(f => f.enabled),
       billingCycle: plan.billingCycle,
       isDefault: plan.isDefault,
@@ -57,7 +58,7 @@ router.get('/plans', async (req, res) => {
 router.get('/info', async (req, res) => {
   try {
     const user = await User.findById(req.user._id).populate('plan');
-    
+
     const billingInfo = {
       currentPlan: user.plan ? {
         id: user.plan._id,
@@ -149,7 +150,7 @@ router.post('/create-session', [
 
     // Get plan price for selected currency
     const amount = plan.getPricingForCurrency(currency.toLowerCase());
-    
+
     if (amount === 0) {
       return res.status(400).json({
         success: false,
@@ -402,9 +403,9 @@ router.delete('/payment-method/:id', async (req, res) => {
 router.get('/exchange-rates', async (req, res) => {
   try {
     const { from = 'USD', to = 'PKR' } = req.query;
-    
+
     const rateResult = await payoneerService.getExchangeRate(from, to);
-    
+
     res.json({
       success: true,
       exchangeRate: {

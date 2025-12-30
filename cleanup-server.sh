@@ -79,11 +79,24 @@ fi
 echo ""
 echo -e "${BLUE}━━━ Step 2: Removing All Docker Images ━━━${NC}"
 
+# Ask about Custom Image
+read -p "Do you want to preserve the Custom PM2 Image? (y/n): " -n 1 -r
+echo
+PRESERVE_IMG=$REPLY
+
 IMAGES=$(docker images -q 2>/dev/null || echo "")
 if [ -n "$IMAGES" ]; then
-    echo "Removing all Docker images..."
-    docker rmi -f $(docker images -q) 2>/dev/null || true
-    echo -e "${GREEN}✓ All images removed${NC}"
+    echo "Removing Docker images..."
+    
+    if [[ $PRESERVE_IMG =~ ^[Yy]$ ]]; then
+        # Remove everything EXCEPT node-pm2-alpine
+        echo "Preserving node-pm2-alpine:latest..."
+        docker images | grep -v "node-pm2-alpine" | awk '{print $3}' | grep -v "IMAGE" | xargs -r docker rmi -f 2>/dev/null || true
+        echo -e "${GREEN}✓ Images removed (Costum PM2 image preserved)${NC}"
+    else
+        docker rmi -f $(docker images -q) 2>/dev/null || true
+        echo -e "${GREEN}✓ All images removed${NC}"
+    fi
 else
     echo "No images to remove"
 fi

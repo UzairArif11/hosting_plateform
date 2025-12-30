@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import api from '@/lib/api';
+import InfraScanner from './InfraScanner';
 
 interface Server {
     domain: string;
@@ -181,6 +182,11 @@ export default function ServerManagement() {
                             )}
                         </div>
                     ))}
+                </div>
+
+                {/* Infrastructure Scan Utility */}
+                <div className="mt-12">
+                    <InfraScanner />
                 </div>
 
                 {/* Help Section */}

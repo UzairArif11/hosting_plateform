@@ -158,6 +158,10 @@ const projectSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  isProtected: {
+    type: Boolean,
+    default: false
+  },
 
   // Deployment References
   latestDeployment: {

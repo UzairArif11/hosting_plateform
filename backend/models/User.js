@@ -74,6 +74,10 @@ const userSchema = new mongoose.Schema({
     enum: ['active', 'suspended', 'banned', 'trial'],
     default: 'trial'
   },
+  isProtected: {
+    type: Boolean,
+    default: false
+  },
 
   // Billing and subscription
   plan: {
@@ -282,6 +286,20 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null,
     description: 'Docker container ID for user\'s main container'
+  },
+  containerName: {
+    type: String,
+    default: null,
+    description: 'Docker container name for user\'s main container'
+  },
+  assignedServer: {
+    type: String,
+    enum: ['EC2', 'EC3', null],
+    default: null
+  },
+  assignedPort: {
+    type: Number,
+    default: null
   },
   serverAssignmentHistory: [{
     server: {

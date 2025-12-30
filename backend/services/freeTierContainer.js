@@ -26,11 +26,11 @@ async function createUserContainer(user, serverKey, server, resources) {
         });
 
         // Create container with Node.js and PM2
-        logger.info('🐳 [CREATE_CONTAINER] Calling docker.runContainer with node:18-alpine');
-        const result = await docker.runContainer('node:18-alpine', containerName, {
+        logger.info('🐳 [CREATE_CONTAINER] Calling docker.runContainer with node-pm2-alpine:latest');
+        const result = await docker.runContainer('node-pm2-alpine:latest', containerName, {
             host: server.host,
             port: port,
-            memory: resources.ram * 1024, // GB to MB
+            memory: resources.ram * 1024,
             cpu: resources.cpu,
             storage: resources.storage,
             env: [
@@ -39,27 +39,28 @@ async function createUserContainer(user, serverKey, server, resources) {
                 `PLAN_TYPE=${user.planType || 'free'}`
             ],
             restart: 'unless-stopped',
-            networkMode: 'host', // Use host networking
-            // Keep container running
-            cmd: ['sh', '-c', 'apk add --no-cache git && npm install -g pm2 && pm2 start /dev/null --name keepalive && tail -f /dev/null']
+            networkMode: 'host',
+            cmd: ['sh', '-c', 'apk add --no-cache git && pm2 start /dev/null --name keepalive && tail -f /dev/null']
         });
 
-        // Handle "Container Already Exists" (Conflict) gracefully
+        // Handle "Container Already Exists" (Conflict) by removing and recreating (Applies new limits)
         if (!result.success) {
             if (result.error && (result.error.includes('Conflict') || result.error.includes('already in use'))) {
-                logger.info('⚠️ [CREATE_CONTAINER] Container already exists, reusing it:', containerName);
+                logger.info('⚠️ [CREATE_CONTAINER] Container name conflict. Removing old container to apply new limits:', containerName);
 
-                // Fetch existing container details to get ID
-                // Note: We assume it's healthy if it exists
-                // If we really wanted to be robust, we'd inspect it here.
+                try {
+                    const dockerClient = docker.getDockerClient(server.host);
+                    const oldContainer = dockerClient.getContainer(containerName);
+                    await oldContainer.stop().catch(() => { });
+                    await oldContainer.remove().catch(() => { });
 
-                return {
-                    success: true,
-                    containerName: containerName,
-                    containerId: result.containerId || 'existing', // docker.run might not return ID on failure
-                    port: port, // Reuse the port meant for this allocation session (or fetch from DB if needed, but irrelevant for Host Mode)
-                    reused: true
-                };
+                    // RETRY Creation
+                    logger.info('♻️ [CREATE_CONTAINER] Old container removed. Retrying creation...');
+                    return await createUserContainer(user, serverKey, server, resources);
+                } catch (retryErr) {
+                    logger.error('❌ [CREATE_CONTAINER] Failed during conflict resolution:', retryErr.message);
+                    throw new Error(`Conflict resolution failed: ${retryErr.message}`);
+                }
             }
 
             logger.error('❌ [CREATE_CONTAINER] Failed to create container:', result.error);
@@ -152,26 +153,19 @@ async function deployProjectToUserContainer(user, project, buildPath, containerI
         }
 
 
-        // Install dependencies AND Build inside container (Remote Build)
+        /* 
+        // SKIPPED: Internal Build (Replaced by Local Build in buildExecutor)
         logger.info(`📦 Running npm install & build inside container...`);
-
-        // Add memory optimization flags for React/Node builds
-        // PUBLIC_URL='.' makes React use relative paths (works with any subpath)
-        const buildCommand = `docker exec ${containerName} sh -c "cd ${projectPath} && [ -f package.json ] && npm install && NODE_OPTIONS='--max-old-space-size=900' PUBLIC_URL='.' GENERATE_SOURCEMAP=false npm run build --if-present"`;
+        const ramLimitMB = Math.floor((user.resourceAllocation?.ram || 1) * 1024);
+        const maxHeapSize = Math.floor(ramLimitMB * 0.75);
+        const buildCommand = `docker exec ${containerName} sh -c "cd ${projectPath} && [ -f package.json ] && npm install --no-audit --no-fund && NODE_OPTIONS='--max-old-space-size=${maxHeapSize}' PUBLIC_URL='.' GENERATE_SOURCEMAP=false npm run build --if-present"`;
         const buildResult = await ssh.execCommand(buildCommand);
-
-        // Log the build output
-        if (buildResult.stdout) {
-            logger.info(`Build output: ${buildResult.stdout.substring(0, 500)}`);
-        }
-        if (buildResult.stderr) {
-            logger.warn(`Build warnings: ${buildResult.stderr.substring(0, 500)}`);
-        }
-
-        // Check if build succeeded
+        
         if (buildResult.code !== 0) {
             throw new Error(`Build failed with code ${buildResult.code}: ${buildResult.stderr}`);
         }
+        */
+        logger.info(`✅ Using pre-built artifacts from local build.`);
 
         // Verify build directory was created
         const checkBuildDir = await ssh.execCommand(`docker exec ${containerName} ls -la ${projectPath}/build`);
@@ -181,6 +175,9 @@ async function deployProjectToUserContainer(user, project, buildPath, containerI
             logger.info(`✅ Build directory verified: ${projectPath}/build`);
         }
 
+
+
+        // PM2 is pre-installed in custom image, no wait needed
 
         // Check if PM2 process already exists and delete it
         const pm2ListCommand = `docker exec ${containerName} pm2 list`;
@@ -194,11 +191,14 @@ async function deployProjectToUserContainer(user, project, buildPath, containerI
         }
 
         // Start project with PM2
+        logger.info(`🚀 Starting PM2 process for project: ${project._id}`);
         const startCommand = `docker exec ${containerName} pm2 start ${projectPath}/server.js --name ${project._id} -- --port ${port}`;
         const startResult = await ssh.execCommand(startCommand);
 
         if (startResult.code !== 0) {
-            throw new Error(`Failed to start PM2 process: ${startResult.stderr}`);
+            const errorMsg = (startResult.stderr || startResult.stdout || 'Unknown error').trim();
+            logger.error(`Failed to start PM2 process: ${errorMsg}`);
+            throw new Error(`Failed to start PM2 process: ${errorMsg}`);
         }
 
         // Save PM2 process list
@@ -386,11 +386,65 @@ async function listProjectsInUserContainer(containerName, host, serverKey) {
     }
 }
 
+/**
+ * Completely remove user container (e.g. when last project is deleted)
+ */
+async function removeUserContainer(user) {
+    try {
+        const userId = user._id || user.id;
+        let serversToTry = [];
+
+        if (user.assignedServer) {
+            serversToTry.push(user.assignedServer);
+        } else {
+            // If server metadata is missing, try all known servers
+            serversToTry = ['EC2', 'EC3'];
+        }
+
+        let removed = false;
+
+        for (const serverKey of serversToTry) {
+            const containerName = user.containerName || `${serverKey}-user-${userId}`;
+            // Correct ENV keys and fallbacks for this specific environment (EC3 is on 129.154.255.90)
+            const host = process.env[`${serverKey}_SERVER_IP`] || (serverKey === 'EC3' ? '129.154.255.90' : '129.154.255.90');
+
+            try {
+                logger.info(`[REMOVE_CONTAINER] Checking for ${containerName} on ${serverKey} (${host})...`);
+                const dockerClient = docker.getDockerClient(host);
+                const container = dockerClient.getContainer(containerName);
+
+                // Check if it exists before trying to stop
+                const info = await container.inspect();
+                if (info) {
+                    logger.info(`[REMOVE_CONTAINER] Found container ${containerName} on ${serverKey}. Stopping and removing...`);
+                    await container.stop();
+                    await container.remove();
+                    logger.info(`✅ Container ${containerName} removed from ${serverKey}`);
+                    removed = true;
+                }
+            } catch (e) {
+                // Ignore if container not found on this specific server
+                if (!e.message.includes('404')) {
+                    logger.warn(`[REMOVE_CONTAINER] Error on ${serverKey}: ${e.message}`);
+                }
+            }
+        }
+
+        return { success: removed };
+
+    } catch (error) {
+        logger.error('Failed to remove user container:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+
 module.exports = {
     createUserContainer,
     deployProjectToUserContainer,
     stopProjectInUserContainer,
     removeProjectFromUserContainer,
     listProjectsInUserContainer,
+    removeUserContainer,
     getAvailablePort
 };

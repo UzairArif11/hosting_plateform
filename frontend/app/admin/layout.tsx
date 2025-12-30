@@ -69,6 +69,9 @@ export default function AdminLayout({
                         <a href="/admin/servers" className="block px-4 py-2 text-gray-300 hover:bg-gray-800 rounded-lg">
                             🖥️ Servers
                         </a>
+                        <a href="/admin/plans" className="block px-4 py-2 text-gray-300 hover:bg-gray-800 rounded-lg">
+                            💳 Plans
+                        </a>
                         <a href="/admin/settings" className="block px-4 py-2 text-gray-300 hover:bg-gray-800 rounded-lg">
                             ⚙️ Settings
                         </a>

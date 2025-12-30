@@ -226,11 +226,22 @@ async function cleanupOrphanedContainers() {
                 .map(p => p.activeContainer.id)
         );
 
+        // Fetch PROTECTED items
+        const protectedProjects = await Project.find({ isProtected: true }).select('activeContainer');
+        const protectedUsers = await User.find({ isProtected: true }).select('containerName');
+
+        const protectedContainerIds = new Set(
+            protectedProjects
+                .filter(p => p.activeContainer?.id)
+                .map(p => p.activeContainer.id)
+        );
+        const protectedNames = new Set(protectedUsers.map(u => u.containerName).filter(Boolean));
+
         let cleaned = 0;
 
         for (const container of allContainers) {
-            // Skip if it's an active container
-            if (activeContainerIds.has(container.Id)) {
+            // Skip if it's an active container or protected
+            if (activeContainerIds.has(container.Id) || protectedContainerIds.has(container.Id)) {
                 continue;
             }
 
@@ -238,6 +249,13 @@ async function cleanupOrphanedContainers() {
 
             // Skip if containerName is still undefined/null
             if (!containerName) {
+                continue;
+            }
+
+            // Skip protected by name (for user-level protection)
+            const cleanName = containerName.replace(/^\//, '');
+            if (protectedNames.has(cleanName)) {
+                logger.info(`Skipping protected container: ${cleanName}`);
                 continue;
             }
 
@@ -249,7 +267,8 @@ async function cleanupOrphanedContainers() {
             // Skip system containers
             if (containerName.includes('nginx') ||
                 containerName.includes('mongo') ||
-                containerName.includes('redis')) {
+                containerName.includes('redis') ||
+                containerName.startsWith('/SYSTEM-')) {
                 continue;
             }
 

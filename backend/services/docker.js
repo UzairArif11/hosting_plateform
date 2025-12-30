@@ -121,9 +121,9 @@ const runContainer = async (imageName, containerName, options = {}) => {
         PortBindings: {
           '80/tcp': [{ HostPort: String(options.port || '3000') }]  // Map nginx port 80 to host port
         },
-        Memory: (options.memory || 512) * 1024 * 1024, // Convert MB to bytes
+        Memory: Math.floor((options.memory || 512) * 1024 * 1024), // Convert MB to bytes
         CpuShares: Math.round((options.cpu || 1) * 1024), // CPU shares (Soft Limit)
-        NanoCpus: Math.round((options.cpu || 1) * 1000000000), // CPU Hard Limit (1 CPU = 1e9 NanoCPU)
+        NanoCpus: Math.floor((options.cpu || 1) * 1000000000), // CPU Hard Limit (1 CPU = 1e9 NanoCPU)
         // StorageOpt: options.storage ? { size: `${options.storage}G` } : undefined, // DISABLED due to fs incompatibility
         RestartPolicy: {
           Name: options.restart || 'unless-stopped'
@@ -725,8 +725,8 @@ const runContainerWithVolumes = async (imageName, containerName, options = {}) =
         PortBindings: {
           '3000/tcp': [{ HostPort: options.port || '3000' }]
         },
-        Memory: (options.memory || 512) * 1024 * 1024, // Convert MB to bytes
-        CpuShares: (options.cpu || 1) * 1024, // CPU shares
+        Memory: Math.floor((options.memory || 512) * 1024 * 1024), // Convert MB to bytes
+        CpuShares: Math.round((options.cpu || 1) * 1024), // CPU shares
         RestartPolicy: {
           Name: 'unless-stopped'
         },
@@ -847,7 +847,7 @@ module.exports = {
   cleanupOldContainers,
   createDataVolume,
   removeDataVolume,
-  backupContainerData,
-  restoreContainerData
+  restoreContainerData,
+  getDockerClient: createDockerClient
 };
 

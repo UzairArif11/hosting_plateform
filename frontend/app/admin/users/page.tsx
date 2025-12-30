@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
+import toast from 'react-hot-toast';
 
 interface User {
     _id: string;
@@ -226,11 +227,20 @@ export default function UserManagement() {
                                 user={user}
                                 selected={selectedUsers.has(user._id)}
                                 onSelect={() => handleSelectUser(user._id)}
-                                onSuspend={(reason) => handleSuspendUser(user._id, reason)}
+                                onSuspend={(reason: string) => handleSuspendUser(user._id, reason)}
                                 onUnsuspend={() => handleUnsuspendUser(user._id)}
                                 onDelete={() => handleDeleteUser(user._id)}
                                 onRecover={() => handleRecoverUser(user._id)}
-                                onChangePlan={(plan) => handleChangePlan(user._id, plan)}
+                                onChangePlan={(plan: string) => handleChangePlan(user._id, plan)}
+                                onToggleProtection={async (isProtected: boolean) => {
+                                    try {
+                                        await api.put(`/api/admin/users/${user._id}/protection`, { isProtected });
+                                        fetchUsers();
+                                        toast.success(isProtected ? 'User marked as PROTECTED' : 'User protection removed');
+                                    } catch (err) {
+                                        toast.error('Failed to update protection');
+                                    }
+                                }}
                             />
                         ))}
                     </div>
@@ -252,8 +262,18 @@ export default function UserManagement() {
     );
 }
 
-function UserRow({ user, selected, onSelect, onSuspend, onUnsuspend, onDelete, onRecover, onChangePlan }: any) {
+function UserRow({ user, selected, onSelect, onSuspend, onUnsuspend, onDelete, onRecover, onChangePlan, onToggleProtection }: any) {
     const [showActions, setShowActions] = useState(false);
+    const [isProtecting, setIsProtecting] = useState(false);
+
+    const handleToggleProtection = async () => {
+        setIsProtecting(true);
+        try {
+            await onToggleProtection(!user.isProtected);
+        } finally {
+            setIsProtecting(false);
+        }
+    };
 
     const getStatusBadge = () => {
         const badges = {
@@ -287,6 +307,11 @@ function UserRow({ user, selected, onSelect, onSuspend, onUnsuspend, onDelete, o
                             <span className="px-3 py-1 rounded-full text-xs font-semibold bg-purple-500/20 text-purple-400 border border-purple-500/30">
                                 {user.plan || 'free'}
                             </span>
+                            {user.isProtected && (
+                                <span className="px-3 py-1 rounded-full text-[10px] font-black bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center gap-1 shadow-lg shadow-blue-500/10">
+                                    🛡️ PROTECTED
+                                </span>
+                            )}
                         </div>
                     </div>
 
@@ -335,6 +360,16 @@ function UserRow({ user, selected, onSelect, onSuspend, onUnsuspend, onDelete, o
                                     <option value="pro">Pro</option>
                                     <option value="enterprise">Enterprise</option>
                                 </select>
+                                <button
+                                    onClick={handleToggleProtection}
+                                    disabled={isProtecting}
+                                    className={`text-xs px-3 py-1 rounded border transition font-bold ${user.isProtected
+                                            ? 'bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-500/10'
+                                            : 'bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border-blue-500/30'
+                                        }`}
+                                >
+                                    {isProtecting ? '...' : user.isProtected ? 'UNPROTECT' : 'PROTECT'}
+                                </button>
                                 <button
                                     onClick={() => {
                                         if (confirm('Delete this user? (15-day recovery period)')) {

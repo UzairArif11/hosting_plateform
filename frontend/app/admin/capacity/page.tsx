@@ -1,362 +1,348 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import api from '@/lib/api';
+import {
+    CpuChipIcon,
+    ServerIcon,
+    CircleStackIcon,
+    BoltIcon,
+    ExclamationTriangleIcon,
+    CheckCircleIcon,
+    CalculatorIcon
+} from '@heroicons/react/24/outline';
+import toast from 'react-hot-toast';
 
-interface ResourceUsage {
-    cpu: { total: number; used: number; available: number; percentage: number };
-    ram: { total: number; used: number; available: number; percentage: number };
-    storage: { total: number; used: number; available: number; percentage: number };
-}
-
-interface Capacity {
-    allocated: any;
-    remaining: any;
-    capacity: {
-        free: number;
-        pro: number;
-        enterprise: number;
-        canAcceptNewUsers: boolean;
-        limitReached: boolean;
+interface ServerCapacity {
+    serverName: string;
+    resources: {
+        total: ResourceSet;
+        allocated: ResourceSet;
+        available: ResourceSet;
+        reserved: ResourceSet;
     };
+    usage: ResourceSet;
+    warnings: Warning[];
+    planLimits: PlanLimit[];
+    lastUpdated: string;
 }
 
-interface Recommendations {
-    allocated: any;
-    remaining: any;
-    capacity: any;
-    usage: ResourceUsage;
-    recommendations: Array<{
-        level: string;
-        message: string;
-        action: string;
-    }>;
+interface ResourceSet {
+    cpu: number;
+    ram: number;
+    storage: number;
+    bandwidth: number;
 }
 
-export default function ResourceCapacity() {
-    const [usage, setUsage] = useState<ResourceUsage | null>(null);
-    const [capacity, setCapacity] = useState<Capacity | null>(null);
-    const [recommendations, setRecommendations] = useState<Recommendations | null>(null);
-    const [limits, setLimits] = useState<any>(null);
+interface Warning {
+    type: string;
+    level: 'warning' | 'critical';
+    message: string;
+}
+
+interface PlanLimit {
+    planName: string;
+    maxUsers: number;
+    currentUsers: number;
+    priority: number;
+}
+
+interface Plan {
+    name: string;
+    displayName: string;
+    resources: ResourceSet;
+}
+
+export default function CapacityPage() {
+    const [servers, setServers] = useState<ServerCapacity[]>([]);
+    const [plans, setPlans] = useState<Plan[]>([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    const [selectedServer, setSelectedServer] = useState<string | null>(null);
+    const [simulatedLimits, setSimulatedLimits] = useState<Record<string, number>>({});
+    const [projection, setProjection] = useState<ResourceSet | null>(null);
 
     useEffect(() => {
         fetchData();
-        const interval = setInterval(fetchData, 30000); // Refresh every 30 seconds
-
-        // Cleanup interval on unmount
-        return () => clearInterval(interval);
     }, []);
 
     const fetchData = async () => {
         try {
-            setError(null);
-            const token = localStorage.getItem('token');
+            const [capacityRes, plansRes] = await Promise.all([
+                api.get('/api/admin/capacity'),
+                api.get('/api/admin/plans')
+            ]);
+            setServers(capacityRes.data.servers);
+            setPlans(plansRes.data.plans);
 
-            if (!token) {
-                setError('No authentication token found');
-                setLoading(false);
-                return;
+            if (capacityRes.data.servers.length > 0) {
+                setSelectedServer(capacityRes.data.servers[0].serverName);
+                initializeSimulatedLimits(capacityRes.data.servers[0]);
             }
 
-            const [usageRes, capacityRes, recommendationsRes, limitsRes] = await Promise.all([
-                fetch('/api/resources/usage', { headers: { 'Authorization': `Bearer ${token}` } }),
-                fetch('/api/resources/capacity', { headers: { 'Authorization': `Bearer ${token}` } }),
-                fetch('/api/resources/recommendations', { headers: { 'Authorization': `Bearer ${token}` } }),
-                fetch('/api/resources/limits', { headers: { 'Authorization': `Bearer ${token}` } })
-            ]);
-
-            // Check for errors
-            if (!usageRes.ok || !capacityRes.ok || !recommendationsRes.ok || !limitsRes.ok) {
-                throw new Error('Failed to fetch resource data');
-            }
-
-            const [usageData, capacityData, recommendationsData, limitsData] = await Promise.all([
-                usageRes.json(),
-                capacityRes.json(),
-                recommendationsRes.json(),
-                limitsRes.json()
-            ]);
-
-            setUsage(usageData);
-            setCapacity(capacityData);
-            setRecommendations(recommendationsData);
-            setLimits(limitsData);
             setLoading(false);
-        } catch (error: any) {
-            console.error('Failed to fetch resource data:', error);
-            setError(error.message || 'Failed to load resource data');
+        } catch (error) {
+            toast.error('Failed to load capacity data');
             setLoading(false);
         }
     };
 
+    const initializeSimulatedLimits = (server: ServerCapacity) => {
+        const limits: Record<string, number> = {};
+        server.planLimits.forEach(l => {
+            limits[l.planName] = l.maxUsers;
+        });
+        setSimulatedLimits(limits);
+    };
+
+    const handleServerChange = (serverName: string) => {
+        setSelectedServer(serverName);
+        const server = servers.find(s => s.serverName === serverName);
+        if (server) {
+            initializeSimulatedLimits(server);
+        }
+    };
+
+    const calculateProjection = () => {
+        if (!selectedServer) return null;
+        const server = servers.find(s => s.serverName === selectedServer);
+        if (!server) return null;
+
+        let cpuUsed = server.reservedResources.cpu;
+        let ramUsed = server.reservedResources.ram;
+        let storageUsed = server.reservedResources.storage;
+
+        Object.entries(simulatedLimits).forEach(([planName, limit]) => {
+            const plan = plans.find(p => p.name === planName);
+            if (plan && limit > 0) {
+                cpuUsed += plan.resources.cpu * limit;
+                ramUsed += plan.resources.ram * limit;
+                storageUsed += plan.resources.storage * limit;
+            }
+        });
+
+        return {
+            cpu: server.resources.total.cpu - cpuUsed,
+            ram: server.resources.total.ram - ramUsed,
+            storage: server.resources.total.storage - storageUsed,
+            bandwidth: 0
+        };
+    };
+
+    const saveLimits = async () => {
+        if (!selectedServer) return;
+
+        try {
+            const limits = Object.entries(simulatedLimits).map(([planName, maxUsers]) => ({
+                planName,
+                maxUsers
+            }));
+
+            await api.put(`/api/admin/capacity/${selectedServer}/limits`, { limits });
+            toast.success('Capacity limits updated');
+            fetchData();
+        } catch (error) {
+            toast.error('Failed to update limits');
+        }
+    };
+
+    const simulatedProjection = calculateProjection();
+
     if (loading) {
         return (
-            <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex items-center justify-center">
-                <div className="text-white text-xl">Loading resource data...</div>
+            <div className="flex items-center justify-center min-h-screen">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
             </div>
         );
     }
 
+    const currentServer = servers.find(s => s.serverName === selectedServer);
+
     return (
-        <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 p-8">
-            <div className="max-w-7xl mx-auto">
-                {/* Header */}
-                <div className="mb-8">
-                    <h1 className="text-4xl font-bold text-white mb-2">📊 Resource Capacity Planning</h1>
-                    <p className="text-gray-300">Oracle Free Tier - 4 CPU, 24GB RAM, 45GB Storage</p>
+        <div className="p-8 max-w-7xl mx-auto space-y-8">
+            <div className="flex justify-between items-center">
+                <div>
+                    <h1 className="text-4xl font-bold text-white">Capacity Planning</h1>
+                    <p className="text-gray-400 mt-2">Monitor server load and set safe plan limits to prevent overselling.</p>
                 </div>
 
-                {/* Alerts */}
-                {recommendations && recommendations.recommendations.filter(r => r.level === 'critical').length > 0 && (
-                    <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-6 mb-8">
-                        <h3 className="text-xl font-bold text-red-400 mb-4">🚨 Critical Alerts</h3>
+                <div className="flex bg-gray-900 rounded-lg p-1 border border-gray-800">
+                    {servers.map(server => (
+                        <button
+                            key={server.serverName}
+                            onClick={() => handleServerChange(server.serverName)}
+                            className={`px-6 py-2 rounded-md text-sm font-bold transition ${selectedServer === server.serverName
+                                    ? 'bg-purple-600 text-white'
+                                    : 'text-gray-400 hover:text-white'
+                                }`}
+                        >
+                            {server.serverName}
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            {currentServer && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    {/* Live Stats Card */}
+                    <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-3xl p-8 space-y-8">
+                        <div className="flex items-center space-x-3 mb-6">
+                            <ServerIcon className="h-6 w-6 text-blue-400" />
+                            <h2 className="text-xl font-bold text-white">Live Server Status</h2>
+                        </div>
+
+                        {/* CPU */}
                         <div className="space-y-2">
-                            {recommendations.recommendations.filter(r => r.level === 'critical').map((rec, idx) => (
-                                <div key={idx} className="bg-red-500/10 border border-red-500/30 rounded p-3">
-                                    <p className="text-red-400 font-semibold">{rec.message}</p>
-                                    <p className="text-gray-300 text-sm">{rec.action}</p>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
-                {/* Resource Usage */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    <ResourceCard
-                        title="CPU Usage"
-                        icon="⚡"
-                        used={usage?.cpu.used.toFixed(2) || 0}
-                        total={limits?.total.cpu || 4}
-                        available={limits?.availableForUsers.cpu || 3}
-                        percentage={usage?.cpu.percentage || 0}
-                        unit="cores"
-                    />
-                    <ResourceCard
-                        title="RAM Usage"
-                        icon="🧠"
-                        used={usage?.ram.used.toFixed(2) || 0}
-                        total={limits?.total.ram || 24}
-                        available={limits?.availableForUsers.ram || 18}
-                        percentage={usage?.ram.percentage || 0}
-                        unit="GB"
-                    />
-                    <ResourceCard
-                        title="Storage Usage"
-                        icon="💾"
-                        used={usage?.storage.used || 0}
-                        total={limits?.total.storage || 45}
-                        available={limits?.availableForUsers.storage || 30}
-                        percentage={usage?.storage.percentage || 0}
-                        unit="GB"
-                    />
-                </div>
-
-                {/* Capacity by Plan */}
-                <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg p-6 mb-8">
-                    <h2 className="text-2xl font-bold text-white mb-6">Available Capacity by Plan</h2>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <PlanCapacityCard
-                            plan="Free"
-                            icon="🆓"
-                            capacity={capacity?.capacity.free || 0}
-                            allocated={capacity?.allocated.free.count || 0}
-                            resources={limits?.planResources.free}
-                            color="blue"
-                        />
-                        <PlanCapacityCard
-                            plan="Pro"
-                            icon="⭐"
-                            capacity={capacity?.capacity.pro || 0}
-                            allocated={capacity?.allocated.pro.count || 0}
-                            resources={limits?.planResources.pro}
-                            color="purple"
-                        />
-                        <PlanCapacityCard
-                            plan="Enterprise"
-                            icon="👑"
-                            capacity={capacity?.capacity.enterprise || 0}
-                            allocated={capacity?.allocated.enterprise.count || 0}
-                            resources={limits?.planResources.enterprise}
-                            color="yellow"
-                        />
-                    </div>
-
-                    {capacity?.capacity.limitReached && (
-                        <div className="mt-6 bg-red-500/10 border border-red-500/30 rounded-lg p-4">
-                            <p className="text-red-400 font-semibold">
-                                ⚠️ Server capacity reached! New signups are blocked.
-                            </p>
-                            <p className="text-gray-300 text-sm mt-2">
-                                Clean up inactive users or upgrade server to accept new users.
-                            </p>
-                        </div>
-                    )}
-                </div>
-
-                {/* Resource Allocation */}
-                <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg p-6 mb-8">
-                    <h2 className="text-2xl font-bold text-white mb-6">Current Resource Allocation</h2>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <AllocationCard
-                            title="CPU Allocated"
-                            allocated={capacity?.allocated.total.cpu.toFixed(2) || 0}
-                            remaining={capacity?.remaining.cpu.toFixed(2) || 0}
-                            total={limits?.availableForUsers.cpu || 3}
-                            unit="cores"
-                        />
-                        <AllocationCard
-                            title="RAM Allocated"
-                            allocated={capacity?.allocated.total.ram.toFixed(2) || 0}
-                            remaining={capacity?.remaining.ram.toFixed(2) || 0}
-                            total={limits?.availableForUsers.ram || 18}
-                            unit="GB"
-                        />
-                        <AllocationCard
-                            title="Storage Allocated"
-                            allocated={capacity?.allocated.total.storage.toFixed(2) || 0}
-                            remaining={capacity?.remaining.storage.toFixed(2) || 0}
-                            total={limits?.availableForUsers.storage || 30}
-                            unit="GB"
-                        />
-                    </div>
-                </div>
-
-                {/* Recommendations */}
-                {recommendations && recommendations.recommendations.length > 0 && (
-                    <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg p-6">
-                        <h2 className="text-2xl font-bold text-white mb-6">💡 Recommendations</h2>
-                        <div className="space-y-3">
-                            {recommendations.recommendations.map((rec, idx) => (
+                            <div className="flex justify-between text-sm">
+                                <span className="text-gray-400">CPU Usage</span>
+                                <span className="text-white font-mono">{currentServer.usage.cpu}%</span>
+                            </div>
+                            <div className="h-4 bg-gray-800 rounded-full overflow-hidden">
                                 <div
-                                    key={idx}
-                                    className={`border rounded-lg p-4 ${rec.level === 'critical'
-                                        ? 'bg-red-500/10 border-red-500/30'
-                                        : rec.level === 'warning'
-                                            ? 'bg-yellow-500/10 border-yellow-500/30'
-                                            : 'bg-blue-500/10 border-blue-500/30'
+                                    className={`h-full rounded-full transition-all duration-500 ${Number(currentServer.usage.cpu) > 80 ? 'bg-red-500' : 'bg-blue-500'
                                         }`}
-                                >
-                                    <p className={`font-semibold ${rec.level === 'critical'
-                                        ? 'text-red-400'
-                                        : rec.level === 'warning'
-                                            ? 'text-yellow-400'
-                                            : 'text-blue-400'
-                                        }`}>
-                                        {rec.message}
-                                    </p>
-                                    <p className="text-gray-300 text-sm mt-1">{rec.action}</p>
+                                    style={{ width: `${currentServer.usage.cpu}%` }}
+                                />
+                            </div>
+                            <div className="flex justify-between text-xs text-gray-500">
+                                <span>{currentServer.resources.allocated.cpu.toFixed(1)} Used</span>
+                                <span>{currentServer.resources.total.cpu} Total OCPU</span>
+                            </div>
+                        </div>
+
+                        {/* RAM */}
+                        <div className="space-y-2">
+                            <div className="flex justify-between text-sm">
+                                <span className="text-gray-400">RAM Usage</span>
+                                <span className="text-white font-mono">{currentServer.usage.ram}%</span>
+                            </div>
+                            <div className="h-4 bg-gray-800 rounded-full overflow-hidden">
+                                <div
+                                    className={`h-full rounded-full transition-all duration-500 ${Number(currentServer.usage.ram) > 85 ? 'bg-red-500' : 'bg-purple-500'
+                                        }`}
+                                    style={{ width: `${currentServer.usage.ram}%` }}
+                                />
+                            </div>
+                            <div className="flex justify-between text-xs text-gray-500">
+                                <span>{currentServer.resources.allocated.ram.toFixed(1)} GB Used</span>
+                                <span>{currentServer.resources.total.ram} GB Total</span>
+                            </div>
+                        </div>
+
+                        {/* Storage */}
+                        <div className="space-y-2">
+                            <div className="flex justify-between text-sm">
+                                <span className="text-gray-400">Storage Usage</span>
+                                <span className="text-white font-mono">{currentServer.usage.storage}%</span>
+                            </div>
+                            <div className="h-4 bg-gray-800 rounded-full overflow-hidden">
+                                <div
+                                    className={`h-full rounded-full transition-all duration-500 ${Number(currentServer.usage.storage) > 90 ? 'bg-red-500' : 'bg-green-500'
+                                        }`}
+                                    style={{ width: `${currentServer.usage.storage}%` }}
+                                />
+                            </div>
+                            <div className="flex justify-between text-xs text-gray-500">
+                                <span>{currentServer.resources.allocated.storage.toFixed(1)} GB Used</span>
+                                <span>{currentServer.resources.total.storage} GB Total</span>
+                            </div>
+                        </div>
+
+                        {currentServer.warnings.length > 0 && (
+                            <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 space-y-2">
+                                {currentServer.warnings.map((w, i) => (
+                                    <div key={i} className="flex items-center space-x-2 text-red-400 text-sm">
+                                        <ExclamationTriangleIcon className="h-4 w-4" />
+                                        <span>{w.message}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Limit Calculator */}
+                    <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-3xl p-8 space-y-6">
+                        <div className="flex items-center space-x-3 mb-6">
+                            <CalculatorIcon className="h-6 w-6 text-purple-400" />
+                            <h2 className="text-xl font-bold text-white">Plan Limits & Calculator</h2>
+                        </div>
+
+                        <p className="text-sm text-gray-400">
+                            Set maximum active users per plan. The system calculates remaining capacity based on these limits.
+                        </p>
+
+                        <div className="space-y-4">
+                            {plans.map(plan => (
+                                <div key={plan.name} className="flex items-center justify-between bg-black/20 p-4 rounded-xl border border-white/5">
+                                    <div className="flex-1">
+                                        <h3 className="text-white font-medium">{plan.displayName}</h3>
+                                        <p className="text-xs text-gray-500">
+                                            {plan.resources.cpu} CPU • {plan.resources.ram} GB RAM
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-col items-end">
+                                        <label className="text-xs text-gray-500 mb-1">Max Users</label>
+                                        <input
+                                            type="number"
+                                            value={simulatedLimits[plan.name] || 0}
+                                            onChange={(e) => setSimulatedLimits({
+                                                ...simulatedLimits,
+                                                [plan.name]: parseInt(e.target.value) || 0
+                                            })}
+                                            className="w-20 bg-gray-800 border-gray-700 text-white rounded px-2 py-1 text-sm text-right focus:ring-purple-500"
+                                        />
+                                    </div>
                                 </div>
                             ))}
                         </div>
+
+                        <div className="border-t border-gray-800 pt-6 space-y-4">
+                            <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Projected Free Capacity</h3>
+
+                            {simulatedProjection && (
+                                <div className="grid grid-cols-3 gap-2">
+                                    <div className={`p-3 rounded-lg border ${simulatedProjection.cpu < 0 ? 'bg-red-500/10 border-red-500/30' : 'bg-blue-500/10 border-blue-500/30'}`}>
+                                        <p className="text-xs text-gray-400">Free CPU</p>
+                                        <p className={`text-lg font-bold ${simulatedProjection.cpu < 0 ? 'text-red-400' : 'text-blue-400'}`}>
+                                            {simulatedProjection.cpu.toFixed(1)}
+                                        </p>
+                                    </div>
+                                    <div className={`p-3 rounded-lg border ${simulatedProjection.ram < 0 ? 'bg-red-500/10 border-red-500/30' : 'bg-purple-500/10 border-purple-500/30'}`}>
+                                        <p className="text-xs text-gray-400">Free RAM</p>
+                                        <p className={`text-lg font-bold ${simulatedProjection.ram < 0 ? 'text-red-400' : 'text-purple-400'}`}>
+                                            {simulatedProjection.ram.toFixed(1)} GB
+                                        </p>
+                                    </div>
+                                    <div className={`p-3 rounded-lg border ${simulatedProjection.storage < 0 ? 'bg-red-500/10 border-red-500/30' : 'bg-green-500/10 border-green-500/30'}`}>
+                                        <p className="text-xs text-gray-400">Free Storage</p>
+                                        <p className={`text-lg font-bold ${simulatedProjection.storage < 0 ? 'text-red-400' : 'text-green-400'}`}>
+                                            {simulatedProjection.storage.toFixed(0)} GB
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {simulatedProjection && (simulatedProjection.cpu < 0 || simulatedProjection.ram < 0 || simulatedProjection.storage < 0) ? (
+                                <p className="text-red-400 text-xs flex items-center gap-1">
+                                    <ExclamationTriangleIcon className="h-4 w-4" />
+                                    Warning: Current limits exceed server capacity!
+                                </p>
+                            ) : (
+                                <p className="text-green-400 text-xs flex items-center gap-1">
+                                    <CheckCircleIcon className="h-4 w-4" />
+                                    Safe Configuration
+                                </p>
+                            )}
+
+                            <button
+                                onClick={saveLimits}
+                                className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-purple-500/20"
+                            >
+                                Apply Capacity Limits
+                            </button>
+                        </div>
                     </div>
-                )}
-
-                {/* Refresh Button */}
-                <div className="mt-8 text-center">
-                    <button
-                        onClick={fetchData}
-                        className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg transition"
-                    >
-                        🔄 Refresh Data
-                    </button>
-                    <p className="text-gray-400 text-sm mt-2">Auto-refreshes every 30 seconds</p>
                 </div>
-            </div>
-        </div>
-    );
-}
-
-function ResourceCard({ title, icon, used, total, available, percentage, unit }: any) {
-    const getColor = () => {
-        if (percentage >= 90) return 'red';
-        if (percentage >= 70) return 'yellow';
-        return 'green';
-    };
-
-    const colors = {
-        red: 'from-red-500/20 to-red-600/20 border-red-500/30',
-        yellow: 'from-yellow-500/20 to-yellow-600/20 border-yellow-500/30',
-        green: 'from-green-500/20 to-green-600/20 border-green-500/30'
-    };
-
-    return (
-        <div className={`bg-gradient-to-br ${colors[getColor()]} border rounded-lg p-6`}>
-            <div className="flex items-center justify-between mb-4">
-                <span className="text-4xl">{icon}</span>
-                <span className="text-3xl font-bold text-white">{percentage.toFixed(1)}%</span>
-            </div>
-            <h3 className="text-white font-semibold mb-2">{title}</h3>
-            <div className="space-y-1 text-sm text-gray-300">
-                <p>Used: <strong className="text-white">{used} {unit}</strong></p>
-                <p>Available: <strong className="text-white">{available} {unit}</strong></p>
-                <p>Total: <strong className="text-white">{total} {unit}</strong></p>
-            </div>
-            <div className="mt-3 bg-black/20 rounded-full h-2">
-                <div
-                    className={`h-2 rounded-full ${percentage >= 90 ? 'bg-red-500' : percentage >= 70 ? 'bg-yellow-500' : 'bg-green-500'
-                        }`}
-                    style={{ width: `${Math.min(percentage, 100)}%` }}
-                />
-            </div>
-        </div>
-    );
-}
-
-function PlanCapacityCard({ plan, icon, capacity, allocated, resources, color }: any) {
-    const colors: any = {
-        blue: 'from-blue-500/20 to-blue-600/20 border-blue-500/30',
-        purple: 'from-purple-500/20 to-purple-600/20 border-purple-500/30',
-        yellow: 'from-yellow-500/20 to-yellow-600/20 border-yellow-500/30'
-    };
-
-    return (
-        <div className={`bg-gradient-to-br ${colors[color]} border rounded-lg p-6`}>
-            <div className="flex items-center justify-between mb-4">
-                <span className="text-4xl">{icon}</span>
-                <span className="text-3xl font-bold text-white">{capacity}</span>
-            </div>
-            <h3 className="text-xl font-bold text-white mb-2">{plan} Plan</h3>
-            <p className="text-gray-300 mb-3">
-                <strong className="text-white">{allocated}</strong> users active
-            </p>
-            <div className="space-y-1 text-xs text-gray-400">
-                <p>CPU: {resources?.cpu} cores</p>
-                <p>RAM: {resources?.ram} MB</p>
-                <p>Storage: {resources?.storage} GB</p>
-            </div>
-            <div className="mt-4">
-                {capacity > 0 ? (
-                    <span className="text-green-400 text-sm">✅ {capacity} slots available</span>
-                ) : (
-                    <span className="text-red-400 text-sm">⚠️ No slots available</span>
-                )}
-            </div>
-        </div>
-    );
-}
-
-function AllocationCard({ title, allocated, remaining, total, unit }: any) {
-    const percentage = (allocated / total) * 100;
-
-    return (
-        <div className="bg-black/20 border border-white/10 rounded-lg p-6">
-            <h3 className="text-white font-semibold mb-4">{title}</h3>
-            <div className="space-y-2 text-sm text-gray-300">
-                <p>Allocated: <strong className="text-white">{allocated} {unit}</strong></p>
-                <p>Remaining: <strong className="text-white">{remaining} {unit}</strong></p>
-                <p>Total: <strong className="text-white">{total} {unit}</strong></p>
-            </div>
-            <div className="mt-3 bg-black/30 rounded-full h-2">
-                <div
-                    className="h-2 rounded-full bg-blue-500"
-                    style={{ width: `${Math.min(percentage, 100)}%` }}
-                />
-            </div>
-            <p className="text-gray-400 text-xs mt-2">{percentage.toFixed(1)}% allocated</p>
+            )}
         </div>
     );
 }

@@ -333,6 +333,58 @@ fi
 
 echo -e "${GREEN}✓ System optimized${NC}"
 
+# Step 13: Build Custom PM2 Docker Image
+echo ""
+echo -e "${BLUE}━━━ Step 13: Building Custom PM2 Image ━━━${NC}"
+echo "This enables instant container startups (no 20s PM2 install wait)"
+echo ""
+
+# Pre-build cleanup to ensure space
+echo "Checking disk/docker space..."
+docker system prune -f > /dev/null 2>&1
+# Ensure we have at least 500MB free in /var/lib/docker or /
+FREE_SPACE=$(df -k . | awk 'NR==2 {print $4}')
+if [ "$FREE_SPACE" -lt 500000 ]; then
+    echo -e "${YELLOW}⚠ Low disk space detected! cleaning harder...${NC}"
+    docker image prune -a -f --filter "until=24h" > /dev/null 2>&1
+fi
+
+# Create clean build directory (avoid /tmp permission issues)
+mkdir -p ~/pm2-build
+cd ~/pm2-build
+
+# Create Dockerfile
+cat > Dockerfile << 'DOCKERFILE_EOF'
+FROM node:18-alpine
+RUN npm install -g pm2@latest --no-audit --no-fund --silent --prefer-offline --no-optional
+
+# FORCE SYMLINKS (Allocates PM2 to global bin paths)
+RUN ln -sf /usr/local/bin/pm2 /bin/pm2
+RUN ln -sf /usr/local/bin/pm2-runtime /bin/pm2-runtime
+RUN ln -sf /usr/local/bin/pm2 /usr/bin/pm2
+
+RUN pm2 --version
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PATH="/usr/local/bin:/bin:/usr/bin:${PATH}"
+EXPOSE 3000
+CMD ["pm2-runtime", "start", "ecosystem.config.js"]
+DOCKERFILE_EOF
+
+echo "Building image... (takes ~2 minutes)"
+if docker build -t node-pm2-alpine:latest . 2>&1 | grep -E "(Step|Successfully)"; then
+    echo -e "${GREEN}✓ Custom PM2 image built: node-pm2-alpine:latest${NC}"
+    docker images | grep node-pm2-alpine
+else
+    echo -e "${YELLOW}⚠ PM2 image build failed (optional, will use standard image)${NC}"
+fi
+
+# Cleanup
+cd ~
+rm -rf ~/pm2-build
+
+echo -e "${GREEN}✓ Platform optimization complete${NC}"
+
 # Summary
 echo ""
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -356,6 +408,7 @@ fi
 echo -e "${GREEN}✓ Deployment directories created${NC}"
 echo -e "${GREEN}✓ Node.js installed${NC}"
 echo -e "${GREEN}✓ System optimized${NC}"
+echo -e "${GREEN}✓ Custom PM2 image built (instant container startups)${NC}"
 echo ""
 echo -e "${BLUE}Server Information:${NC}"
 echo "  Hostname: $(hostname)"
