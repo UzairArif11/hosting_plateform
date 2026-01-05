@@ -9,7 +9,41 @@ const Plan = require('../models/Plan');
 const ServerCapacity = require('../models/ServerCapacity');
 const docker = require('../services/docker');
 const logger = require('../utils/logger');
-const { getRemoteSystemStats, ORACLE_SERVERS } = require('../services/containerOrchestrator');
+const { getRemoteSystemStats, getServerUtilization, getRemoteDockerStats, getRemoteContainerLogs, ORACLE_SERVERS } = require('../services/containerOrchestrator');
+
+// ... imports remain the same ...
+
+// Get container logs
+router.get('/servers/:serverKey/containers/:containerId/logs', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { serverKey, containerId } = req.params;
+
+    // validate server key
+    if (!ORACLE_SERVERS[serverKey]) {
+      return res.status(404).json({ success: false, error: 'Server not found' });
+    }
+
+    const result = await getRemoteContainerLogs(serverKey, containerId);
+
+    if (!result) {
+      return res.status(500).json({ success: false, error: 'Failed to connect to server' });
+    }
+
+    if (!result.success) {
+      return res.status(400).json({ success: false, error: result.error });
+    }
+
+    res.json({
+      success: true,
+      logs: result.logs
+    });
+  } catch (error) {
+    logger.error('Get container logs error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch container logs' });
+  }
+});
+
+// ==================== SERVER CAPACITY MANAGEMENT ====================
 const containerUpgrade = require('../services/containerUpgrade');
 const buildQueue = require('../services/buildQueue');
 
@@ -435,11 +469,18 @@ router.get('/plans/:id', requireAuth, requireAdmin, async (req, res) => {
 router.post('/plans', requireAuth, requireAdmin, async (req, res) => {
   try {
     const planData = req.body;
+    logger.info('Attempting to create plan:', { ...planData, features: planData.features?.length }); // Log data
     const plan = new Plan(planData);
     await plan.save();
     res.json({ success: true, plan });
   } catch (error) {
     logger.error('Create plan error:', error);
+    // Be verbose about validation errors
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(val => val.message);
+      logger.error('Validation Messages:', messages);
+      return res.status(400).json({ error: 'Validation Error', details: messages });
+    }
     res.status(500).json({ error: 'Failed to create plan', details: error.message });
   }
 });
@@ -879,10 +920,763 @@ router.put('/capacity/:serverName/limits', requireAuth, requireAdmin, async (req
       }
     });
 
+
   } catch (error) {
     logger.error('Update limits error:', error);
     res.status(500).json({ error: 'Failed to update limits' });
   }
 });
 
+// ==================== PLAN MANAGEMENT ROUTES ====================
+
+// Get all plans
+router.get('/plans', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const plans = await Plan.find({}).sort({ 'pricing.usd': 1 });
+
+    // Get user count for each plan
+    const plansWithUserCount = await Promise.all(
+      plans.map(async (plan) => {
+        const userCount = await User.countDocuments({ plan: plan._id });
+        return {
+          ...plan.toObject(),
+          activeUsers: userCount
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      plans: plansWithUserCount
+    });
+  } catch (error) {
+    logger.error('Get plans error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch plans' });
+  }
+});
+
+// Get single plan
+router.get('/plans/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const plan = await Plan.findById(req.params.id);
+
+    if (!plan) {
+      return res.status(404).json({ success: false, error: 'Plan not found' });
+    }
+
+    const userCount = await User.countDocuments({ plan: plan._id });
+
+    res.json({
+      success: true,
+      plan: {
+        ...plan.toObject(),
+        activeUsers: userCount
+      }
+    });
+  } catch (error) {
+    logger.error('Get plan error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch plan' });
+  }
+});
+
+// Create new plan
+router.post('/plans', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const {
+      name,
+      displayName,
+      description,
+      pricing,
+      resources,
+      features,
+      isTrial,
+      isActive,
+      billingCycle,
+      oracleConfig
+    } = req.body;
+
+    // Validate required fields
+    if (!name || !displayName || !description || !pricing || !resources) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: name, displayName, description, pricing, resources'
+      });
+    }
+
+    // Check if plan name already exists
+    const existing = await Plan.findOne({ name });
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        error: `Plan with name "${name}" already exists`
+      });
+    }
+
+    const plan = new Plan({
+      name,
+      displayName,
+      description,
+      pricing,
+      resources,
+      features: features || [],
+      isTrial: isTrial || false,
+      isActive: isActive !== undefined ? isActive : true,
+      billingCycle: billingCycle || 'monthly',
+      oracleConfig: oracleConfig || { accountType: 'shared' }
+    });
+
+    await plan.save();
+
+    logger.info('Plan created by admin', {
+      adminId: req.user._id,
+      planId: plan._id,
+      planName: plan.name
+    });
+
+    res.status(201).json({
+      success: true,
+      plan,
+      message: 'Plan created successfully'
+    });
+  } catch (error) {
+    logger.error('Create plan error:', error);
+    res.status(400).json({
+      success: false,
+      error: error.message || 'Failed to create plan'
+    });
+  }
+});
+
+// Update plan
+router.put('/plans/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const plan = await Plan.findById(req.params.id);
+
+    if (!plan) {
+      return res.status(404).json({ success: false, error: 'Plan not found' });
+    }
+
+    // Check how many users are on this plan
+    const userCount = await User.countDocuments({ plan: plan._id });
+
+    const {
+      displayName,
+      description,
+      pricing,
+      resources,
+      features,
+      isActive,
+      billingCycle,
+      oracleConfig
+    } = req.body;
+
+    // Update allowed fields
+    if (displayName) plan.displayName = displayName;
+    if (description) plan.description = description;
+    if (pricing) plan.pricing = pricing;
+    if (resources) plan.resources = resources;
+    if (features) plan.features = features;
+    if (isActive !== undefined) plan.isActive = isActive;
+    if (billingCycle) plan.billingCycle = billingCycle;
+    if (oracleConfig) plan.oracleConfig = oracleConfig;
+
+    await plan.save();
+
+    logger.info('Plan updated by admin', {
+      adminId: req.user._id,
+      planId: plan._id,
+      planName: plan.name,
+      affectedUsers: userCount
+    });
+
+    res.json({
+      success: true,
+      plan,
+      message: `Plan updated successfully. ${userCount} users affected.`
+    });
+  } catch (error) {
+    logger.error('Update plan error:', error);
+    res.status(400).json({
+      success: false,
+      error: error.message || 'Failed to update plan'
+    });
+  }
+});
+
+// Delete (deactivate) plan
+router.delete('/plans/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const plan = await Plan.findById(req.params.id);
+
+    if (!plan) {
+      return res.status(404).json({ success: false, error: 'Plan not found' });
+    }
+
+    // Check if any users are using this plan
+    const userCount = await User.countDocuments({ plan: plan._id });
+
+    if (userCount > 0) {
+      return res.status(409).json({
+        success: false,
+        error: `Cannot delete plan "${plan.name}". ${userCount} users are currently using this plan.`,
+        affectedUsers: userCount,
+        suggestion: 'Deactivate the plan instead or migrate users to another plan first.'
+      });
+    }
+
+    // Safe to delete since no users
+    await plan.deleteOne();
+
+    logger.warn('Plan deleted by admin', {
+      adminId: req.user._id,
+      planId: plan._id,
+      planName: plan.name
+    });
+
+    res.json({
+      success: true,
+      message: `Plan "${plan.name}" deleted successfully`
+    });
+  } catch (error) {
+    logger.error('Delete plan error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete plan'
+    });
+  }
+});
+
+// ==================== SERVER MANAGEMENT ROUTES ====================
+
+// Get all servers with real-time stats
+router.get('/servers', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const servers = ['EC2', 'EC3'];
+
+    const serverStats = await Promise.all(
+      servers.map(async (serverKey) => {
+        const stats = await getRemoteSystemStats(serverKey);
+        const utilization = await getServerUtilization(serverKey);
+
+        // Count containers on this server
+        const containerCount = await User.countDocuments({ assignedServer: serverKey });
+
+        return {
+          serverKey,
+          serverInfo: ORACLE_SERVERS[serverKey],
+          systemStats: stats || { success: false, error: 'Unable to fetch stats' },
+          utilization: utilization || { success: false },
+          containerCount,
+          isOnline: stats?.success || false
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      servers: serverStats,
+      timestamp: new Date()
+    });
+  } catch (error) {
+    logger.error('Get servers error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch server stats' });
+  }
+});
+
+// Get specific server details
+router.get('/servers/:serverKey', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { serverKey } = req.params;
+
+    if (!ORACLE_SERVERS[serverKey]) {
+      return res.status(404).json({ success: false, error: 'Server not found' });
+    }
+
+    const [stats, utilization] = await Promise.all([
+      getRemoteSystemStats(serverKey),
+      getServerUtilization(serverKey)
+    ]);
+
+    // Get all users on this server
+    const users = await User.find({ assignedServer: serverKey })
+      .select('_id email username containerName resourceAllocation currentResourceUsage')
+      .limit(100);
+
+    res.json({
+      success: true,
+      server: {
+        key: serverKey,
+        info: ORACLE_SERVERS[serverKey],
+        stats,
+        utilization,
+        users: {
+          count: users.length,
+          list: users
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('Get server details error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch server details' });
+  }
+});
+
+// Get detailed Docker stats for a server
+router.get('/servers/:serverKey/docker-stats', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { serverKey } = req.params;
+    const server = ORACLE_SERVERS[serverKey];
+
+    if (!server) {
+      return res.status(404).json({ success: false, error: 'Server not found' });
+    }
+
+    // Fetch system info, container list, and REAL resource stats in parallel
+    const [systemInfo, containersResult, realStats] = await Promise.all([
+      getRemoteSystemStats(serverKey),
+      docker.listContainers(server.host, true), // true = all containers
+      getRemoteDockerStats(serverKey) // SSH-based real stats
+    ]);
+
+    if (!containersResult.success) {
+      throw new Error(containersResult.error || 'Failed to list containers');
+    }
+
+    // Create a map of real stats for easy lookup (key = container name)
+    const statsMap = {};
+    if (realStats && Array.isArray(realStats)) {
+      realStats.forEach(stat => {
+        statsMap[stat.name] = stat;
+      });
+    }
+
+    // Process containers using real stats where available
+    const containerList = containersResult.containers.map(c => {
+      const name = c.names[0].replace(/^\//, ''); // Remove leading slash
+      const realStat = statsMap[name];
+
+      // Default empty stats
+      let stats = {
+        cpu: '0%',
+        memory: { usage: '0 MB', limit: '0 GB', percent: '0%' },
+        network: { rx: '0 MB', tx: '0 MB' }
+      };
+
+      // Populate if available (usually only for running containers)
+      if (realStat) {
+        // Parse Memory string "18.36MiB / 7.63GiB"
+        let memUsage = realStat.memUsage || '0B / 0B';
+        let [usage, limit] = memUsage.split(' / ');
+
+        // Parse Net I/O "1.2kB / 0B"
+        let netIO = realStat.netIO || '0B / 0B';
+        let [rx, tx] = netIO.split(' / ');
+
+        stats = {
+          cpu: realStat.cpu || '0%',
+          memory: {
+            usage: usage || '0B',
+            limit: limit || '0B',
+            percent: realStat.memPerc || '0%'
+          },
+          network: {
+            rx: rx || '0B',
+            tx: tx || '0B'
+          }
+        };
+      }
+
+      return {
+        id: c.id.substring(0, 12),
+        name: name,
+        image: c.image,
+        state: c.state,
+        status: c.status,
+        stats: stats
+      };
+    });
+
+    const running = containerList.filter(c => c.state === 'running').length;
+
+    res.json({
+      success: true,
+      docker: {
+        containers: {
+          total: containerList.length,
+          running,
+          stopped: containerList.length - running,
+          list: containerList
+        },
+        system: systemInfo.success ? {
+          version: systemInfo.version || 'Unknown',
+          operatingSystem: systemInfo.os || 'Linux',
+          cpus: systemInfo.cpuCount || 0,
+          totalMemory: systemInfo.totalMem || 'Unknown',
+        } : {
+          version: 'Unreachable',
+          operatingSystem: 'Unreachable',
+          cpus: 0,
+          totalMemory: '0 GB'
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('Get Docker stats error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch Docker stats' });
+  }
+});
+
+// ==================== SERVER CAPACITY MANAGEMENT ====================
+
+// Get server capacity configuration
+router.get('/servers/:serverKey/capacity', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { serverKey } = req.params;
+
+    if (!['EC2', 'EC3'].includes(serverKey)) {
+      return res.status(400).json({ success: false, error: 'Invalid server key' });
+    }
+
+    let capacity = await ServerCapacity.findOne({ serverName: serverKey });
+
+    // Create if doesn't exist
+    if (!capacity) {
+      const defaults = {
+        EC2: { cpu: 4, ram: 24, storage: 200, bandwidth: 5000 },
+        EC3: { cpu: 8, ram: 48, storage: 400, bandwidth: 10000 }
+      };
+
+      capacity = new ServerCapacity({
+        serverName: serverKey,
+        totalResources: defaults[serverKey]
+      });
+      await capacity.save();
+    }
+
+    // Get current user counts per plan
+    const planCounts = await User.aggregate([
+      { $match: { assignedServer: serverKey } },
+      {
+        $lookup: {
+          from: 'plans',
+          localField: 'plan',
+          foreignField: '_id',
+          as: 'planInfo'
+        }
+      },
+      { $unwind: { path: '$planInfo', preserveNullAndEmptyArrays: true } },
+      {
+        $group: {
+          _id: '$planInfo.name',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    res.json({
+      success: true,
+      capacity: {
+        ...capacity.toObject(),
+        availableResources: capacity.availableResources,
+        usagePercentage: capacity.usagePercentage,
+        warnings: capacity.getWarnings(),
+        currentPlanCounts: planCounts
+      }
+    });
+  } catch (error) {
+    logger.error('Get capacity error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch capacity' });
+  }
+});
+
+// Update server total resources
+router.put('/servers/:serverKey/capacity/resources', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { serverKey } = req.params;
+    const { totalResources, reservedResources, warningThresholds, overselling } = req.body;
+
+    let capacity = await ServerCapacity.findOne({ serverName: serverKey });
+    if (!capacity) {
+      return res.status(404).json({ success: false, error: 'Server capacity not found' });
+    }
+
+    // Update total resources
+    if (totalResources) {
+      capacity.totalResources = { ...capacity.totalResources, ...totalResources };
+    }
+
+    // Update reserved resources
+    if (reservedResources) {
+      capacity.reservedResources = { ...capacity.reservedResources, ...reservedResources };
+    }
+
+    // Update warning thresholds
+    if (warningThresholds) {
+      capacity.warningThresholds = { ...capacity.warningThresholds, ...warningThresholds };
+    }
+
+    // Update overselling settings
+    if (overselling) {
+      capacity.overselling = { ...capacity.overselling, ...overselling };
+    }
+
+    await capacity.save();
+
+    logger.info('Server capacity updated', {
+      adminId: req.user._id,
+      serverKey,
+      changes: { totalResources, reservedResources, warningThresholds, overselling }
+    });
+
+    res.json({
+      success: true,
+      capacity: {
+        ...capacity.toObject(),
+        availableResources: capacity.availableResources,
+        usagePercentage: capacity.usagePercentage
+      },
+      message: `${serverKey} capacity updated successfully`
+    });
+  } catch (error) {
+    logger.error('Update capacity error:', error);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// Update plan limits (max users per plan per server)
+router.put('/servers/:serverKey/capacity/plan-limits', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { serverKey } = req.params;
+    const { planName, maxUsers, priority } = req.body;
+
+    if (!planName) {
+      return res.status(400).json({ success: false, error: 'planName is required' });
+    }
+
+    let capacity = await ServerCapacity.findOne({ serverName: serverKey });
+    if (!capacity) {
+      return res.status(404).json({ success: false, error: 'Server capacity not found' });
+    }
+
+    // Find or create plan limit
+    let planLimit = capacity.planLimits.find(p => p.planName === planName);
+
+    if (planLimit) {
+      // Update existing
+      if (maxUsers !== undefined) planLimit.maxUsers = maxUsers;
+      if (priority !== undefined) planLimit.priority = priority;
+    } else {
+      // Add new
+      capacity.planLimits.push({
+        planName,
+        maxUsers: maxUsers || -1,
+        currentUsers: 0,
+        priority: priority || 5
+      });
+    }
+
+    await capacity.save();
+
+    // Get current user count for this plan
+    const currentCount = await User.countDocuments({
+      assignedServer: serverKey,
+      planType: planName
+    });
+
+    logger.info('Plan limit updated', {
+      adminId: req.user._id,
+      serverKey,
+      planName,
+      maxUsers,
+      currentUsers: currentCount
+    });
+
+    res.json({
+      success: true,
+      capacity,
+      currentUsers: currentCount,
+      message: `Plan limit for "${planName}" updated on ${serverKey}`
+    });
+  } catch (error) {
+    logger.error('Update plan limit error:', error);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// Calculate capacity for a plan
+router.post('/servers/:serverKey/capacity/calculate', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { serverKey } = req.params;
+    const { planResources } = req.body;
+
+    if (!planResources || !planResources.cpu || !planResources.ram) {
+      return res.status(400).json({
+        success: false,
+        error: 'Plan resources required (cpu, ram, storage, bandwidth)'
+      });
+    }
+
+    const result = await ServerCapacity.calculatePlanCapacity(serverKey, planResources);
+
+    res.json(result);
+  } catch (error) {
+    logger.error('Calculate capacity error:', error);
+    res.status(500).json({ success: false, error: 'Failed to calculate capacity' });
+  }
+});
+
+// Get detailed Docker stats for a server
+router.get('/servers/:serverKey/docker-stats', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { serverKey } = req.params;
+
+    if (!ORACLE_SERVERS[serverKey]) {
+      return res.status(404).json({ success: false, error: 'Server not found' });
+    }
+
+    const host = ORACLE_SERVERS[serverKey].host;
+    const dockerClient = docker.getDockerClient(host);
+
+    // Get all containers
+    const containers = await dockerClient.listContainers({ all: true });
+
+    // Get detailed stats for each container
+    const containerStats = await Promise.all(
+      containers.map(async (containerInfo) => {
+        try {
+          const container = dockerClient.getContainer(containerInfo.Id);
+
+          // Get stats (1 second sample)
+          const stats = await container.stats({ stream: false });
+
+          // Calculate CPU %
+          const cpuDelta = stats.cpu_stats.cpu_usage.total_usage -
+            (stats.precpu_stats.cpu_usage?.total_usage || 0);
+          const systemDelta = stats.cpu_stats.system_cpu_usage -
+            (stats.precpu_stats.system_cpu_usage || 0);
+          const cpuPercent = systemDelta > 0
+            ? (cpuDelta / systemDelta) * stats.cpu_stats.online_cpus * 100
+            : 0;
+
+          // Calculate Memory %
+          const memUsage = stats.memory_stats.usage || 0;
+          const memLimit = stats.memory_stats.limit || 1;
+          const memPercent = (memUsage / memLimit) * 100;
+
+          // Network I/O
+          const networks = stats.networks || {};
+          const networkIO = Object.values(networks).reduce((acc, net) => ({
+            rx_bytes: acc.rx_bytes + (net.rx_bytes || 0),
+            tx_bytes: acc.tx_bytes + (net.tx_bytes || 0)
+          }), { rx_bytes: 0, tx_bytes: 0 });
+
+          return {
+            id: containerInfo.Id.substring(0, 12),
+            name: containerInfo.Names[0]?.replace(/^\//, ''),
+            image: containerInfo.Image,
+            state: containerInfo.State,
+            status: containerInfo.Status,
+            created: new Date(containerInfo.Created * 1000),
+            stats: {
+              cpu: cpuPercent.toFixed(2) + '%',
+              memory: {
+                usage: (memUsage / 1024 / 1024).toFixed(2) + ' MB',
+                limit: (memLimit / 1024 / 1024).toFixed(2) + ' MB',
+                percent: memPercent.toFixed(2) + '%'
+              },
+              network: {
+                rx: (networkIO.rx_bytes / 1024 / 1024).toFixed(2) + ' MB',
+                tx: (networkIO.tx_bytes / 1024 / 1024).toFixed(2) + ' MB'
+              },
+              pids: stats.pids_stats?.current || 0
+            }
+          };
+        } catch (statsError) {
+          // If stats fail, return basic info
+          return {
+            id: containerInfo.Id.substring(0, 12),
+            name: containerInfo.Names[0]?.replace(/^\//, ''),
+            image: containerInfo.Image,
+            state: containerInfo.State,
+            status: containerInfo.Status,
+            stats: { error: 'Stats unavailable (container may be stopped)' }
+          };
+        }
+      })
+    );
+
+    // Get Docker system info
+    const systemInfo = await dockerClient.info();
+
+    res.json({
+      success: true,
+      server: serverKey,
+      docker: {
+        containers: {
+          total: containerStats.length,
+          running: containerStats.filter(c => c.state === 'running').length,
+          stopped: containerStats.filter(c => c.state === 'exited').length,
+          list: containerStats
+        },
+        system: {
+          version: systemInfo.ServerVersion,
+          kernelVersion: systemInfo.KernelVersion,
+          operatingSystem: systemInfo.OperatingSystem,
+          architecture: systemInfo.Architecture,
+          cpus: systemInfo.NCPU,
+          totalMemory: (systemInfo.MemTotal / 1024 / 1024 / 1024).toFixed(2) + ' GB',
+          images: systemInfo.Images,
+          driver: systemInfo.Driver
+        }
+      },
+      timestamp: new Date()
+    });
+  } catch (error) {
+    logger.error('Get Docker stats error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch Docker stats',
+      details: error.message
+    });
+  }
+});
+
+// Get deployment queue stats
+router.get('/deployment-queue/stats', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const queueStats = await buildQueue.getQueueStats();
+    const activeJobs = await buildQueue.getActiveJobs();
+    const waitingJobs = await buildQueue.getWaitingJobs();
+
+    res.json({
+      success: true,
+      queue: {
+        stats: queueStats,
+        active: activeJobs.map(job => ({
+          id: job.id,
+          deploymentId: job.data.deploymentId,
+          projectId: job.data.projectId,
+          userId: job.data.userId,
+          progress: job.progress,
+          timestamp: job.timestamp,
+          attemptsMade: job.attemptsMade
+        })),
+        waiting: waitingJobs.map(job => ({
+          id: job.id,
+          deploymentId: job.data.deploymentId,
+          projectId: job.data.projectId,
+          userId: job.data.userId,
+          priority: job.opts.priority,
+          timestamp: job.timestamp
+        }))
+      }
+    });
+  } catch (error) {
+    logger.error('Get queue stats error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch queue stats' });
+  }
+});
+
 module.exports = router;
+
+

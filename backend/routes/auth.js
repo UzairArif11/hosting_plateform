@@ -121,6 +121,19 @@ const handleGitHubAuthentication = async (accessToken, refreshToken, profile, do
     // Check if user already exists
     let user = await User.findByGithubId(profile.id);
 
+    // FIX: If not found by ID, check by Email to link accounts (Prevent Duplicate Key Error)
+    if (!user) {
+      const emailCandidate = profile.emails?.[0]?.value || `${profile.username}@github.local`;
+      const existingUser = await User.findOne({ email: emailCandidate });
+
+      if (existingUser) {
+        logger.info(`Linking GitHub account for ${profile.username} to existing email ${emailCandidate}`);
+        existingUser.githubId = profile.id;
+        await existingUser.save();
+        user = existingUser;
+      }
+    }
+
     if (user) {
       // Update existing user data
       user = await updateExistingUser(user, profile);

@@ -196,6 +196,13 @@ server.listen(PORT, () => {
   // Start resource monitoring for shared containers
   monitoringInterval = containerOrchestrator.startResourceMonitoring(60000); // Check every minute
   logger.info(`📊 Resource monitoring active for shared containers`);
+
+  // Start alert monitoring (High Server Load)
+  containerOrchestrator.startAlertMonitoring();
+
+  // Start User Resource Enforcement (RAM/Storage Limits)
+  const resourceEnforcer = require('./services/resourceEnforcer');
+  resourceEnforcer.startEnforcement();
 });
 
 // Graceful shutdown

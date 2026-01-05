@@ -6,26 +6,13 @@ import {
     CpuChipIcon,
     ServerIcon,
     CircleStackIcon,
-    BoltIcon,
     ExclamationTriangleIcon,
     CheckCircleIcon,
-    CalculatorIcon
+    CalculatorIcon,
+    PencilSquareIcon,
+    XMarkIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
-
-interface ServerCapacity {
-    serverName: string;
-    resources: {
-        total: ResourceSet;
-        allocated: ResourceSet;
-        available: ResourceSet;
-        reserved: ResourceSet;
-    };
-    usage: ResourceSet;
-    warnings: Warning[];
-    planLimits: PlanLimit[];
-    lastUpdated: string;
-}
 
 interface ResourceSet {
     cpu: number;
@@ -34,118 +21,111 @@ interface ResourceSet {
     bandwidth: number;
 }
 
-interface Warning {
-    type: string;
-    level: 'warning' | 'critical';
-    message: string;
+interface ServerCapacity {
+    serverName: string;
+    totalResources: ResourceSet;
+    reservedResources: ResourceSet;
+    allocatedResources: ResourceSet;
+    availableResources: ResourceSet;
+    usagePercentage: {
+        cpu: string;
+        ram: string;
+        storage: string;
+        bandwidth: string;
+    };
+    planLimits: {
+        planName: string;
+        maxUsers: number;
+        currentUsers: number;
+        priority: number;
+    }[];
+    overselling: {
+        enabled: boolean;
+        cpuMultiplier: number;
+        ramMultiplier: number;
+    };
+    warningThresholds: {
+        cpu: number;
+        ram: number;
+        storage: number;
+    };
+    warnings: {
+        type: string;
+        level: string;
+        message: string;
+    }[];
+    currentPlanCounts: {
+        _id: string;
+        count: number;
+    }[];
 }
 
-interface PlanLimit {
-    planName: string;
-    maxUsers: number;
-    currentUsers: number;
-    priority: number;
-}
-
-interface Plan {
-    name: string;
-    displayName: string;
-    resources: ResourceSet;
-}
-
-export default function CapacityPage() {
-    const [servers, setServers] = useState<ServerCapacity[]>([]);
-    const [plans, setPlans] = useState<Plan[]>([]);
+export default function CapacityManagementPage() {
+    const [selectedServer, setSelectedServer] = useState<'EC2' | 'EC3'>('EC3');
+    const [capacity, setCapacity] = useState<ServerCapacity | null>(null);
     const [loading, setLoading] = useState(true);
-    const [selectedServer, setSelectedServer] = useState<string | null>(null);
-    const [simulatedLimits, setSimulatedLimits] = useState<Record<string, number>>({});
-    const [projection, setProjection] = useState<ResourceSet | null>(null);
+    const [editingResources, setEditingResources] = useState(false);
+    const [editingOverselling, setEditingOverselling] = useState(false);
+    const [resourceForm, setResourceForm] = useState<Partial<ServerCapacity>>({});
+    const [planLimitForm, setPlanLimitForm] = useState({ planName: '', maxUsers: 0, priority: 5 });
 
     useEffect(() => {
-        fetchData();
-    }, []);
+        fetchCapacity();
+    }, [selectedServer]);
 
-    const fetchData = async () => {
+    const fetchCapacity = async () => {
         try {
-            const [capacityRes, plansRes] = await Promise.all([
-                api.get('/api/admin/capacity'),
-                api.get('/api/admin/plans')
-            ]);
-            setServers(capacityRes.data.servers);
-            setPlans(plansRes.data.plans);
-
-            if (capacityRes.data.servers.length > 0) {
-                setSelectedServer(capacityRes.data.servers[0].serverName);
-                initializeSimulatedLimits(capacityRes.data.servers[0]);
-            }
-
+            const res = await api.get(`/api/admin/servers/${selectedServer}/capacity`);
+            setCapacity(res.data.capacity);
+            setResourceForm({
+                totalResources: res.data.capacity.totalResources,
+                reservedResources: res.data.capacity.reservedResources,
+                warningThresholds: res.data.capacity.warningThresholds,
+                overselling: res.data.capacity.overselling
+            });
             setLoading(false);
-        } catch (error) {
-            toast.error('Failed to load capacity data');
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'Failed to fetch capacity');
             setLoading(false);
         }
     };
 
-    const initializeSimulatedLimits = (server: ServerCapacity) => {
-        const limits: Record<string, number> = {};
-        server.planLimits.forEach(l => {
-            limits[l.planName] = l.maxUsers;
-        });
-        setSimulatedLimits(limits);
-    };
-
-    const handleServerChange = (serverName: string) => {
-        setSelectedServer(serverName);
-        const server = servers.find(s => s.serverName === serverName);
-        if (server) {
-            initializeSimulatedLimits(server);
+    const handleUpdateResources = async () => {
+        try {
+            await api.put(`/api/admin/servers/${selectedServer}/capacity/resources`, {
+                totalResources: resourceForm.totalResources,
+                reservedResources: resourceForm.reservedResources,
+                warningThresholds: resourceForm.warningThresholds,
+                overselling: resourceForm.overselling
+            });
+            toast.success('Server resources updated');
+            setEditingResources(false);
+            setEditingOverselling(false);
+            fetchCapacity();
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'Failed to update resources');
         }
     };
 
-    const calculateProjection = () => {
-        if (!selectedServer) return null;
-        const server = servers.find(s => s.serverName === selectedServer);
-        if (!server) return null;
-
-        let cpuUsed = server.reservedResources.cpu;
-        let ramUsed = server.reservedResources.ram;
-        let storageUsed = server.reservedResources.storage;
-
-        Object.entries(simulatedLimits).forEach(([planName, limit]) => {
-            const plan = plans.find(p => p.name === planName);
-            if (plan && limit > 0) {
-                cpuUsed += plan.resources.cpu * limit;
-                ramUsed += plan.resources.ram * limit;
-                storageUsed += plan.resources.storage * limit;
-            }
-        });
-
-        return {
-            cpu: server.resources.total.cpu - cpuUsed,
-            ram: server.resources.total.ram - ramUsed,
-            storage: server.resources.total.storage - storageUsed,
-            bandwidth: 0
-        };
-    };
-
-    const saveLimits = async () => {
-        if (!selectedServer) return;
+    const handleUpdatePlanLimit = async () => {
+        if (!planLimitForm.planName) {
+            toast.error('Please enter a plan name');
+            return;
+        }
 
         try {
-            const limits = Object.entries(simulatedLimits).map(([planName, maxUsers]) => ({
-                planName,
-                maxUsers
-            }));
-
-            await api.put(`/api/admin/capacity/${selectedServer}/limits`, { limits });
-            toast.success('Capacity limits updated');
-            fetchData();
-        } catch (error) {
-            toast.error('Failed to update limits');
+            await api.put(`/api/admin/servers/${selectedServer}/capacity/plan-limits`, {
+                planName: planLimitForm.planName,
+                maxUsers: planLimitForm.maxUsers,
+                priority: planLimitForm.priority
+            });
+            toast.success(`Plan limit updated for ${planLimitForm.planName}`);
+            setPlanLimitForm({ planName: '', maxUsers: 0, priority: 5 });
+            fetchCapacity();
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'Failed to update plan limit');
         }
     };
-
-    const simulatedProjection = calculateProjection();
 
     if (loading) {
         return (
@@ -155,190 +135,340 @@ export default function CapacityPage() {
         );
     }
 
-    const currentServer = servers.find(s => s.serverName === selectedServer);
-
     return (
         <div className="p-8 max-w-7xl mx-auto space-y-8">
             <div className="flex justify-between items-center">
                 <div>
-                    <h1 className="text-4xl font-bold text-white">Capacity Planning</h1>
-                    <p className="text-gray-400 mt-2">Monitor server load and set safe plan limits to prevent overselling.</p>
+                    <h1 className="text-4xl font-bold text-white">Capacity Management</h1>
+                    <p className="text-gray-400 mt-2">Manage server resources and plan limits</p>
                 </div>
-
                 <div className="flex bg-gray-900 rounded-lg p-1 border border-gray-800">
-                    {servers.map(server => (
-                        <button
-                            key={server.serverName}
-                            onClick={() => handleServerChange(server.serverName)}
-                            className={`px-6 py-2 rounded-md text-sm font-bold transition ${selectedServer === server.serverName
-                                    ? 'bg-purple-600 text-white'
-                                    : 'text-gray-400 hover:text-white'
-                                }`}
-                        >
-                            {server.serverName}
-                        </button>
-                    ))}
+                    <button
+                        onClick={() => setSelectedServer('EC2')}
+                        className={`px-6 py-2 rounded-md text-sm font-bold transition ${selectedServer === 'EC2' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white'
+                            }`}
+                    >
+                        EC2
+                    </button>
+                    <button
+                        onClick={() => setSelectedServer('EC3')}
+                        className={`px-6 py-2 rounded-md text-sm font-bold transition ${selectedServer === 'EC3' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white'
+                            }`}
+                    >
+                        EC3
+                    </button>
                 </div>
             </div>
 
-            {currentServer && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    {/* Live Stats Card */}
-                    <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-3xl p-8 space-y-8">
-                        <div className="flex items-center space-x-3 mb-6">
-                            <ServerIcon className="h-6 w-6 text-blue-400" />
-                            <h2 className="text-xl font-bold text-white">Live Server Status</h2>
+            {capacity && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Resource Usage Card */}
+                    <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-2xl p-6 space-y-6">
+                        <div className="flex justify-between items-center">
+                            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                                <ServerIcon className="h-6 w-6 text-purple-400" />
+                                Resource Usage
+                            </h2>
+                            <button
+                                onClick={() => setEditingResources(!editingResources)}
+                                className="text-sm text-purple-400 hover:text-purple-300 flex items-center gap-1"
+                            >
+                                {editingResources ? <XMarkIcon className="h-4 w-4" /> : <PencilSquareIcon className="h-4 w-4" />}
+                                {editingResources ? 'Cancel' : 'Edit'}
+                            </button>
                         </div>
 
                         {/* CPU */}
                         <div className="space-y-2">
                             <div className="flex justify-between text-sm">
-                                <span className="text-gray-400">CPU Usage</span>
-                                <span className="text-white font-mono">{currentServer.usage.cpu}%</span>
+                                <span className="text-gray-400">CPU</span>
+                                <span className="text-white font-mono">{capacity.usagePercentage.cpu}%</span>
                             </div>
-                            <div className="h-4 bg-gray-800 rounded-full overflow-hidden">
+                            <div className="h-3 bg-gray-800 rounded-full overflow-hidden">
                                 <div
-                                    className={`h-full rounded-full transition-all duration-500 ${Number(currentServer.usage.cpu) > 80 ? 'bg-red-500' : 'bg-blue-500'
+                                    className={`h-full transition-all ${parseFloat(capacity.usagePercentage.cpu) > capacity.warningThresholds.cpu
+                                        ? 'bg-red-500'
+                                        : 'bg-blue-500'
                                         }`}
-                                    style={{ width: `${currentServer.usage.cpu}%` }}
+                                    style={{ width: `${capacity.usagePercentage.cpu}%` }}
                                 />
                             </div>
                             <div className="flex justify-between text-xs text-gray-500">
-                                <span>{currentServer.resources.allocated.cpu.toFixed(1)} Used</span>
-                                <span>{currentServer.resources.total.cpu} Total OCPU</span>
+                                <span>{capacity.allocatedResources.cpu.toFixed(2)} / {capacity.totalResources.cpu} OCPU</span>
+                                <span>Available: {capacity.availableResources.cpu.toFixed(2)}</span>
                             </div>
                         </div>
 
                         {/* RAM */}
                         <div className="space-y-2">
                             <div className="flex justify-between text-sm">
-                                <span className="text-gray-400">RAM Usage</span>
-                                <span className="text-white font-mono">{currentServer.usage.ram}%</span>
+                                <span className="text-gray-400">RAM</span>
+                                <span className="text-white font-mono">{capacity.usagePercentage.ram}%</span>
                             </div>
-                            <div className="h-4 bg-gray-800 rounded-full overflow-hidden">
+                            <div className="h-3 bg-gray-800 rounded-full overflow-hidden">
                                 <div
-                                    className={`h-full rounded-full transition-all duration-500 ${Number(currentServer.usage.ram) > 85 ? 'bg-red-500' : 'bg-purple-500'
+                                    className={`h-full transition-all ${parseFloat(capacity.usagePercentage.ram) > capacity.warningThresholds.ram
+                                        ? 'bg-red-500'
+                                        : 'bg-purple-500'
                                         }`}
-                                    style={{ width: `${currentServer.usage.ram}%` }}
+                                    style={{ width: `${capacity.usagePercentage.ram}%` }}
                                 />
                             </div>
                             <div className="flex justify-between text-xs text-gray-500">
-                                <span>{currentServer.resources.allocated.ram.toFixed(1)} GB Used</span>
-                                <span>{currentServer.resources.total.ram} GB Total</span>
+                                <span>{capacity.allocatedResources.ram.toFixed(2)} / {capacity.totalResources.ram} GB</span>
+                                <span>Available: {capacity.availableResources.ram.toFixed(2)} GB</span>
                             </div>
                         </div>
 
                         {/* Storage */}
                         <div className="space-y-2">
                             <div className="flex justify-between text-sm">
-                                <span className="text-gray-400">Storage Usage</span>
-                                <span className="text-white font-mono">{currentServer.usage.storage}%</span>
+                                <span className="text-gray-400">Storage</span>
+                                <span className="text-white font-mono">{capacity.usagePercentage.storage}%</span>
                             </div>
-                            <div className="h-4 bg-gray-800 rounded-full overflow-hidden">
+                            <div className="h-3 bg-gray-800 rounded-full overflow-hidden">
                                 <div
-                                    className={`h-full rounded-full transition-all duration-500 ${Number(currentServer.usage.storage) > 90 ? 'bg-red-500' : 'bg-green-500'
+                                    className={`h-full transition-all ${parseFloat(capacity.usagePercentage.storage) > capacity.warningThresholds.storage
+                                        ? 'bg-red-500'
+                                        : 'bg-green-500'
                                         }`}
-                                    style={{ width: `${currentServer.usage.storage}%` }}
+                                    style={{ width: `${capacity.usagePercentage.storage}%` }}
                                 />
                             </div>
                             <div className="flex justify-between text-xs text-gray-500">
-                                <span>{currentServer.resources.allocated.storage.toFixed(1)} GB Used</span>
-                                <span>{currentServer.resources.total.storage} GB Total</span>
+                                <span>{capacity.allocatedResources.storage.toFixed(0)} / {capacity.totalResources.storage} GB</span>
+                                <span>Available: {capacity.availableResources.storage.toFixed(0)} GB</span>
                             </div>
                         </div>
 
-                        {currentServer.warnings.length > 0 && (
-                            <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 space-y-2">
-                                {currentServer.warnings.map((w, i) => (
-                                    <div key={i} className="flex items-center space-x-2 text-red-400 text-sm">
+                        {capacity.warnings.length > 0 && (
+                            <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 space-y-2">
+                                {capacity.warnings.map((warning, i) => (
+                                    <div key={i} className="flex items-center gap-2 text-red-400 text-sm">
                                         <ExclamationTriangleIcon className="h-4 w-4" />
-                                        <span>{w.message}</span>
+                                        <span>{warning.message}</span>
                                     </div>
                                 ))}
                             </div>
                         )}
                     </div>
 
-                    {/* Limit Calculator */}
-                    <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-3xl p-8 space-y-6">
-                        <div className="flex items-center space-x-3 mb-6">
-                            <CalculatorIcon className="h-6 w-6 text-purple-400" />
-                            <h2 className="text-xl font-bold text-white">Plan Limits & Calculator</h2>
-                        </div>
+                    {/* Edit Resources Form */}
+                    {editingResources && resourceForm && (
+                        <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-2xl p-6 space-y-4">
+                            <h2 className="text-xl font-bold text-white">Edit Server Resources</h2>
 
-                        <p className="text-sm text-gray-400">
-                            Set maximum active users per plan. The system calculates remaining capacity based on these limits.
-                        </p>
+                            <div>
+                                <h3 className="text-sm font-semibold text-gray-400 mb-3">Total Resources</h3>
+                                <div className="grid grid-cols-2 gap-3">
+                                    {['cpu', 'ram', 'storage', 'bandwidth'].map(key => (
+                                        <div key={key}>
+                                            <label className="block text-xs text-gray-400 mb-1 capitalize">{key}</label>
+                                            <input
+                                                type="number"
+                                                value={resourceForm.totalResources?.[key as keyof ResourceSet] || 0}
+                                                onChange={(e) => setResourceForm({
+                                                    ...resourceForm,
+                                                    totalResources: {
+                                                        ...resourceForm.totalResources!,
+                                                        [key]: parseFloat(e.target.value) || 0
+                                                    }
+                                                })}
+                                                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white text-sm"
+                                                step="0.1"
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
 
-                        <div className="space-y-4">
-                            {plans.map(plan => (
-                                <div key={plan.name} className="flex items-center justify-between bg-black/20 p-4 rounded-xl border border-white/5">
-                                    <div className="flex-1">
-                                        <h3 className="text-white font-medium">{plan.displayName}</h3>
-                                        <p className="text-xs text-gray-500">
-                                            {plan.resources.cpu} CPU • {plan.resources.ram} GB RAM
-                                        </p>
+                            <div>
+                                <h3 className="text-sm font-semibold text-gray-400 mb-3">Reserved Resources</h3>
+                                <div className="grid grid-cols-2 gap-3">
+                                    {['cpu', 'ram', 'storage', 'bandwidth'].map(key => (
+                                        <div key={key}>
+                                            <label className="block text-xs text-gray-400 mb-1 capitalize">{key}</label>
+                                            <input
+                                                type="number"
+                                                value={resourceForm.reservedResources?.[key as keyof ResourceSet] || 0}
+                                                onChange={(e) => setResourceForm({
+                                                    ...resourceForm,
+                                                    reservedResources: {
+                                                        ...resourceForm.reservedResources!,
+                                                        [key]: parseFloat(e.target.value) || 0
+                                                    }
+                                                })}
+                                                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white text-sm"
+                                                step="0.1"
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div>
+                                <h3 className="text-sm font-semibold text-gray-400 mb-3">Warning Thresholds (%)</h3>
+                                <div className="grid grid-cols-3 gap-3">
+                                    {['cpu', 'ram', 'storage'].map(key => (
+                                        <div key={key}>
+                                            <label className="block text-xs text-gray-400 mb-1 capitalize">{key}</label>
+                                            <input
+                                                type="number"
+                                                value={resourceForm.warningThresholds?.[key as keyof typeof resourceForm.warningThresholds]}
+                                                onChange={(e) => setResourceForm({
+                                                    ...resourceForm,
+                                                    warningThresholds: {
+                                                        ...resourceForm.warningThresholds!,
+                                                        [key]: parseInt(e.target.value) || 0
+                                                    }
+                                                })}
+                                                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white text-sm"
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div>
+                                <h3 className="text-sm font-semibold text-gray-400 mb-3">Overselling</h3>
+                                <label className="flex items-center gap-2 mb-3">
+                                    <input
+                                        type="checkbox"
+                                        checked={resourceForm.overselling?.enabled}
+                                        onChange={(e) => setResourceForm({
+                                            ...resourceForm,
+                                            overselling: {
+                                                ...resourceForm.overselling!,
+                                                enabled: e.target.checked
+                                            }
+                                        })}
+                                        className="w-4 h-4"
+                                    />
+                                    <span className="text-sm text-white">Enable Overselling</span>
+                                </label>
+                                {resourceForm.overselling?.enabled && (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs text-gray-400 mb-1">CPU Multiplier</label>
+                                            <input
+                                                type="number"
+                                                value={resourceForm.overselling.cpuMultiplier}
+                                                onChange={(e) => setResourceForm({
+                                                    ...resourceForm,
+                                                    overselling: {
+                                                        ...resourceForm.overselling!,
+                                                        cpuMultiplier: parseFloat(e.target.value) || 1
+                                                    }
+                                                })}
+                                                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white text-sm"
+                                                step="0.1"
+                                                min="1"
+                                                max="3"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs text-gray-400 mb-1">RAM Multiplier</label>
+                                            <input
+                                                type="number"
+                                                value={resourceForm.overselling.ramMultiplier}
+                                                onChange={(e) => setResourceForm({
+                                                    ...resourceForm,
+                                                    overselling: {
+                                                        ...resourceForm.overselling!,
+                                                        ramMultiplier: parseFloat(e.target.value) || 1
+                                                    }
+                                                })}
+                                                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white text-sm"
+                                                step="0.1"
+                                                min="1"
+                                                max="2"
+                                            />
+                                        </div>
                                     </div>
-                                    <div className="flex flex-col items-end">
-                                        <label className="text-xs text-gray-500 mb-1">Max Users</label>
-                                        <input
-                                            type="number"
-                                            value={simulatedLimits[plan.name] || 0}
-                                            onChange={(e) => setSimulatedLimits({
-                                                ...simulatedLimits,
-                                                [plan.name]: parseInt(e.target.value) || 0
-                                            })}
-                                            className="w-20 bg-gray-800 border-gray-700 text-white rounded px-2 py-1 text-sm text-right focus:ring-purple-500"
-                                        />
+                                )}
+                            </div>
+
+                            <button
+                                onClick={handleUpdateResources}
+                                className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-lg transition"
+                            >
+                                Save Resources
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Plan Limits */}
+                    <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-2xl p-6 space-y-4">
+                        <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                            <CalculatorIcon className="h-6 w-6 text-green-400" />
+                            Plan Limits
+                        </h2>
+
+                        <div className="space-y-3">
+                            {capacity.planLimits.map((limit) => (
+                                <div key={limit.planName} className="bg-black/20 rounded-lg p-4">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-white font-semibold">{limit.planName}</span>
+                                        <span className="text-sm text-gray-400">Priority: {limit.priority}</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-gray-400">Max Users:</span>
+                                        <span className="text-white font-mono">
+                                            {limit.maxUsers === -1 ? 'Unlimited' : limit.maxUsers}
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-gray-400">Current:</span>
+                                        <span className="text-purple-400 font-mono">{limit.currentUsers}</span>
                                     </div>
                                 </div>
                             ))}
                         </div>
 
-                        <div className="border-t border-gray-800 pt-6 space-y-4">
-                            <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Projected Free Capacity</h3>
-
-                            {simulatedProjection && (
-                                <div className="grid grid-cols-3 gap-2">
-                                    <div className={`p-3 rounded-lg border ${simulatedProjection.cpu < 0 ? 'bg-red-500/10 border-red-500/30' : 'bg-blue-500/10 border-blue-500/30'}`}>
-                                        <p className="text-xs text-gray-400">Free CPU</p>
-                                        <p className={`text-lg font-bold ${simulatedProjection.cpu < 0 ? 'text-red-400' : 'text-blue-400'}`}>
-                                            {simulatedProjection.cpu.toFixed(1)}
-                                        </p>
-                                    </div>
-                                    <div className={`p-3 rounded-lg border ${simulatedProjection.ram < 0 ? 'bg-red-500/10 border-red-500/30' : 'bg-purple-500/10 border-purple-500/30'}`}>
-                                        <p className="text-xs text-gray-400">Free RAM</p>
-                                        <p className={`text-lg font-bold ${simulatedProjection.ram < 0 ? 'text-red-400' : 'text-purple-400'}`}>
-                                            {simulatedProjection.ram.toFixed(1)} GB
-                                        </p>
-                                    </div>
-                                    <div className={`p-3 rounded-lg border ${simulatedProjection.storage < 0 ? 'bg-red-500/10 border-red-500/30' : 'bg-green-500/10 border-green-500/30'}`}>
-                                        <p className="text-xs text-gray-400">Free Storage</p>
-                                        <p className={`text-lg font-bold ${simulatedProjection.storage < 0 ? 'text-red-400' : 'text-green-400'}`}>
-                                            {simulatedProjection.storage.toFixed(0)} GB
-                                        </p>
-                                    </div>
-                                </div>
-                            )}
-
-                            {simulatedProjection && (simulatedProjection.cpu < 0 || simulatedProjection.ram < 0 || simulatedProjection.storage < 0) ? (
-                                <p className="text-red-400 text-xs flex items-center gap-1">
-                                    <ExclamationTriangleIcon className="h-4 w-4" />
-                                    Warning: Current limits exceed server capacity!
-                                </p>
-                            ) : (
-                                <p className="text-green-400 text-xs flex items-center gap-1">
-                                    <CheckCircleIcon className="h-4 w-4" />
-                                    Safe Configuration
-                                </p>
-                            )}
-
+                        <div className="pt-4 border-t border-gray-800 space-y-3">
+                            <h3 className="text-sm font-semibold text-gray-400">Add/Update Plan Limit</h3>
+                            <input
+                                type="text"
+                                placeholder="Plan Name (e.g., free, pro)"
+                                value={planLimitForm.planName}
+                                onChange={(e) => setPlanLimitForm({ ...planLimitForm, planName: e.target.value })}
+                                className="w-full bg-gray-800 border border-gray-700 rounded px-4 py-2 text-white text-sm"
+                            />
+                            <div className="grid grid-cols-2 gap-3">
+                                <input
+                                    type="number"
+                                    placeholder="Max Users"
+                                    value={planLimitForm.maxUsers}
+                                    onChange={(e) => setPlanLimitForm({ ...planLimitForm, maxUsers: parseInt(e.target.value) || 0 })}
+                                    className="bg-gray-800 border border-gray-700 rounded px-4 py-2 text-white text-sm"
+                                />
+                                <input
+                                    type="number"
+                                    placeholder="Priority (1-10)"
+                                    value={planLimitForm.priority}
+                                    onChange={(e) => setPlanLimitForm({ ...planLimitForm, priority: parseInt(e.target.value) || 5 })}
+                                    className="bg-gray-800 border border-gray-700 rounded px-4 py-2 text-white text-sm"
+                                />
+                            </div>
                             <button
-                                onClick={saveLimits}
-                                className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-purple-500/20"
+                                onClick={handleUpdatePlanLimit}
+                                className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-lg transition"
                             >
-                                Apply Capacity Limits
+                                Update Plan Limit
                             </button>
+                        </div>
+                    </div>
+
+                    {/* Current Plan Distribution */}
+                    <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-2xl p-6 space-y-4">
+                        <h2 className="text-xl font-bold text-white">Current Distribution</h2>
+                        <div className="space-y-3">
+                            {capacity.currentPlanCounts.map((planCount) => (
+                                <div key={planCount._id || 'unknown'} className="flex justify-between items-center bg-black/20 rounded-lg p-3">
+                                    <span className="text-white">{planCount._id || 'No Plan'}</span>
+                                    <span className="text-purple-400 font-bold">{planCount.count} users</span>
+                                </div>
+                            ))}
                         </div>
                     </div>
                 </div>

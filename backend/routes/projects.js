@@ -184,7 +184,20 @@ router.post('/',
       }
 
       // Create the project
-      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      let slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+      // Ensure global uniqueness of slug
+      let slugExists = await Project.findOne({ slug });
+      let attempts = 0;
+      const originalSlug = slug;
+      while (slugExists && attempts < 5) {
+        slug = `${originalSlug}-${Math.random().toString(36).substring(2, 8)}`;
+        slugExists = await Project.findOne({ slug });
+        attempts++;
+      }
+      if (slugExists) {
+        throw new Error('Could not generate unique project URL. Please try a different name.');
+      }
 
       const project = new Project({
         name,
@@ -232,7 +245,8 @@ router.post('/',
       });
     } catch (error) {
       logger.error('Create project error:', error.message);
-      res.status(500).json({ success: false, error: 'Failed to create project' });
+      // Return specific error message for UI
+      res.status(400).json({ success: false, error: error.message });
     }
   }
 );

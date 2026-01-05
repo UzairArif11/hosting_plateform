@@ -582,8 +582,9 @@ console.log('Server running at http://localhost:' + port);
         // Get build size
         const buildOutputPath = path.join(buildPath, outputDir);
         // Calculate build size (cross-platform)
-        let buildSize = 0;
+        let buildSize = 0; // Initialize buildSize
         try {
+            // Calculate build size - ONLY measure the output directory, not entire buildPath
             const getDirectorySize = async (dirPath) => {
                 let size = 0;
                 const files = await fs.readdir(dirPath);
@@ -598,7 +599,11 @@ console.log('Server running at http://localhost:' + port);
                 }
                 return size;
             };
-            buildSize = await getDirectorySize(buildPath);
+
+            // Measure ONLY the output directory (e.g., build/) not the entire repo
+            // Ensure output directory exists before trying to measure it
+            await fs.access(buildOutputPath);
+            buildSize = await getDirectorySize(buildOutputPath);
         } catch (sizeError) {
             await onLog('warn', `Failed to calculate build size: ${sizeError.message}`);
         }
@@ -610,7 +615,7 @@ console.log('Server running at http://localhost:' + port);
         };
         await deployment.save();
 
-        await onLog('info', `✓ Build size: ${(buildSize / 1024 / 1024).toFixed(2)} MB`);
+        await onLog('info', `✓ Build size: ${(buildSize / 1024 / 1024).toFixed(2)} MB (${outputDir}/ folder only)`);
 
         return {
             outputDir,

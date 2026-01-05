@@ -34,7 +34,9 @@ router.put('/', requireAuth, requireAdmin, async (req, res) => {
             protocol,
             maxDeploymentsPerUser,
             maxBuildTime,
-            features
+            features,
+            alertConfig,
+            resourceLimits // New
         } = req.body;
 
         const updates = {};
@@ -46,6 +48,8 @@ router.put('/', requireAuth, requireAdmin, async (req, res) => {
         if (maxDeploymentsPerUser) updates.maxDeploymentsPerUser = maxDeploymentsPerUser;
         if (maxBuildTime) updates.maxBuildTime = maxBuildTime;
         if (features) updates.features = features;
+        if (alertConfig) updates.alertConfig = alertConfig;
+        if (resourceLimits) updates.resourceLimits = resourceLimits;
 
         const settings = await Settings.updateSettings(updates, req.user._id);
 

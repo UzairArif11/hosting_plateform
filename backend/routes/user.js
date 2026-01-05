@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
+const Notification = require('../models/Notification');
 const { requireAuth } = require('../middleware/auth');
 const accountLifecycle = require('../services/accountLifecycle');
 const logger = require('../utils/logger');
@@ -137,6 +138,43 @@ router.get('/account/status', requireAuth, async (req, res) => {
     } catch (error) {
         logger.error('Get account status error:', error);
         res.status(500).json({ error: 'Failed to get account status' });
+    }
+});
+
+/**
+ * @route   GET /api/user/notifications
+ * @desc    Get user notifications (resource warnings, etc)
+ * @access  User (authenticated)
+ */
+router.get('/notifications', requireAuth, async (req, res) => {
+    try {
+        const notifications = await Notification.find({ userId: req.user._id })
+            .sort({ createdAt: -1 })
+            .limit(50);
+
+        const unreadCount = await Notification.countDocuments({ userId: req.user._id, read: false });
+
+        res.json({ notifications, unreadCount });
+    } catch (error) {
+        logger.error('Get notifications error:', error);
+        res.status(500).json({ error: 'Failed to fetch notifications' });
+    }
+});
+
+/**
+ * @route   PUT /api/user/notifications/:id/read
+ * @desc    Mark notification as read
+ * @access  User (authenticated)
+ */
+router.put('/notifications/:id/read', requireAuth, async (req, res) => {
+    try {
+        await Notification.findOneAndUpdate(
+            { _id: req.params.id, userId: req.user._id },
+            { read: true }
+        );
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: 'Update failed' });
     }
 });
 

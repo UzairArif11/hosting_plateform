@@ -1,0 +1,79 @@
+
+// Get detailed Docker stats for a server
+router.get('/servers/:serverKey/docker-stats', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { serverKey } = req.params;
+    const server = ORACLE_SERVERS[serverKey];
+
+    if (!server) {
+      return res.status(404).json({ success: false, error: 'Server not found' });
+    }
+
+    // Fetch system info and containers in parallel
+    const [systemInfo, containersResult] = await Promise.all([
+      getRemoteSystemStats(serverKey),
+      docker.listContainers(server.host, true) // true = all containers
+    ]);
+
+    if (!containersResult.success) {
+      throw new Error(containersResult.error || 'Failed to list containers');
+    }
+
+    // Process containers to match frontend interface
+    const containerList = containersResult.containers.map(c => {
+      // Extract stats from names/labels if available, or placeholder
+      // For real stats we'd need a separate call per container which is invalid for list
+      // So we return what listContainers gives us + parsed resource limits
+      
+      let resourceUsage = {
+         cpu: '0%',
+         memory: { usage: '0 MB', limit: '0 GB', percent: '0%' },
+         network: { rx: '0 MB', tx: '0 MB' } 
+      };
+
+      // Try to parse resource usage from status if possible (Docker CLI sometimes includes it?)
+      // distinct from 'docker stats' command. 
+      // For now we'll return the basic info. Real-time stats stream is complex.
+      // We can interpret the name for limits.
+      
+      return {
+        id: c.id.substring(0, 12),
+        name: c.names[0].replace(/^\//, ''),
+        image: c.image,
+        state: c.state,
+        status: c.status,
+        stats: resourceUsage // Placeholder for now, real stats require 'docker stats'
+      };
+    });
+
+    // Calculate summary
+    const running = containerList.filter(c => c.state === 'running').length;
+    const stopped = containerList.length - running;
+
+    res.json({
+      success: true,
+      docker: {
+        containers: {
+          total: containerList.length,
+          running,
+          stopped,
+          list: containerList
+        },
+        system: systemInfo.success ? {
+          version: systemInfo.version || 'Unknown',
+          operatingSystem: systemInfo.os || 'Linux',
+          cpus: systemInfo.cpuCount || 0,
+          totalMemory: systemInfo.totalMem || 'Unknown',
+        } : {
+          version: 'Unreachable',
+          operatingSystem: 'Unreachable',
+          cpus: 0,
+          totalMemory: '0 GB'
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('Get Docker stats error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch Docker stats' });
+  }
+});

@@ -40,7 +40,7 @@ async function createUserContainer(user, serverKey, server, resources) {
             ],
             restart: 'unless-stopped',
             networkMode: 'host',
-            cmd: ['sh', '-c', 'apk add --no-cache git && pm2 start /dev/null --name keepalive && tail -f /dev/null']
+            cmd: ['pm2-runtime', 'start', '/dev/null', '--name', 'keepalive']
         });
 
         // Handle "Container Already Exists" (Conflict) by removing and recreating (Applies new limits)
@@ -258,16 +258,22 @@ function isPortFree(port) {
  */
 async function getAvailablePort() {
     const minPort = 4000;
-    const maxPort = 9999;
-    const maxAttempts = 100;
+    const maxPort = 20000; // Increased range for safety
+    const maxAttempts = 200;
+
+    // Importing Deployment model to check global usage
+    const Deployment = require('../models/Deployment');
 
     for (let i = 0; i < maxAttempts; i++) {
         const port = Math.floor(Math.random() * (maxPort - minPort + 1)) + minPort;
-        if (await isPortFree(port)) {
+
+        // Check 1: Is it used in DB?
+        const existing = await Deployment.findOne({ port: port, status: { $ne: 'failed' } });
+        if (!existing) {
             return port;
         }
     }
-    throw new Error('No available port found after multiple attempts');
+    throw new Error('No available global port found after multiple attempts');
 }
 
 /**

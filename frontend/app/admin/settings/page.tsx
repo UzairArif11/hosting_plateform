@@ -1,28 +1,41 @@
 'use client';
 
-import { useState } from 'react';
-import { Cog6ToothIcon, EnvelopeIcon, CreditCardIcon, ShieldCheckIcon, BellIcon } from '@heroicons/react/24/outline';
+import { useState, useEffect } from 'react';
+import { Cog6ToothIcon, EnvelopeIcon, CreditCardIcon, ShieldCheckIcon, BellIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import api from '@/lib/api';
 
 export default function AdminSettingsPage() {
     const [activeTab, setActiveTab] = useState('platform');
     const [saving, setSaving] = useState(false);
+    const [loading, setLoading] = useState(true);
 
     const [platformSettings, setPlatformSettings] = useState({
-        siteName: 'Vercel Clone Platform',
-        siteUrl: 'https://yourplatform.com',
-        supportEmail: 'support@yourplatform.com',
+        siteName: '',
+        siteUrl: '',
+        supportEmail: '',
         allowRegistration: true,
         maintenanceMode: false,
     });
 
     const [emailSettings, setEmailSettings] = useState({
-        smtpHost: 'smtp.gmail.com',
-        smtpPort: '587',
+        smtpHost: '',
+        smtpPort: '',
         smtpUser: '',
         smtpPassword: '',
-        fromEmail: 'noreply@yourplatform.com',
-        fromName: 'Vercel Clone Platform',
+        fromEmail: '',
+        fromName: '',
+    });
+
+    const [alertSettings, setAlertSettings] = useState({
+        email: '',
+        password: '',
+        enabled: false
+    });
+
+    const [resourceLimits, setResourceLimits] = useState({
+        warnThreshold: 80,
+        stopThreshold: 90
     });
 
     const [securitySettings, setSecuritySettings] = useState({
@@ -33,13 +46,52 @@ export default function AdminSettingsPage() {
         passwordMinLength: '8',
     });
 
+    useEffect(() => {
+        fetchSettings();
+    }, []);
+
+    const fetchSettings = async () => {
+        try {
+            const res = await api.get('/api/admin/settings');
+            const data = res.data;
+            if (data) {
+                // Populate state (mapping backend fields to frontend state)
+                // Note: Most of these mock fields (smtp, security) don't exist in backend yet
+                // But we will map what we have
+                /* 
+                   Backend returns: 
+                   baseDomain, serverDomains, sslEmail, protocol, features, alertConfig
+                */
+
+                if (data.alertConfig) {
+                    setAlertSettings(data.alertConfig);
+                }
+                if (data.resourceLimits) {
+                    setResourceLimits(data.resourceLimits);
+                }
+            }
+            setLoading(false);
+        } catch (error) {
+            console.error(error);
+            toast.error('Failed to load settings');
+            setLoading(false);
+        }
+    };
+
     const handleSave = async () => {
         setSaving(true);
         try {
-            // Simulate API call
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            // We only send back what the backend supports for now
+            // + the new alertConfig
+            const payload = {
+                alertConfig: alertSettings,
+                resourceLimits
+            };
+
+            await api.put('/api/admin/settings', payload);
             toast.success('Settings saved successfully');
         } catch (error) {
+            console.error(error);
             toast.error('Failed to save settings');
         } finally {
             setSaving(false);
@@ -48,11 +100,13 @@ export default function AdminSettingsPage() {
 
     const tabs = [
         { id: 'platform', name: 'Platform', icon: Cog6ToothIcon },
-        { id: 'email', name: 'Email', icon: EnvelopeIcon },
-        { id: 'payment', name: 'Payment', icon: CreditCardIcon },
-        { id: 'security', name: 'Security', icon: ShieldCheckIcon },
-        { id: 'notifications', name: 'Notifications', icon: BellIcon },
+        { id: 'alerts', name: 'Alerts', icon: ExclamationTriangleIcon },
+        { id: 'email', name: 'Email (Example)', icon: EnvelopeIcon },
     ];
+
+    if (loading) {
+        return <div className="p-8 text-center text-gray-400">Loading settings...</div>;
+    }
 
     return (
         <div className="space-y-6">
@@ -70,8 +124,8 @@ export default function AdminSettingsPage() {
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id)}
                                 className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === tab.id
-                                        ? 'bg-purple-500/10 text-purple-500'
-                                        : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                                    ? 'bg-purple-500/10 text-purple-500'
+                                    : 'text-gray-400 hover:bg-gray-800 hover:text-white'
                                     }`}
                             >
                                 <tab.icon className="h-5 w-5" />
@@ -84,318 +138,112 @@ export default function AdminSettingsPage() {
                 {/* Settings Content */}
                 <div className="flex-1">
                     <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                        {activeTab === 'alerts' && (
+                            <div className="space-y-6">
+                                <h2 className="text-xl font-semibold text-white">Admin Alerts Configuration</h2>
+                                <p className="text-sm text-gray-400">
+                                    Configure email alerts for high server load (CPU {'>'} 90% for 5 mins).
+                                </p>
+
+                                <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-lg">
+                                    <h3 className="text-purple-400 font-medium mb-2">How it works</h3>
+                                    <ul className="list-disc list-inside text-sm text-gray-300 space-y-1">
+                                        <li>System monitors remote servers via SSH every 5 minutes.</li>
+                                        <li>If CPU usage exceeds 90% repeatedly, an alert is triggered.</li>
+                                        <li>You will receive an email notification if configured below.</li>
+                                    </ul>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div className="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg">
+                                        <div>
+                                            <p className="text-white font-medium">Enable Email Alerts</p>
+                                            <p className="text-sm text-gray-400">Turn on/off email notifications</p>
+                                        </div>
+                                        <label className="relative inline-flex items-center cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={alertSettings.enabled}
+                                                onChange={(e) => setAlertSettings({ ...alertSettings, enabled: e.target.checked })}
+                                                className="sr-only peer"
+                                            />
+                                            <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                                        </label>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                                            Destination Email
+                                        </label>
+                                        <input
+                                            type="email"
+                                            placeholder="admin@example.com"
+                                            value={alertSettings.email}
+                                            onChange={(e) => setAlertSettings({ ...alertSettings, email: e.target.value })}
+                                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                                            Gmail App Password (SMTP)
+                                        </label>
+                                        <input
+                                            type="password"
+                                            placeholder="xxyy zzaa bbcc ddee"
+                                            value={alertSettings.password}
+                                            onChange={(e) => setAlertSettings({ ...alertSettings, password: e.target.value })}
+                                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">
+                                            Use a Gmail App Password. The system uses standard Gmail SMTP settings (smtp.gmail.com:587).
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {activeTab === 'platform' && (
                             <div className="space-y-6">
-                                <h2 className="text-xl font-semibold text-white">Platform Configuration</h2>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                                        Site Name
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={platformSettings.siteName}
-                                        onChange={(e) => setPlatformSettings({ ...platformSettings, siteName: e.target.value })}
-                                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                                        Site URL
-                                    </label>
-                                    <input
-                                        type="url"
-                                        value={platformSettings.siteUrl}
-                                        onChange={(e) => setPlatformSettings({ ...platformSettings, siteUrl: e.target.value })}
-                                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                                        Support Email
-                                    </label>
-                                    <input
-                                        type="email"
-                                        value={platformSettings.supportEmail}
-                                        onChange={(e) => setPlatformSettings({ ...platformSettings, supportEmail: e.target.value })}
-                                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                    />
-                                </div>
-
-                                <div className="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg">
-                                    <div>
-                                        <p className="text-white font-medium">Allow New Registrations</p>
-                                        <p className="text-sm text-gray-400">Enable users to create new accounts</p>
-                                    </div>
-                                    <label className="relative inline-flex items-center cursor-pointer">
+                                <h2 className="text-xl font-semibold text-white">Platform Resource Limits</h2>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                                        <h3 className="text-lg font-medium text-purple-400 mb-2">Warning Threshold (%)</h3>
+                                        <p className="text-sm text-gray-400 mb-4">Send email warning when usage exceeds this %.</p>
                                         <input
-                                            type="checkbox"
-                                            checked={platformSettings.allowRegistration}
-                                            onChange={(e) => setPlatformSettings({ ...platformSettings, allowRegistration: e.target.checked })}
-                                            className="sr-only peer"
+                                            type="number"
+                                            min="1"
+                                            max="100"
+                                            value={resourceLimits.warnThreshold}
+                                            onChange={(e) => setResourceLimits({ ...resourceLimits, warnThreshold: parseInt(e.target.value) })}
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white"
                                         />
-                                        <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
-                                    </label>
-                                </div>
-
-                                <div className="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg">
-                                    <div>
-                                        <p className="text-white font-medium">Maintenance Mode</p>
-                                        <p className="text-sm text-gray-400">Temporarily disable the platform</p>
                                     </div>
-                                    <label className="relative inline-flex items-center cursor-pointer">
+                                    <div className="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                                        <h3 className="text-lg font-medium text-red-400 mb-2">Stop Threshold (%)</h3>
+                                        <p className="text-sm text-gray-400 mb-4">Stop the highest consuming process when usage exceeds this %.</p>
                                         <input
-                                            type="checkbox"
-                                            checked={platformSettings.maintenanceMode}
-                                            onChange={(e) => setPlatformSettings({ ...platformSettings, maintenanceMode: e.target.checked })}
-                                            className="sr-only peer"
+                                            type="number"
+                                            min="1"
+                                            max="100"
+                                            value={resourceLimits.stopThreshold}
+                                            onChange={(e) => setResourceLimits({ ...resourceLimits, stopThreshold: parseInt(e.target.value) })}
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white"
                                         />
-                                        <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
-                                    </label>
+                                    </div>
                                 </div>
                             </div>
                         )}
 
                         {activeTab === 'email' && (
                             <div className="space-y-6">
-                                <h2 className="text-xl font-semibold text-white">Email Configuration</h2>
-
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-300 mb-2">
-                                            SMTP Host
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={emailSettings.smtpHost}
-                                            onChange={(e) => setEmailSettings({ ...emailSettings, smtpHost: e.target.value })}
-                                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-300 mb-2">
-                                            SMTP Port
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={emailSettings.smtpPort}
-                                            onChange={(e) => setEmailSettings({ ...emailSettings, smtpPort: e.target.value })}
-                                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                        />
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                                        SMTP Username
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={emailSettings.smtpUser}
-                                        onChange={(e) => setEmailSettings({ ...emailSettings, smtpUser: e.target.value })}
-                                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                                        SMTP Password
-                                    </label>
-                                    <input
-                                        type="password"
-                                        value={emailSettings.smtpPassword}
-                                        onChange={(e) => setEmailSettings({ ...emailSettings, smtpPassword: e.target.value })}
-                                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                    />
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-300 mb-2">
-                                            From Email
-                                        </label>
-                                        <input
-                                            type="email"
-                                            value={emailSettings.fromEmail}
-                                            onChange={(e) => setEmailSettings({ ...emailSettings, fromEmail: e.target.value })}
-                                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-300 mb-2">
-                                            From Name
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={emailSettings.fromName}
-                                            onChange={(e) => setEmailSettings({ ...emailSettings, fromName: e.target.value })}
-                                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {activeTab === 'payment' && (
-                            <div className="space-y-6">
-                                <h2 className="text-xl font-semibold text-white">Payment Gateway</h2>
-
-                                <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                                    <p className="text-blue-400 text-sm">
-                                        <strong>Note:</strong> Payment integration with Payoneer is configured in the backend.
-                                    </p>
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                                        Payoneer API Key
-                                    </label>
-                                    <input
-                                        type="password"
-                                        placeholder="Enter Payoneer API key"
-                                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                                        Webhook URL
-                                    </label>
-                                    <input
-                                        type="url"
-                                        value="https://yourplatform.com/api/webhooks/payoneer"
-                                        readOnly
-                                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-gray-400"
-                                    />
-                                </div>
-                            </div>
-                        )}
-
-                        {activeTab === 'security' && (
-                            <div className="space-y-6">
-                                <h2 className="text-xl font-semibold text-white">Security Settings</h2>
-
-                                <div className="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg">
-                                    <div>
-                                        <p className="text-white font-medium">Require Email Verification</p>
-                                        <p className="text-sm text-gray-400">Users must verify email before accessing platform</p>
-                                    </div>
-                                    <label className="relative inline-flex items-center cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            checked={securitySettings.requireEmailVerification}
-                                            onChange={(e) => setSecuritySettings({ ...securitySettings, requireEmailVerification: e.target.checked })}
-                                            className="sr-only peer"
-                                        />
-                                        <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
-                                    </label>
-                                </div>
-
-                                <div className="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg">
-                                    <div>
-                                        <p className="text-white font-medium">Enable 2FA</p>
-                                        <p className="text-sm text-gray-400">Allow users to enable two-factor authentication</p>
-                                    </div>
-                                    <label className="relative inline-flex items-center cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            checked={securitySettings.enable2FA}
-                                            onChange={(e) => setSecuritySettings({ ...securitySettings, enable2FA: e.target.checked })}
-                                            className="sr-only peer"
-                                        />
-                                        <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
-                                    </label>
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                                        Session Timeout (hours)
-                                    </label>
-                                    <input
-                                        type="number"
-                                        value={securitySettings.sessionTimeout}
-                                        onChange={(e) => setSecuritySettings({ ...securitySettings, sessionTimeout: e.target.value })}
-                                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                                        Max Login Attempts
-                                    </label>
-                                    <input
-                                        type="number"
-                                        value={securitySettings.maxLoginAttempts}
-                                        onChange={(e) => setSecuritySettings({ ...securitySettings, maxLoginAttempts: e.target.value })}
-                                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                                        Minimum Password Length
-                                    </label>
-                                    <input
-                                        type="number"
-                                        value={securitySettings.passwordMinLength}
-                                        onChange={(e) => setSecuritySettings({ ...securitySettings, passwordMinLength: e.target.value })}
-                                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                    />
-                                </div>
-                            </div>
-                        )}
-
-                        {activeTab === 'notifications' && (
-                            <div className="space-y-6">
-                                <h2 className="text-xl font-semibold text-white">Notification Settings</h2>
-
-                                <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
-                                    <p className="text-yellow-400 text-sm">
-                                        Configure which notifications are sent to users and admins.
-                                    </p>
-                                </div>
-
-                                <div className="space-y-3">
-                                    <div className="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg">
-                                        <div>
-                                            <p className="text-white font-medium">Deployment Success</p>
-                                            <p className="text-sm text-gray-400">Notify users when deployment completes</p>
-                                        </div>
-                                        <label className="relative inline-flex items-center cursor-pointer">
-                                            <input type="checkbox" defaultChecked className="sr-only peer" />
-                                            <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
-                                        </label>
-                                    </div>
-
-                                    <div className="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg">
-                                        <div>
-                                            <p className="text-white font-medium">Deployment Failure</p>
-                                            <p className="text-sm text-gray-400">Notify users when deployment fails</p>
-                                        </div>
-                                        <label className="relative inline-flex items-center cursor-pointer">
-                                            <input type="checkbox" defaultChecked className="sr-only peer" />
-                                            <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
-                                        </label>
-                                    </div>
-
-                                    <div className="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg">
-                                        <div>
-                                            <p className="text-white font-medium">Payment Received</p>
-                                            <p className="text-sm text-gray-400">Notify users of successful payments</p>
-                                        </div>
-                                        <label className="relative inline-flex items-center cursor-pointer">
-                                            <input type="checkbox" defaultChecked className="sr-only peer" />
-                                            <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
-                                        </label>
-                                    </div>
-                                </div>
+                                <h2 className="text-xl font-semibold text-white">Email Settings</h2>
+                                <p className="text-gray-500">This section is for future platform email configuration.</p>
                             </div>
                         )}
 
                         {/* Save Button */}
-                        <div className="flex justify-end pt-6 border-t border-gray-800">
+                        <div className="flex justify-end pt-6 border-t border-gray-800 mt-6">
                             <button
                                 onClick={handleSave}
                                 disabled={saving}

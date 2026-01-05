@@ -72,6 +72,18 @@ export default function AdminLayout({
                         <a href="/admin/plans" className="block px-4 py-2 text-gray-300 hover:bg-gray-800 rounded-lg">
                             💳 Plans
                         </a>
+                        <a href="/admin/capacity" className="block px-4 py-2 text-gray-300 hover:bg-gray-800 rounded-lg">
+                            📊 Capacity Management
+                        </a>
+                        <a href="/admin/servers-new" className="block px-4 py-2 text-gray-300 hover:bg-gray-800 rounded-lg">
+                            🐳 Servers & Docker Stats
+                        </a>
+                        <a href="/admin/queue" className="block px-4 py-2 text-gray-300 hover:bg-gray-800 rounded-lg">
+                            ⏱️ Deployment Queue
+                        </a>
+                        <a href="/admin/cleanup" className="block px-4 py-2 text-gray-300 hover:bg-gray-800 rounded-lg">
+                            🧹 Cleanup
+                        </a>
                         <a href="/admin/settings" className="block px-4 py-2 text-gray-300 hover:bg-gray-800 rounded-lg">
                             ⚙️ Settings
                         </a>

@@ -187,7 +187,7 @@ const planSchema = new mongoose.Schema({
     accountType: {
       type: String,
       enum: ['shared', 'dedicated'],
-      required: true
+      default: 'dedicated'
     },
     instanceShape: {
       type: String,

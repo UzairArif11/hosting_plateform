@@ -310,9 +310,34 @@ EOF
 
 echo -e "${GREEN}✓ Health check created${NC}"
 
-# Step 12: System optimization
+# Step 12: System Optimization (Auto-Prune & Logs)
 echo ""
 echo -e "${BLUE}━━━ Step 12: System Optimization ━━━${NC}"
+
+# 1. Setup Daily Docker Prune (Maintenance)
+CRON_JOB="0 4 * * * /usr/bin/docker system prune -af --filter \"until=24h\" >> /var/log/docker-prune.log 2>&1"
+(crontab -l 2>/dev/null | grep -v "docker system prune"; echo "$CRON_JOB") | crontab -
+echo "✓ Daily Docker cleanup scheduled (4 AM)"
+
+# 2. Configure Docker Log Rotation (Prevent log explosion)
+# This will overwrite the existing daemon.json, so ensure all desired settings are here.
+sudo tee /etc/docker/daemon.json > /dev/null <<EOF
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "5m",
+    "max-file": "3"
+  },
+  "default-address-pools": [
+    {
+      "base": "172.17.0.0/16",
+      "size": 24
+    }
+  ]
+}
+EOF
+sudo systemctl restart docker
+echo "✓ Docker log limits configured (5MB max)"
 
 # Increase file limits
 if ! grep -q "nofile 65536" /etc/security/limits.conf; then

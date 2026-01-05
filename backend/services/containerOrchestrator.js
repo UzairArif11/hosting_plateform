@@ -1,6 +1,8 @@
 const docker = require('./docker');
 const logger = require('../utils/logger');
 const net = require('net');
+const nodemailer = require('nodemailer');
+const Settings = require('../models/Settings');
 // Enhanced 3-Server Architecture with Load Balancing
 // NEW SYSTEM: Free users get SHARED containers, Paid users get DEDICATED containers
 // Both shared and dedicated containers can be allocated on EC2 or EC3 (load balanced)
@@ -150,54 +152,64 @@ const chooseBestServerForUser = async (containerType = 'shared') => {
       getServerUtilization('EC3')
     ]);
 
-    if (!ec2Status.success || !ec3Status.success) {
-      return 'EC2'; // Default fallback
+    // If one server is down, use the other
+    if (!ec2Status.success) {
+      logger.warn('EC2 unavailable, routing to EC3');
+      return 'EC3';
+    }
+    if (!ec3Status.success) {
+      logger.warn('EC3 unavailable, routing to EC2');
+      return 'EC2';
     }
 
-    if (containerType === 'shared') {
-      // For shared containers, choose server with more shared capacity
-      if (ec2Status.utilization.sharedCapacity > ec3Status.utilization.sharedCapacity) {
-        return 'EC2';
-      } else {
-        return 'EC3';
-      }
+    // Count actual users (not capacity) for better load balancing
+    const User = require('../models/User');
+    const [ec2UserCount, ec3UserCount] = await Promise.all([
+      User.countDocuments({ assignedServer: 'EC2' }),
+      User.countDocuments({ assignedServer: 'EC3' })
+    ]);
+
+    logger.info(`Server load: EC2=${ec2UserCount} users, EC3=${ec3UserCount} users`);
+
+    // Choose server with FEWER users
+    if (ec2UserCount < ec3UserCount) {
+      logger.info('Assigning to EC2 (lower load)');
+      return 'EC2';
+    } else if (ec3UserCount < ec2UserCount) {
+      logger.info('Assigning to EC3 (lower load)');
+      return 'EC3';
     } else {
-      // For dedicated containers, choose server with more dedicated capacity
-      if (ec2Status.utilization.dedicatedCapacity > ec3Status.utilization.dedicatedCapacity) {
-        return 'EC2';
-      } else {
-        return 'EC3';
-      }
+      // Tie: Round robin based on total
+      const totalUsers = ec2UserCount + ec3UserCount;
+      const choice = (totalUsers % 2 === 0) ? 'EC2' : 'EC3';
+      logger.info(`Equal load, round-robin to ${choice}`);
+      return choice;
     }
   } catch (error) {
     logger.error('Error choosing best server:', error);
-    return 'EC2'; // Default fallback
+    return 'EC2'; // Safe fallback
   }
 };
 
-// Allocate container for user (shared vs dedicated on both EC2/EC3)
+// Allocate container for user (ALWAYS dedicated - every user gets their own container)
 const allocateContainer = async (user, plan) => {
   try {
     logger.info(`allocateContainer called with plan: ${JSON.stringify(plan)}`);
 
-    const isFreePlan = !plan || plan === 'free' || plan.isTrial || plan.name === 'free-trial';
-    const containerType = isFreePlan ? 'shared' : 'dedicated';
+    // SIMPLIFIED: Every user gets their own dedicated container
+    // No more shared vs dedicated confusion
+    // Resource limits are applied via plan configuration
+    const containerType = 'dedicated';
 
-    logger.info(`isFreePlan: ${isFreePlan}, containerType: ${containerType}`);
+    logger.info(`Allocating dedicated container for user ${user.username}`);
 
-    // Choose best server based on container type and current load
+    // Choose best server based on current load
     const targetServer = await chooseBestServerForUser(containerType);
     const server = ORACLE_SERVERS[targetServer];
 
-    if (isFreePlan) {
-      // Create shared container allocation (can be on EC2 or EC3)
-      logger.info('Calling allocateSharedContainer');
-      return await allocateSharedContainer(user, targetServer, server);
-    } else {
-      // Create dedicated container (can be on EC2 or EC3)
-      logger.info('Calling allocateDedicatedContainer');
-      return await allocateDedicatedContainer(user, plan, targetServer, server);
-    }
+    // Always create dedicated container (can be on EC2 or EC3)
+    logger.info('Creating dedicated container for user');
+    return await allocateDedicatedContainer(user, plan, targetServer, server);
   } catch (error) {
     logger.error('Container allocation failed:', error);
     throw error;  // Re-throw instead of returning error object
@@ -212,12 +224,20 @@ const allocateSharedContainer = async (user, serverKey, server) => {
 
     // Get user's plan to determine resources
     const Plan = require('../models/Plan');
-    const userPlan = await Plan.findById(user.plan);
+    let userPlan = await Plan.findById(user.plan);
 
-    // Default resources if no plan found
+    // If no plan found (e.g. user created via OAuth without plan), fetch default Free/Trial plan from DB
+    // This ensures we use Admin-configured limits instead of hardcoded values
+    if (!userPlan) {
+      userPlan = await Plan.findOne({
+        $or: [{ name: 'free' }, { name: 'trial' }, { name: 'basic' }]
+      }).sort({ 'pricing.usd': 1 }); // Get cheapest
+    }
+
+    // Default resources: Use DB plan if available, otherwise minimal safety fallback
     const resources = userPlan?.resources || {
       cpu: 0.5,
-      ram: 1,
+      ram: 0.5, // 512MB fallback only if DB is empty
       storage: 2,
       bandwidth: 100
     };
@@ -1185,8 +1205,194 @@ const getRemoteSystemStats = async (serverKey) => {
   }
 };
 
+// Get real-time Docker stats via SSH (Efficient)
+const getRemoteDockerStats = async (serverKey) => {
+  try {
+    const server = ORACLE_SERVERS[serverKey];
+    if (!server) return null;
+
+    const { NodeSSH } = require('node-ssh');
+    const fs = require('fs');
+    const ssh = new NodeSSH();
+
+    // Get SSH key
+    const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
+      : serverKey === 'EC3' ? process.env.SSH_EC3_KEY
+        : process.env.SSH_EC3_KEY;
+
+    // Connect
+    await ssh.connect({
+      host: server.host,
+      username: 'ubuntu',
+      privateKey: fs.readFileSync(keyPath, 'utf8')
+    });
+
+    // Run docker stats command (one-shot, JSON format)
+    // We use a custom format to ensure easy parsing
+    const cmd = `docker stats --no-stream --format '{"id":"{{.ID}}","name":"{{.Name}}","cpu":"{{.CPUPerc}}","memUsage":"{{.MemUsage}}","memPerc":"{{.MemPerc}}","netIO":"{{.NetIO}}"}'`;
+
+    const result = await ssh.execCommand(cmd);
+    ssh.dispose();
+
+    if (result.code !== 0) {
+      logger.error(`Docker stats command failed on ${serverKey}: ${result.stderr}`);
+      return [];
+    }
+
+    // Parse output lines (each line is a JSON object)
+    const stats = result.stdout.trim().split('\n')
+      .filter(line => line.trim())
+      .map(line => {
+        try {
+          return JSON.parse(line);
+        } catch (e) {
+          return null;
+        }
+      })
+      .filter(item => item !== null);
+
+    return stats;
+
+  } catch (error) {
+    logger.error(`Error getting docker stats from ${serverKey}:`, error);
+    return [];
+  }
+};
+
+// Get container logs via SSH
+const getRemoteContainerLogs = async (serverKey, containerId) => {
+  try {
+    const server = ORACLE_SERVERS[serverKey];
+    if (!server) return null;
+
+    const { NodeSSH } = require('node-ssh');
+    const fs = require('fs');
+    const ssh = new NodeSSH();
+
+    // Get SSH key
+    const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
+      : serverKey === 'EC3' ? process.env.SSH_EC3_KEY
+        : process.env.SSH_EC3_KEY;
+
+    // Connect
+    await ssh.connect({
+      host: server.host,
+      username: 'ubuntu',
+      privateKey: fs.readFileSync(keyPath, 'utf8')
+    });
+
+    // Run docker logs command
+    // Use --tail 100 to get recent logs
+    // Use stderr merge because many apps log to stderr
+    const result = await ssh.execCommand(`docker logs --tail 100 ${containerId} 2>&1`);
+    ssh.dispose();
+
+    if (result.code !== 0) {
+      if (result.stderr.includes('No such container')) {
+        return { success: false, error: 'Container not found' };
+      }
+      return { success: false, error: result.stderr };
+    }
+
+    return { success: true, logs: result.stdout };
+
+  } catch (error) {
+    logger.error(`Error getting logs for ${containerId} on ${serverKey}:`, error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Alerting System
+let monitoringInterval = null;
+const highLoadCounter = {}; // { serverKey: count_of_consecutive_high_load_checks }
+
+const sendAlert = async (serverKey, cpu, checkCount) => {
+  const duration = checkCount * 5; // 5 minutes per check
+  const message = `🚨 CRITICAL ALERT: Server ${serverKey} is experiencing high CPU load! \n\nCurrent CPU: ${cpu}%\nDuration: > ${duration} minutes.\n\nCheck Admin Panel immediately.`;
+  logger.error(message.replace(/\n/g, ' '));
+
+  try {
+    const settings = await Settings.getSettings();
+    if (settings.alertConfig && settings.alertConfig.enabled && settings.alertConfig.email && settings.alertConfig.password) {
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: settings.alertConfig.email,
+          pass: settings.alertConfig.password
+        }
+      });
+
+      await transporter.sendMail({
+        from: `"Platform Admin" <${settings.alertConfig.email}>`,
+        to: settings.alertConfig.email, // Send to self/admin
+        subject: `[ALERT] High Load on Server ${serverKey} (${cpu}%)`,
+        text: message
+      });
+
+      logger.info(`📧 Alert email sent to ${settings.alertConfig.email}`);
+    }
+  } catch (err) {
+    logger.error('Failed to send alert email:', err);
+  }
+};
+
+const startAlertMonitoring = () => {
+  if (monitoringInterval) return;
+
+  logger.info('Starting Server Resource Monitoring (Interval: 5m, Threshold: 90% CPU)...');
+
+  // Check every 5 minutes (300,000 ms) to reduce SSH load
+  monitoringInterval = setInterval(async () => {
+    try {
+      const servers = Object.keys(ORACLE_SERVERS);
+
+      for (const serverKey of servers) {
+        try {
+          // Fetch stats silently
+          const stats = await getRemoteSystemStats(serverKey);
+
+          if (!stats || !stats.success) {
+            continue;
+          }
+
+          const cpuPercent = parseFloat(stats.cpu.percent);
+
+          if (cpuPercent > 90) {
+            highLoadCounter[serverKey] = (highLoadCounter[serverKey] || 0) + 1;
+
+            // If high load for 2+ checks (5+ minutes, since interval is 5m)
+            if (highLoadCounter[serverKey] >= 2) {
+              // Alert on 2nd check (5m), 6th check (25m), etc. to avoid spamming every 5m
+              // actually let's alert every time it stays high for now, it's critical
+              sendAlert(serverKey, cpuPercent, highLoadCounter[serverKey]);
+            }
+          } else {
+            // Reset if load drops
+            if (highLoadCounter[serverKey] > 0) {
+              logger.info(`Server ${serverKey} load normalized.`);
+            }
+            highLoadCounter[serverKey] = 0;
+          }
+        } catch (innerError) {
+          // Suppress SSH timeout logs to avoid console spam
+          if (innerError.message && innerError.message.includes('Timed out')) {
+            // invalid/timeout, skip
+            continue;
+          }
+          logger.error(`Error monitoring ${serverKey}:`, innerError);
+        }
+      }
+    } catch (error) {
+      logger.error('Error in alert monitoring loop:', error);
+    }
+  }, 5 * 60 * 1000); // 5 minute interval
+};
+
 module.exports = {
   getRemoteSystemStats,
+  getRemoteDockerStats,
+  getRemoteContainerLogs,
+  startAlertMonitoring,
   ORACLE_SERVERS,
   SHARED_RESOURCE_CAPS,
   getServerUtilization,

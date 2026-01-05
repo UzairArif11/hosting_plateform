@@ -151,26 +151,52 @@ router.post('/', [
     }
 
     // Check for ANY active deployment for this USER (Global Lock)
-    const activeDeployment = await Deployment.findOne({
-      userId: req.user._id,
-      status: { $in: ['queued', 'building', 'deploying'] }
-    });
+    // ONLY enforce for Free Tier users. Paid users can run parallel builds.
 
-    if (activeDeployment) {
-      // PRO-ACTIVE FIX: Check if the project for this "active" deployment still exists
-      const activeProjectExists = await Project.exists({ _id: activeDeployment.projectId });
+    // Dynamic DB Check: Is user on a paid plan?
+    const Plan = require('../models/Plan');
+    let isPaidUser = false;
 
-      if (!activeProjectExists) {
-        logger.warn(`Found ghost deployment ${activeDeployment._id} for non-existent project. Cleaning up.`);
-        await activeDeployment.updateStatus('failed', { error: { message: 'Project deleted during deployment' } });
-        // Allow the current request to proceed
-      } else {
-        return res.status(409).json({
-          success: false,
-          error: 'You already have a deployment in progress. Please wait for it to complete.',
-          activeDeploymentId: activeDeployment._id,
-          projectId: activeDeployment.projectId
-        });
+    if (req.user.plan) {
+      try {
+        // Cache this if performance becomes an issue
+        const userPlan = await Plan.findById(req.user.plan);
+        // Any plan with cost > 0 is considered Paid
+        if (userPlan && (userPlan.pricing?.usd > 0 || userPlan.pricing?.pkr > 0)) {
+          isPaidUser = true;
+        }
+      } catch (e) {
+        logger.warn('Failed to fetch user plan for check', e);
+      }
+    }
+
+    // Fallback: Check planType string if DB check was inconclusive
+    if (!isPaidUser) {
+      isPaidUser = ['pro', 'business', 'enterprise'].includes(req.user.planType);
+    }
+
+    if (!isPaidUser) {
+      const activeDeployment = await Deployment.findOne({
+        userId: req.user._id,
+        status: { $in: ['queued', 'building', 'deploying'] }
+      });
+
+      if (activeDeployment) {
+        // PRO-ACTIVE FIX: Check if the project for this "active" deployment still exists
+        const activeProjectExists = await Project.exists({ _id: activeDeployment.projectId });
+
+        if (!activeProjectExists) {
+          logger.warn(`Found ghost deployment ${activeDeployment._id} for non-existent project. Cleaning up.`);
+          await activeDeployment.updateStatus('failed', { error: { message: 'Project deleted during deployment' } });
+          // Allow the current request to proceed
+        } else {
+          return res.status(409).json({
+            success: false,
+            error: 'Free tier is limited to 1 concurrent deployment. Please upgrade to Pro for parallel builds.',
+            activeDeploymentId: activeDeployment._id,
+            projectId: activeDeployment.projectId
+          });
+        }
       }
     }
 
@@ -198,11 +224,15 @@ router.post('/', [
       trigger: 'manual'
     });
 
-    // Add to build queue
+    // Add to build queue with PRIORITY for paid users
+    // Priority 1 = High, 10 = Low
+    const queuePriority = isPaidUser ? 1 : 10;
+
     await buildQueue.addDeployment(
       deployment._id.toString(),
       projectId,
-      req.user._id.toString()
+      req.user._id.toString(),
+      { priority: queuePriority }
     );
 
     // Update project stats

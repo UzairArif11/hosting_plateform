@@ -1,36 +1,77 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Vercel Clone Platform - Frontend
 
-## Getting Started
+## 🚀 Overview
 
-First, run the development server:
+The modern, responsive frontend for the Vercel Clone Platform, built with Next.js 14.
+It provides a seamless experience for users to deploy projects and for administrators to manage the infrastructure.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## 🛠️ Tech Stack
+
+- **Framework:** Next.js 14 (App Router)
+- **Styling:** Tailwind CSS
+- **Icons:** Heroicons, Lucide React
+- **State:** React Hooks
+- **Charts:** Recharts
+- **Terminal:** XTerm.js (for logs)
+
+## ✨ Key Features
+
+### 👤 User Dashboard
+- **Project Management:** Create, deploy, and manage projects.
+- **Real-time Logs:** View build and runtime logs via WebSocket/SSH.
+- **Analytics:** storage, bandwidth, and CPU usage charts.
+- **Billing:** Plan upgrades and payment history.
+
+### 🛡️ Admin Panel
+- **Infrastructure Overview:** Monitor EC2/EC3 servers.
+- **Container Management:** View running containers, stats, and logs.
+- **User Management:** Suspend, feature-flag, and manage users.
+- **Plan Configuration:** Create and edit pricing plans.
+- **System Alerts:** Configure SMTP email alerts for high load.
+
+## 🏃‍♂️ Quick Start
+
+1. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+
+2. **Configure Environment:**
+   Create `.env.local`:
+   ```env
+   NEXT_PUBLIC_API_URL=http://localhost:5000
+   ```
+
+3. **Run Development Server:**
+   ```bash
+   npm run dev
+   ```
+
+4. **Build for Production:**
+   ```bash
+   npm run build
+   npm start
+   ```
+
+## 📂 Project Structure
+
+```
+app/
+├── admin/          # Admin routes (protected)
+├── dashboard/      # User dashboard
+├── login/          # Authentication
+├── components/     # Reusable UI components
+├── services/       # API clients (socket, etc)
+└── utils/          # Helpers
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 🎨 Theme System
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The application uses a dark-mode first design with:
+- **Primary:** Purple/Violet gradients
+- **Background:** Deep gray/black (`bg-gray-900`)
+- **Glassmorphism:** Translucent panels and modals
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+**Connected to Backend API at port 5000 by default.**

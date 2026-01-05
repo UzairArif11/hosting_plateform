@@ -198,7 +198,8 @@ async function uploadToRemoteServer(buildPath, deploymentId, serverHost, serverK
             excludeCmd = excludes.map(ex => `--exclude="${ex}"`).join(' ') + ' ';
         }
 
-        await execAsync(`tar ${excludeCmd}-czf "${localTarPath}" -C "${buildPath}" .`);
+        const normalizedBuildPath = buildPath.replace(/\\/g, '/');
+        await execAsync(`tar ${excludeCmd}-czf "${localTarPath}" -C "${normalizedBuildPath}" .`);
 
         // Get compressed size for logging
         const stats = await fsPromises.stat(localTarPath);

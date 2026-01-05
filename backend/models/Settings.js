@@ -41,15 +41,21 @@ const settingsSchema = new mongoose.Schema({
         default: 'https'
     },
 
-    // Deployment Settings
-    maxDeploymentsPerUser: {
-        type: Number,
-        default: 10
+    deploymentLimits: {
+        maxPerUser: {
+            type: Number,
+            default: 10
+        },
+        maxBuildTime: {
+            type: Number,
+            default: 900000 // 15 minutes in ms
+        }
     },
 
-    maxBuildTime: {
-        type: Number,
-        default: 900000 // 15 minutes in ms
+    // Resource Limits (Admin Configurable)
+    resourceLimits: {
+        warnThreshold: { type: Number, default: 80 }, // % Usage for Warning
+        stopThreshold: { type: Number, default: 90 }  // % Usage for Stopping
     },
 
     // Feature Flags
@@ -91,6 +97,22 @@ const settingsSchema = new mongoose.Schema({
             type: Boolean,
             default: true,
             description: 'Paid accounts can create unlimited containers (not counted towards IP limit)'
+        }
+    },
+
+    // Alert Configuration
+    alertConfig: {
+        email: {
+            type: String,
+            default: ''
+        },
+        password: {
+            type: String, // SMTP password or App Password
+            default: ''
+        },
+        enabled: {
+            type: Boolean,
+            default: false
         }
     },
 

@@ -6,6 +6,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { getCurrentUser } from '@/lib/slices/authSlice';
 import { AppDispatch, RootState } from '@/lib/store';
 import Sidebar from '@/components/Sidebar';
+import NotificationBell from '@/components/NotificationBell';
 import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline';
 
 export default function DashboardLayout({
@@ -98,6 +99,7 @@ export default function DashboardLayout({
 
                         {/* Resource Usage - Hidden on mobile */}
                         <div className="hidden md:flex items-center space-x-4">
+                            <NotificationBell />
                             <div className="text-right">
                                 <p className="text-xs text-gray-400">Storage</p>
                                 <p className="text-sm font-medium text-white">

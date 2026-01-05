@@ -409,7 +409,18 @@ async function createUpgradedContainer(user, serverKey, deployments, newPlan) {
         const containerName = `${serverKey}-user-${user._id}-upgrading-${timestamp}`;
 
         // Allocate new port
-        const newPort = 3000 + Math.floor(Math.random() * 2000);
+        // Allocate new unique port
+        const Deployment = require('../models/Deployment');
+        let newPort = 0;
+        for (let i = 0; i < 200; i++) {
+            const candidate = 4000 + Math.floor(Math.random() * 16000);
+            const exists = await Deployment.findOne({ port: candidate, status: { $ne: 'failed' } });
+            if (!exists) {
+                newPort = candidate;
+                break;
+            }
+        }
+        if (newPort === 0) throw new Error('Failed to allocate unique port for upgrade');
 
         // Get first deployment's image
         const isShared = user.planType === 'free';
