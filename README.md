@@ -208,10 +208,10 @@ chmod +x setup-deployment-server.sh
 ╔══════════════════════════════════════════════════════════
 
 # Create and run fix script
-vim fix-ssl-now.sh
+vim fix-ssl-https.sh
 # Paste the content
-chmod +x fix-ssl-now.sh
-sudo ./fix-ssl-now.sh
+chmod +x fix-ssl-https.sh
+sudo ./fix-ssl-https.sh
 ══════════════════════════════════════════════
 
 
