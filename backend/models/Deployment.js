@@ -199,6 +199,19 @@ deploymentSchema.virtual('statusBadge').get(function () {
   return badges[this.status] || badges.queued;
 });
 
+// COMPATIBILITY VIRTUALS FOR FRONTEND
+deploymentSchema.virtual('buildTime').get(function () {
+  return this.buildDuration || (this.analytics && this.analytics.buildTime) || 0;
+});
+
+deploymentSchema.virtual('url').get(function () {
+  return this.deploymentUrl;
+});
+
+// Ensure virtuals are included when converting to JSON/Object
+deploymentSchema.set('toJSON', { virtuals: true });
+deploymentSchema.set('toObject', { virtuals: true });
+
 // Instance Methods
 
 // Add build log

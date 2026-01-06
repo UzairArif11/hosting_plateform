@@ -278,7 +278,10 @@ const sendEmail = async (to, subject, text) => {
         const settings = await Settings.getSettings();
         if (settings.alertConfig?.enabled && settings.alertConfig?.email && settings.alertConfig?.password) {
             const transporter = nodemailer.createTransport({
-                service: 'gmail',
+                host: process.env.SMTP_HOST || undefined,
+                port: process.env.SMTP_PORT || undefined,
+                secure: process.env.SMTP_SECURE === 'true',
+                service: !process.env.SMTP_HOST ? 'gmail' : undefined,
                 auth: { user: settings.alertConfig.email, pass: settings.alertConfig.password }
             });
 

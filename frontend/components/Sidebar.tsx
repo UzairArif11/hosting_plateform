@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useDispatch, useSelector } from 'react-redux';
-import { RootState } from '@/lib/store';
+import { RootState, AppDispatch } from '@/lib/store';
 import { logout } from '@/lib/slices/authSlice';
 import {
     HomeIcon,
@@ -19,7 +19,7 @@ import toast from 'react-hot-toast';
 
 export default function Sidebar() {
     const pathname = usePathname();
-    const dispatch = useDispatch();
+    const dispatch = useDispatch<AppDispatch>();
     const router = useRouter();
     const { user } = useSelector((state: RootState) => state.auth);
 

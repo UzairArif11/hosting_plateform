@@ -14,6 +14,7 @@ interface Deployment {
     createdAt: string;
     duration: number;
     buildTime?: number;
+    error?: string | { message: string } | any;
 }
 
 interface DeploymentsState {
@@ -84,7 +85,7 @@ const deploymentsSlice = createSlice({
             if (deployment) {
                 deployment.status = status;
             }
-            if (state.currentDeployment?._id === deploymentId) {
+            if (state.currentDeployment && state.currentDeployment._id === deploymentId) {
                 state.currentDeployment.status = status;
             }
         },

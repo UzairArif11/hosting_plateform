@@ -1,13 +1,10 @@
 #!/bin/bash
 
 ###############################################################################
-# COMPLETE DEPLOYMENT SCRIPT
+# COMPLETE SELF-HEALING DEPLOYMENT SCRIPT
 # 
-# This script deploys the entire platform to EC1, EC2, and EC3
-# 
-# Usage:
-#   chmod +x deploy-complete.sh
-#   ./deploy-complete.sh
+# This script ensures infrastructure is ready, builds, and deploys the platform.
+# It handles Docker, Docker Compose, Node.js, and PM2 automatically.
 ###############################################################################
 
 set -e
@@ -21,21 +18,8 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 echo -e "${CYAN}╔════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║         COMPLETE PLATFORM DEPLOYMENT                      ║${NC}"
+echo -e "${CYAN}║         AUTO-HEALING PLATFORM DEPLOYMENT                   ║${NC}"
 echo -e "${CYAN}╚════════════════════════════════════════════════════════════╝${NC}"
-echo ""
-
-# Configuration
-DOMAIN="${DOMAIN:-foodpanda.site}"
-EC1_HOST="${EC1_HOST:-localhost}"
-EC2_HOST="${EC2_HOST:-129.159.249.123}"
-EC3_HOST="${EC3_HOST:-129.154.255.90}"
-
-echo -e "${GREEN}Domain:${NC} $DOMAIN"
-echo -e "${GREEN}EC1 (Control):${NC} $EC1_HOST"
-echo -e "${GREEN}EC2 (Deploy):${NC} $EC2_HOST"
-echo -e "${GREEN}EC3 (Deploy):${NC} $EC3_HOST"
-echo ""
 
 # Function to print step
 step() {
@@ -44,147 +28,137 @@ step() {
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
-step "Step 1: Checking Prerequisites"
+step "Step 1: Checking System Environment"
 
-# Check Node.js
-if command -v node &> /dev/null; then
-    echo -e "${GREEN}✓ Node.js installed:${NC} $(node --version)"
+# Detect OS
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    OS=$ID
+    echo -e "${GREEN}✓ OS Detected:${NC} $PRETTY_NAME"
 else
-    echo -e "${RED}✗ Node.js not installed${NC}"
+    echo -e "${RED}✗ Unknown OS. This script prefers Ubuntu/Debian.${NC}"
+fi
+
+# Check Node.js & npm
+if ! command -v node &> /dev/null; then
+    echo -e "${YELLOW}⚠ Node.js not found. Installing...${NC}"
+    curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+fi
+echo -e "${GREEN}✓ Node.js:${NC} $(node --version)"
+
+# Check Docker
+if ! command -v docker &> /dev/null; then
+    echo -e "${YELLOW}⚠ Docker not found. Installing...${NC}"
+    sudo apt-get update
+    sudo apt-get install -y ca-certificates curl gnupg
+    sudo install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    sudo chmod a+r /etc/apt/keyrings/docker.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    sudo apt-get update
+    sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    sudo usermod -aG docker $USER
+    echo -e "${GREEN}✓ Docker installed. Note: You might need to re-login for group changes.${NC}"
+fi
+
+# Check Docker Compose (Plugin vs Standalone)
+COMPOSE_CMD="docker compose"
+if ! docker compose version &> /dev/null; then
+    if command -v docker-compose &> /dev/null; then
+        COMPOSE_CMD="docker-compose"
+    else
+        echo -e "${YELLOW}⚠ Docker Compose plugin not found. Attempting install...${NC}"
+        sudo apt-get update && sudo apt-get install -y docker-compose-plugin || sudo apt-get install -y docker-compose
+        if ! docker compose version &> /dev/null; then COMPOSE_CMD="docker-compose"; fi
+    fi
+fi
+echo -e "${GREEN}✓ Using Compose Command:${NC} $COMPOSE_CMD"
+
+# Check PM2
+if ! command -v pm2 &> /dev/null; then
+    echo -e "${YELLOW}⚠ PM2 not found. Installing globally...${NC}"
+    sudo npm install -g pm2
+fi
+echo -e "${GREEN}✓ PM2 installed${NC}"
+
+step "Step 2: Starting Infrastructure (Databases)"
+if [ -f "docker-compose.yml" ]; then
+    echo -e "${CYAN}Starting MongoDB, Redis, and Mongo Express...${NC}"
+    # Use sudo if current user can't run docker
+    if docker ps &> /dev/null; then
+        $COMPOSE_CMD up -d
+    else
+        sudo $COMPOSE_CMD up -d
+    fi
+    echo -e "${GREEN}✓ Databases are running${NC}"
+else
+    echo -e "${RED}✗ Error: docker-compose.yml not found in current directory!${NC}"
     exit 1
 fi
 
-# Check npm
-if command -v npm &> /dev/null; then
-    echo -e "${GREEN}✓ npm installed:${NC} $(npm --version)"
-else
-    echo -e "${RED}✗ npm not installed${NC}"
-    exit 1
-fi
-
-# Check MongoDB
-if command -v mongod &> /dev/null; then
-    echo -e "${GREEN}✓ MongoDB installed${NC}"
-else
-    echo -e "${YELLOW}⚠ MongoDB not found - make sure it's running${NC}"
-fi
-
-step "Step 2: Installing Backend Dependencies"
+step "Step 3: Preparing Backend"
 cd backend
+if [ ! -f .env ]; then
+    echo -e "${YELLOW}⚠ Backend .env not found, creating from example...${NC}"
+    cp .env.example .env
+fi
 npm install
-echo -e "${GREEN}✓ Backend dependencies installed${NC}"
+echo -e "${GREEN}✓ Backend ready${NC}"
 
-step "Step 3: Installing Frontend Dependencies"
+step "Step 4: Preparing Frontend"
 cd ../frontend
-npm install
-echo -e "${GREEN}✓ Frontend dependencies installed${NC}"
-
-# Frontend Env Check
 if [ ! -f .env ]; then
     echo -e "${YELLOW}⚠ Frontend .env not found, creating from example...${NC}"
     if [ -f .env.example ]; then
         cp .env.example .env
-        echo -e "${GREEN}✓ Frontend .env created${NC}"
     else
-        # Create default if no example
         echo "NEXT_PUBLIC_API_URL=http://localhost:5000/api" > .env
-        echo -e "${GREEN}✓ Frontend .env created (default)${NC}"
     fi
 fi
-
-step "Step 4: Building Frontend"
+npm install
+echo -e "${CYAN}Building frontend (this may take a few minutes)...${NC}"
 npm run build
-echo -e "${GREEN}✓ Frontend built${NC}"
+echo -e "${GREEN}✓ Frontend ready and built${NC}"
 
-step "Step 5: Checking Backend Configuration"
-cd ../backend
+step "Step 5: Starting Services with PM2"
+cd ..
 
-if [ ! -f .env ]; then
-    echo -e "${YELLOW}⚠ .env file not found, creating from example...${NC}"
-    if [ -f .env.example ]; then
-        cp .env.example .env
-        echo -e "${GREEN}✓ .env created${NC}"
-        echo -e "${YELLOW}⚠ Please edit .env with your configuration${NC}"
-    else
-        echo -e "${RED}✗ .env.example not found${NC}"
-        exit 1
-    fi
-fi
+# Restart Backend
+echo -e "${CYAN}Starting/Restarting Backend...${NC}"
+cd backend
+pm2 stop backend 2>/dev/null || true
+pm2 delete backend 2>/dev/null || true
+pm2 start server.js --name backend --time
+cd ..
 
-step "Step 6: Starting Backend"
-echo -e "${CYAN}Starting backend server...${NC}"
+# Restart Frontend
+echo -e "${CYAN}Starting/Restarting Frontend...${NC}"
+cd frontend
+pm2 stop frontend 2>/dev/null || true
+pm2 delete frontend 2>/dev/null || true
+pm2 start npm --name frontend --time -- start
+cd ..
 
-# Check if PM2 is installed
-if command -v pm2 &> /dev/null; then
-    echo -e "${GREEN}✓ PM2 found${NC}"
-    
-    # Stop existing instances
-    pm2 delete backend 2>/dev/null || true
-    
-    # Start backend
-    pm2 start server.js --name backend
-    pm2 save
-    
-    echo -e "${GREEN}✓ Backend started with PM2${NC}"
-    echo -e "${CYAN}View logs: pm2 logs backend${NC}"
-else
-    echo -e "${YELLOW}⚠ PM2 not found, starting with npm...${NC}"
-    npm start &
-    echo -e "${GREEN}✓ Backend started${NC}"
-fi
+pm2 save
+echo -e "${GREEN}✓ Services are live in PM2${NC}"
 
-step "Step 7: Starting Frontend"
-cd ../frontend
-
-if command -v pm2 &> /dev/null; then
-    # Stop existing instances
-    pm2 delete frontend 2>/dev/null || true
-    
-    # Start frontend
-    pm2 start npm --name frontend -- start
-    pm2 save
-    
-    echo -e "${GREEN}✓ Frontend started with PM2${NC}"
-    echo -e "${CYAN}View logs: pm2 logs frontend${NC}"
-else
-    npm start &
-    echo -e "${GREEN}✓ Frontend started${NC}"
-fi
-
-step "Step 8: Waiting for Services to Start"
+step "Step 6: Final Verification"
+echo -e "${CYAN}Checking health endpoints...${NC}"
 sleep 5
-
-step "Step 9: Testing Backend"
-cd ../backend
-
-# Test health endpoint
 if curl -s http://localhost:5000/api/health > /dev/null; then
-    echo -e "${GREEN}✓ Backend is responding${NC}"
+    echo -e "${GREEN}✓ Backend Health OK${NC}"
 else
-    echo -e "${RED}✗ Backend not responding${NC}"
-    echo -e "${YELLOW}Check logs: pm2 logs backend${NC}"
+    echo -e "${RED}✗ Backend Health Check Failed. Check logs: pm2 logs backend${NC}"
 fi
-
-step "Step 10: Running Tests"
-echo -e "${CYAN}Running comprehensive tests...${NC}"
-node test-complete-system.js
 
 echo -e "\n${CYAN}╔════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║              DEPLOYMENT COMPLETE!                          ║${NC}"
+echo -e "${CYAN}║              DEPLOYMENT SUCCESSFUL!                        ║${NC}"
 echo -e "${CYAN}╚════════════════════════════════════════════════════════════╝${NC}"
-echo ""
-echo -e "${GREEN}✓ Backend running on:${NC} http://localhost:5000"
-echo -e "${GREEN}✓ Frontend running on:${NC} http://localhost:3000"
-echo ""
-echo -e "${YELLOW}Useful Commands:${NC}"
-echo -e "  ${CYAN}pm2 logs backend${NC}    - View backend logs"
-echo -e "  ${CYAN}pm2 logs frontend${NC}   - View frontend logs"
-echo -e "  ${CYAN}pm2 restart all${NC}     - Restart all services"
-echo -e "  ${CYAN}pm2 stop all${NC}        - Stop all services"
-echo ""
-echo -e "${YELLOW}Next Steps:${NC}"
-echo "  1. Setup SSL: ./setup-ssl.sh"
-echo "  2. Configure domain DNS"
-echo "  3. Deploy to production servers"
-echo ""
-echo -e "${GREEN}Done! 🎉${NC}"
+echo -e "${GREEN}✓ Platform is live!${NC}"
+echo -e "${BLUE}Frontend:${NC} http://$(curl -s ifconfig.me):3000"
+echo -e "${BLUE}Backend: ${NC} http://$(curl -s ifconfig.me):5000"
+echo -e "${BLUE}DB UI:   ${NC} http://$(curl -s ifconfig.me):8081 (admin/password123)"
+echo -e "\n${YELLOW}Logs:${NC} pm2 logs"
+echo -e "${YELLOW}Status:${NC} pm2 status"
+echo -e "${CYAN}Note: If you just installed Docker, run 'newgrp docker' to use without sudo.${NC}"

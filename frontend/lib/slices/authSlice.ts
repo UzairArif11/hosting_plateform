@@ -26,6 +26,10 @@ interface User {
     } | null;
     resourceUsagePercentage: any;
     createdAt: string;
+    apiKey?: string;
+    githubUsername?: string;
+    githubId?: string;
+    googleId?: string;
 }
 
 interface AuthState {

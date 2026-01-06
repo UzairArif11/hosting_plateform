@@ -342,7 +342,7 @@ export default function ProjectDetailPage() {
                                 </button>
                             </div>
                         ) : (
-                            deployments.map((deployment: any) => (
+                            deployments.map((deployment) => (
                                 <Link
                                     key={deployment._id}
                                     href={`/dashboard/deployments/${deployment._id}`}
