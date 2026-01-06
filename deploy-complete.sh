@@ -133,11 +133,12 @@ pm2 start server.js --name backend --time
 cd ..
 
 # Restart Frontend
-echo -e "${CYAN}Starting/Restarting Frontend...${NC}"
+echo -e "${CYAN}Frontend is now STATIC (output: 'export'). No PM2 needed.${NC}"
 cd frontend
 pm2 stop frontend 2>/dev/null || true
 pm2 delete frontend 2>/dev/null || true
-pm2 start npm --name frontend --time -- start
+echo -e "${GREEN}✓ Frontend built at: $(pwd)/out${NC}"
+echo -e "${YELLOW}ℹ Note: Ensure Nginx is pointing to $(pwd)/out${NC}"
 cd ..
 
 pm2 save
