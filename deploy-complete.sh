@@ -79,6 +79,19 @@ cd ../frontend
 npm install
 echo -e "${GREEN}✓ Frontend dependencies installed${NC}"
 
+# Frontend Env Check
+if [ ! -f .env ]; then
+    echo -e "${YELLOW}⚠ Frontend .env not found, creating from example...${NC}"
+    if [ -f .env.example ]; then
+        cp .env.example .env
+        echo -e "${GREEN}✓ Frontend .env created${NC}"
+    else
+        # Create default if no example
+        echo "NEXT_PUBLIC_API_URL=http://localhost:5000/api" > .env
+        echo -e "${GREEN}✓ Frontend .env created (default)${NC}"
+    fi
+fi
+
 step "Step 4: Building Frontend"
 npm run build
 echo -e "${GREEN}✓ Frontend built${NC}"
