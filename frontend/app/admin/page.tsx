@@ -197,8 +197,14 @@ export default function AdminDashboard() {
     );
 }
 
-function StatCard({ title, value, icon, color, subtitle }: any) {
-    const colors: { [key: string]: string } = {
+function StatCard({ title, value, icon, color, subtitle }: {
+    title: string;
+    value: number | string;
+    icon: string;
+    color: string;
+    subtitle?: string;
+}) {
+    const colors: Record<string, string> = {
         blue: 'from-blue-500/20 to-blue-600/20 border-blue-500/30',
         yellow: 'from-yellow-500/20 to-yellow-600/20 border-yellow-500/30',
         red: 'from-red-500/20 to-red-600/20 border-red-500/30',

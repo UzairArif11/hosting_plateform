@@ -9,9 +9,11 @@ interface Deployment {
     commitSha: string;
     commitMessage: string;
     deploymentUrl: string;
+    url?: string;
     buildLogs: any[];
     createdAt: string;
     duration: number;
+    buildTime?: number;
 }
 
 interface DeploymentsState {
