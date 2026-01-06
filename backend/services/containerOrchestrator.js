@@ -1407,5 +1407,7 @@ module.exports = {
   assignUserToServer,
   enforceUserResourceCaps,
   monitorUserResourceUsage,
-  startResourceMonitoring
+  startResourceMonitoring,
+  ORACLE_SERVERS,
+  SHARED_RESOURCE_CAPS
 };
