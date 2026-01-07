@@ -103,8 +103,9 @@ echo -e "${BLUE}${BOLD}Frontend:${NC}"
 
 cd frontend
 
-# Update .env.local with production URL
+# Update .env.local with production URL (CRITICAL: Must be set before build)
 echo "NEXT_PUBLIC_API_URL=https://foodpanda.site" > .env.local
+info "Set NEXT_PUBLIC_API_URL=https://foodpanda.site in .env.local"
 
 # Install if needed
 if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then
@@ -113,8 +114,16 @@ if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then
 fi
 
 # Always rebuild (code might have changed) with production API URL
+# IMPORTANT: Next.js embeds env vars at build time, so this MUST be set
 info "Building frontend with production API URL..."
 export NEXT_PUBLIC_API_URL=https://foodpanda.site
+
+# Verify env var is set
+if [ -z "$NEXT_PUBLIC_API_URL" ]; then
+    echo -e "${YELLOW}⚠️  NEXT_PUBLIC_API_URL not set!${NC}"
+    exit 1
+fi
+info "Building with API_URL: $NEXT_PUBLIC_API_URL"
 
 # Run build and capture exit code
 if npm run build > /tmp/frontend-build.log 2>&1; then

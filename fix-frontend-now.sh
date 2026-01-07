@@ -31,9 +31,17 @@ pm2 delete frontend 2>/dev/null || true
 echo -e "${CYAN}Cleaning old build...${NC}"
 rm -rf .next
 
-# Set environment
-export NEXT_PUBLIC_API_URL=https://foodpanda.site
+# Set environment (CRITICAL: Must be in .env.local AND exported)
 echo "NEXT_PUBLIC_API_URL=https://foodpanda.site" > .env.local
+export NEXT_PUBLIC_API_URL=https://foodpanda.site
+
+# Verify
+if [ -z "$NEXT_PUBLIC_API_URL" ]; then
+    echo -e "${YELLOW}❌ NEXT_PUBLIC_API_URL not set!${NC}"
+    exit 1
+fi
+
+echo -e "${CYAN}Building with API_URL: $NEXT_PUBLIC_API_URL${NC}"
 
 # Build
 echo -e "${CYAN}Building frontend...${NC}"
