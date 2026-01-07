@@ -2,14 +2,15 @@
 const nextConfig = {
     reactStrictMode: true,
     swcMinify: true,
-    // ✅ Enable static export - NO server needed!
-    output: 'export',
-    trailingSlash: true,
-    // Disable image optimization for static export
+    // ❌ Remove static export - we need dynamic routes!
+    // output: 'export',
+    
+    // ✅ Keep these optimizations
     images: {
-        unoptimized: true
+        domains: ['avatars.githubusercontent.com', 'lh3.googleusercontent.com'],
     },
-    // Environment variables available at build time
+    
+    // Environment variables
     env: {
         NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000',
     }
