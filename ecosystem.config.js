@@ -14,29 +14,26 @@ module.exports = {
       out_file: '../logs/backend-out.log',
       log_date_format: 'YYYY-MM-DD HH:mm:ss',
       max_memory_restart: '500M',
-      autorestart: true,
-      watch: false
+      autorestart: true
     },
     {
       name: 'frontend',
-      script: 'node_modules/next/dist/bin/next',
-      args: 'start',
+      script: 'npm',
+      args: 'start -- --port 3001',
       cwd: './frontend',
       instances: 1,
       exec_mode: 'fork',
       env: {
         NODE_ENV: 'production',
-        PORT: 3000
+        PORT: 3001
       },
       error_file: '../logs/frontend-error.log',
       out_file: '../logs/frontend-out.log',
       log_date_format: 'YYYY-MM-DD HH:mm:ss',
       max_memory_restart: '300M',
       autorestart: true,
-      watch: false,
-      kill_timeout: 5000,
-      wait_ready: true,
-      listen_timeout: 10000
+      max_restarts: 10,
+      min_uptime: '10s'
     }
   ]
 };

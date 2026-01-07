@@ -1,220 +1,126 @@
-# 🚀 Platform - Quick Reference
+# 🚀 PLATFORM - Deployment & Management
 
-**Version:** 2.0 | **Last Updated:** 2025-12-18
-
----
-
-## 📖 **READ THIS FIRST**
-
-**Main Documentation:** `PLATFORM_ARCHITECTURE.md`
-
-This file contains **EVERYTHING** you need to know about the platform architecture.
+**One script. Simple workflow. Zero confusion.**
 
 ---
 
-## ⚡ **QUICK FACTS**
+## ⚡ DEPLOYMENT
 
-### **Container Architecture:**
-- ✅ **ONE container per user** (not per project)
-- ✅ **Resources from plan** (Free: 1GB/0.5CPU, Pro: 8GB/2CPU)
-- ✅ **Projects = PM2 processes** inside container
-- ✅ **Resources shared dynamically**
+### **First Time:**
+```bash
+chmod +x deploy.sh
+./deploy.sh
+```
 
-### **IP Restrictions:**
-- ✅ **Limit: 3 free accounts per IP**
-- ✅ **4th+ account can signup but can't create projects**
-- ✅ **Paid accounts exempt**
-- ✅ **Tracks ALL accounts** (including deleted)
+### **After Code Updates:**
+```bash
+git pull
+./deploy.sh
+```
 
-### **Routing:**
-- ✅ **Port-based** (not container-based)
-- ✅ **Each project gets unique port**
-- ✅ **Nginx proxies to port**
+**That's it!** 🎉
 
 ---
 
-## 🔧 **KEY FILES**
+## 📊 WHAT'S RUNNING
 
 ### **Services:**
 ```
-backend/services/
-├── containerOrchestrator.js    # Container allocation
-├── freeTierContainer.js        # Project deployment
-├── buildExecutor.js            # Build pipeline
-├── ipRestrictions.js           # IP restrictions
-└── nginxRouter.js              # Domain routing
+PM2:
+  • backend  (port 5000) - Platform API
+  • frontend (port 3000) - Platform UI
+
+Docker:
+  • MongoDB (port 27017) - Database  
+  • Redis (port 6379) - Job queue
+
+Nginx:
+  • Port 80/443 - SSL proxy
 ```
 
-### **Routes:**
+### **Architecture:**
 ```
-backend/routes/
-├── auth.js                     # Signup (IP tracking)
-├── projects.js                 # Project creation (IP check)
-└── ipRestrictions.js           # Admin IP management
-```
-
-### **Models:**
-```
-backend/models/
-├── User.js                     # signupIP, containerName
-├── Project.js                  # port, containerName
-├── Settings.js                 # ipRestrictions config
-└── Plan.js                     # resources, maxProjects
+https://foodpanda.site/
+  ├─→ /              → Platform UI (admin/dashboard)
+  ├─→ /api/          → Platform API
+  ├─→ /user-project/ → User deployments (10+ active)
+  └─→ ...
 ```
 
 ---
 
-## 📊 **FLOW DIAGRAMS**
+## 🔧 COMMANDS
 
-### **User Signup:**
-```
-1. User signs up → Check email
-2. Create account → Track IP
-3. Allocate container → Save to user
-4. ✅ User can login
+### **View Status:**
+```bash
+pm2 list              # PM2 processes
+docker ps             # Containers
 ```
 
-### **Project Creation:**
-```
-1. User creates project → Check IP restrictions
-2. If allowed → Build project
-3. Get user's container → Deploy as PM2 process
-4. Configure Nginx → Add location block
-5. ✅ Project accessible
+### **View Logs:**
+```bash
+pm2 logs              # All logs
+pm2 logs backend      # Backend only
+pm2 logs frontend     # Frontend only
 ```
 
-### **IP Restriction:**
-```
-1. Count free accounts from IP
-2. If > 3 → Block project creation
-3. Show upgrade message
-4. Paid accounts → Always allowed
-```
-
----
-
-## 🎯 **EXAMPLES**
-
-### **User Container:**
-```
-Container: EC2-user-john-1234567890
-Resources: 1GB RAM, 0.5 CPU
-
-Process 1: My Blog → Port 3001
-Process 2: My Shop → Port 3002
-Process 3: My App → Port 3003
-
-All share 1GB RAM, 0.5 CPU
+### **Restart:**
+```bash
+pm2 restart all       # Both services
+pm2 restart backend   # Backend only
+pm2 restart frontend  # Frontend only
 ```
 
-### **Nginx Routing:**
-```nginx
-location /myblog-abc123/ {
-    proxy_pass http://localhost:3001/;
-}
-
-location /myshop-def456/ {
-    proxy_pass http://localhost:3002/;
-}
+### **Clean PM2:**
+```bash
+# Remove errored processes
+pm2 list | grep errored | awk '{print $4}' | xargs pm2 delete
+pm2 save
 ```
 
 ---
 
-## ⚙️ **ADMIN CONTROLS**
+## 📝 MAINTENANCE
 
-### **Plans:**
-- Set max projects
-- Set resources (CPU, RAM, Storage)
-- Set price
-
-### **IP Restrictions:**
-- Enable/disable
-- Set max free accounts per IP
-- Block deleted emails
-- Exempt paid accounts
-
----
-
-## 🔍 **DEBUGGING**
-
-### **Check User Container:**
-```javascript
-const user = await User.findById(userId);
-console.log('Container:', user.containerName);
-console.log('Server:', user.assignedServer);
-console.log('Resources:', user.resourceAllocation);
+### **Update Code:**
+```bash
+git pull
+./deploy.sh
 ```
 
-### **Check IP Restrictions:**
-```javascript
-const ipRestrictions = require('./services/ipRestrictions');
-const check = await ipRestrictions.canUseFreeResources(ipAddress, userId);
-console.log('Allowed:', check.allowed);
-console.log('Reason:', check.reason);
+### **Rebuild Frontend:**
+```bash
+cd frontend
+npm run build
+pm2 restart frontend
 ```
 
-### **List Projects in Container:**
-```javascript
-const freeTierContainer = require('./services/freeTierContainer');
-const projects = await freeTierContainer.listProjectsInUserContainer(containerName, host);
-console.log('Projects:', projects);
+### **Check Health:**
+```bash
+curl https://foodpanda.site/api/health
 ```
 
 ---
 
-## 📚 **DOCUMENTATION**
+## 📚 DOCUMENTATION
 
-- **Architecture:** `PLATFORM_ARCHITECTURE.md` (Read This First)
-- **User Guide:** `USER_GUIDE.md`
-- **Admin Guide:** `ADMIN_GUIDE.md`
-- **Quick Start:** `QUICK_START_GUIDE.md`
-- **Testing:** `TESTING_GUIDE.md`
-- **Specific Guides:**
-  - `DOMAIN_MIGRATION_COMPLETE_GUIDE.md`
-  - `ADMIN_PANEL_SERVER_DNS_GUIDE.md`
+- `README.md` - This file (Quick ref)
+- `README_DEPLOYMENT.md` - Detailed guide
+- `PLATFORM_ARCHITECTURE.md` - System architecture
+- `DEEP_SECURITY_REVIEW.md` - Security checklist
 
 ---
 
-## ✅ **CHECKLIST FOR NEW DEVELOPERS**
+## ✅ SUMMARY
 
-- [ ] Read `PLATFORM_ARCHITECTURE.md`
-- [ ] Understand container architecture (ONE per user)
-- [ ] Understand IP restrictions (3 free accounts per IP)
-- [ ] Understand routing (port-based)
-- [ ] Review key files (containerOrchestrator, freeTierContainer, ipRestrictions)
-- [ ] Test locally
-- [ ] Review admin controls
+**One deployment script:**
+- First time: `./deploy.sh`
+- Updates: `git pull && ./deploy.sh`
 
----
+**Your platform:**
+- SSL enabled ✅
+- 10+ user projects deployed ✅
+- Backend + Frontend running ✅
+- Simple workflow ✅
 
-**EVERYTHING YOU NEED IS IN `PLATFORM_ARCHITECTURE.md`!** 📖✨
-
-
-cleans previous config and containers 
-
-rm cleanup-server.sh
-vim cleanup-server.sh
-chmod +x cleanup-server.sh
-./cleanup-server.sh  
-╔══════════════════════════════════════════════════════════
-
-clean setup of config 
-
-
-rm setup-deployment-server.sh
-vim setup-deployment-server.sh
-chmod +x setup-deployment-server.sh
-./setup-deployment-server.sh  
-╔══════════════════════════════════════════════════════════
-
-# Create and run fix script
-vim fix-ssl-https.sh
-# Paste the content
-chmod +x fix-ssl-https.sh
-sudo ./fix-ssl-https.sh
-══════════════════════════════════════════════
-
-
-
-node reset-db.js
-node make-admin.js user@example.com
+🚀 **Production ready!**
