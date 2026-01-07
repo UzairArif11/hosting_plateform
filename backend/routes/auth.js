@@ -331,15 +331,41 @@ const handleGitHubOAuthStart = passport.authenticate('github', {
 
 const handleGitHubCallback = async (req, res) => {
   try {
+    // Log callback received for debugging
+    logger.info('GitHub OAuth callback received', {
+      hasUser: !!req.user,
+      userId: req.user?._id,
+      query: req.query,
+      userAgent: req.get('User-Agent'),
+      ip: req.ip
+    });
+
+    // Check if user exists (set by passport middleware)
+    if (!req.user) {
+      logger.error('GitHub OAuth callback: req.user is undefined', {
+        query: req.query,
+        session: req.session,
+        userAgent: req.get('User-Agent'),
+        ip: req.ip
+      });
+      const frontendURL = process.env.FRONTEND_URL || 'http://localhost:3000';
+      return res.redirect(`${frontendURL}/login?error=auth_failed`);
+    }
+
     // Generate JWT token
     const token = generateToken(req.user);
 
     // Set JWT as HTTP-only cookie
+    // In production with HTTPS, use secure cookies with sameSite: 'none' for OAuth redirects
+    const isProduction = process.env.NODE_ENV === 'production';
+    const isHTTPS = process.env.FRONTEND_URL?.startsWith('https://') || isProduction;
+    
     res.cookie('auth_token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      secure: isHTTPS, // Must be true for HTTPS
+      sameSite: isHTTPS ? 'none' : 'lax', // 'none' required for cross-site OAuth redirects over HTTPS
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      domain: isProduction ? undefined : undefined // Let browser set domain automatically
     });
 
     // Log successful authentication
@@ -355,8 +381,14 @@ const handleGitHubCallback = async (req, res) => {
     const targetPath = req.user.role === 'admin' ? '/admin' : '/dashboard';
     res.redirect(`${frontendURL}${targetPath}`);
   } catch (error) {
-    logger.error('Authentication callback error:', error.message);
-    res.redirect('/login?error=callback_failed');
+    logger.error('Authentication callback error:', {
+      message: error.message,
+      stack: error.stack,
+      hasUser: !!req.user,
+      userId: req.user?._id
+    });
+    const frontendURL = process.env.FRONTEND_URL || 'http://localhost:3000';
+    res.redirect(`${frontendURL}/login?error=callback_failed`);
   }
 };
 
@@ -601,7 +633,10 @@ const refreshToken = async (req, res) => {
 router.get('/github', handleGitHubOAuthStart);
 
 router.get('/github/callback',
-  passport.authenticate('github', { failureRedirect: '/login?error=auth_failed' }),
+  passport.authenticate('github', { 
+    failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login?error=auth_failed`,
+    session: false // OAuth doesn't need sessions
+  }),
   handleGitHubCallback
 );
 
