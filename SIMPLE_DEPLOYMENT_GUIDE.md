@@ -32,7 +32,7 @@ chmod +x deploy.sh
 
 ```bash
 git pull
-./update.sh
+./deploy.sh
 ```
 
 ---
