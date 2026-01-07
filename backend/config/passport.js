@@ -115,18 +115,43 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                     }
 
                     // Create new user
+                    // Ensure all required fields are present
+                    let email = profile.emails?.[0]?.value || `${profile.username}@github.com`;
+                    let username = profile.username || `github_${profile.id}`;
+                    const displayName = profile.displayName || profile.username || username;
+
+                    // Check if username or email already exists and make them unique
+                    let usernameExists = await User.findOne({ username });
+                    let emailExists = await User.findOne({ email });
+                    
+                    if (usernameExists) {
+                        username = `${username}_${profile.id}`;
+                        logger.info(`Username already exists, using: ${username}`);
+                    }
+                    
+                    if (emailExists) {
+                        email = `github_${profile.id}@github.com`;
+                        logger.info(`Email already exists, using: ${email}`);
+                    }
+
                     logger.info('👤 Creating new user from GitHub...', {
                         githubId: profile.id,
-                        username: profile.username,
-                        email: profile.emails?.[0]?.value
+                        username: username,
+                        email: email,
+                        displayName: displayName
                     });
+
+                    // Validate data before creating
+                    if (!username || !email || !displayName) {
+                        throw new Error(`Missing required fields: username=${!!username}, email=${!!email}, displayName=${!!displayName}`);
+                    }
 
                     user = await User.create({
                         githubId: profile.id,
-                        email: profile.emails?.[0]?.value || `${profile.username}@github.com`,
-                        displayName: profile.displayName || profile.username,
-                        username: profile.username,
-                        avatar: profile.photos?.[0]?.value,
+                        email: email,
+                        displayName: displayName,
+                        username: username,
+                        avatar: profile.photos?.[0]?.value || '',
                         githubAccessToken: accessToken,
                         provider: 'github'
                     });
@@ -144,7 +169,16 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                         message: error.message,
                         stack: error.stack,
                         githubId: profile?.id,
-                        username: profile?.username
+                        username: profile?.username,
+                        email: profile.emails?.[0]?.value,
+                        errorName: error.name,
+                        errorCode: error.code,
+                        errors: error.errors ? Object.keys(error.errors) : null,
+                        validationErrors: error.errors ? Object.entries(error.errors).map(([key, val]) => ({
+                            field: key,
+                            message: val.message,
+                            value: val.value
+                        })) : null
                     });
                     done(error, null);
                 }
