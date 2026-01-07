@@ -14,7 +14,6 @@ interface Deployment {
     createdAt: string;
     duration: number;
     buildTime?: number;
-    error?: string | { message: string } | any;
 }
 
 interface DeploymentsState {

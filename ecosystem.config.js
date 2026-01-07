@@ -25,7 +25,8 @@ module.exports = {
       exec_mode: 'fork',
       env: {
         NODE_ENV: 'production',
-        PORT: 3001
+        PORT: 3001,
+        NEXT_PUBLIC_API_URL: 'https://foodpanda.site'
       },
       error_file: '../logs/frontend-error.log',
       out_file: '../logs/frontend-out.log',
