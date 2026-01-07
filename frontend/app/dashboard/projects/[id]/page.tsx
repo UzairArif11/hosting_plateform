@@ -375,9 +375,11 @@ export default function ProjectDetailPage() {
                                                 {deployment.status === 'failed' && deployment.error && (
                                                     <p className="text-xs text-red-400 mt-1">
                                                         Error: {(() => {
-                                                            const errorMsg = typeof deployment.error === 'string'
-                                                                ? deployment.error
-                                                                : deployment.error?.message || JSON.stringify(deployment.error);
+                                                            if (typeof deployment.error === 'string') {
+                                                                return deployment.error.substring(0, 100) + (deployment.error.length > 100 ? '...' : '');
+                                                            }
+                                                            const errorObj = deployment.error as any;
+                                                            const errorMsg = errorObj?.message || errorObj?.error || JSON.stringify(deployment.error);
                                                             return errorMsg.substring(0, 100) + (errorMsg.length > 100 ? '...' : '');
                                                         })()}
                                                     </p>
