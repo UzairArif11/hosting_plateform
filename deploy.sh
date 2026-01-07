@@ -1,15 +1,16 @@
 #!/bin/bash
 
 ###############################################################################
-# COMPLETE DEPLOYMENT SCRIPT - All-in-One
+# SMART DEPLOYMENT SCRIPT
 # 
-# This is a standalone alternative to the 3-script workflow
-# Use this OR use cleanup-server.sh + setup-deployment-server.sh + fix-ssl-now.sh
+# Detects what changed and only updates that!
+# - First time: Full deployment
+# - Updates: Only rebuild/restart what changed
+# - MongoDB/Redis: Keep running (no restart needed!)
 ###############################################################################
 
 set -e
 
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
@@ -19,107 +20,130 @@ NC='\033[0m'
 
 clear
 echo -e "${CYAN}${BOLD}"
-cat << "EOF"
-╔════════════════════════════════════════════════════════════╗
-║         🚀 ALL-IN-ONE DEPLOYMENT SCRIPT 🚀                 ║
-║                                                            ║
-║  Alternative to the 3-script workflow                      ║
-║  Does cleanup + setup + nginx config in one go             ║
-╚════════════════════════════════════════════════════════════╝
-EOF
+echo "╔════════════════════════════════════════════════════════════╗"
+echo "║              🚀 SMART DEPLOYMENT 🚀                        ║"
+echo "╚════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
-
-echo -e "${YELLOW}This will cleanup and redeploy everything.${NC}"
-echo -e "${YELLOW}Continue? (yes/no)${NC}"
-read -r confirm
-if [ "$confirm" != "yes" ]; then
-    echo "Cancelled."
-    exit 0
-fi
-
-step() {
-    echo -e "\n${BLUE}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${GREEN}${BOLD}▶ $1${NC}"
-    echo -e "${BLUE}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-}
 
 success() { echo -e "${GREEN}✓ $1${NC}"; }
 info() { echo -e "${CYAN}• $1${NC}"; }
 
 #==============================================================================
-# CLEANUP
+# DETECT MODE
 #==============================================================================
 
-step "Cleanup Phase"
-
-pm2 kill 2>/dev/null || true
-sudo pkill -f "next-server" 2>/dev/null || true
-sudo pkill -f "next start" 2>/dev/null || true
-docker stop vercel-clone-mongodb vercel-clone-redis vercel-clone-mongo-express 2>/dev/null || true
-docker rm vercel-clone-mongodb vercel-clone-redis vercel-clone-mongo-express 2>/dev/null || true
-rm -rf logs/*.log 2>/dev/null || true
-success "Cleanup complete"
-
-#==============================================================================
-# DEPLOY
-#==============================================================================
-
-step "Deployment"
+FIRST_TIME=false
+if ! pm2 list | grep -q "backend.*online"; then
+    FIRST_TIME=true
+    info "First-time deployment detected"
+else
+    info "Update deployment detected"
+fi
 
 SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || echo "localhost")
 
-# Start databases
-docker-compose up -d mongodb redis
-sleep 5
-success "Databases started"
+#==============================================================================
+# DATABASES (Only if not running)
+#==============================================================================
 
-# Backend
+if ! docker ps | grep -q vercel-clone-mongodb; then
+    info "Starting MongoDB and Redis..."
+    docker-compose up -d mongodb redis
+    sleep 5
+    success "Databases started"
+else
+    success "Databases already running (no restart needed)"
+fi
+
+#==============================================================================
+# BACKEND
+#==============================================================================
+
+echo ""
+echo -e "${BLUE}${BOLD}Backend:${NC}"
+
 cd backend
-[ ! -f .env ] && [ -f .env.example ] && cp .env.example .env
-npm install --quiet
-cd ..
-success "Backend ready"
 
-# Frontend
+# Install if needed
+if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then
+    info "Installing dependencies..."
+    npm install --quiet
+fi
+
+# Restart backend
+if pm2 list | grep -q "backend.*online"; then
+    info "Restarting backend..."
+    pm2 restart backend
+else
+    info "Starting backend..."
+    pm2 start server.js --name backend
+fi
+
+success "Backend updated (port 5000)"
+cd ..
+
+#==============================================================================
+# FRONTEND
+#==============================================================================
+
+echo ""
+echo -e "${BLUE}${BOLD}Frontend:${NC}"
+
 cd frontend
+
+# Update .env.local
 echo "NEXT_PUBLIC_API_URL=http://${SERVER_IP}:5000" > .env.local
-npm install --quiet
+
+# Install if needed
+if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then
+    info "Installing dependencies..."
+    npm install --quiet
+fi
+
+# Always rebuild (code might have changed)
 info "Building frontend..."
-npm run build 2>&1 | grep -E "✓|Route" | head -10 || echo "Building..."
+npm run build 2>&1 | grep -E "✓|Compiled|Route" | head -5
+
+# Restart frontend
+if pm2 list | grep -q "frontend.*online"; then
+    info "Restarting frontend..."
+    pm2 restart frontend
+else
+    info "Starting frontend..."
+    PORT=3001 pm2 start npm --name frontend -- start -- --port 3001
+fi
+
+success "Frontend updated (port 3001)"
 cd ..
-success "Frontend built"
 
-# Start services
-mkdir -p logs
-cd backend && pm2 start server.js --name backend && cd ..
-cd frontend && PORT=3001 pm2 start npm --name frontend -- start -- --port 3001 && cd ..
+# Save PM2
 pm2 save
-pm2 startup | grep "sudo env" | bash || true
-sleep 5
-success "Services started (Backend: 5000, Frontend: 3001)"
+
+# Setup startup (only first time)
+if [ "$FIRST_TIME" = true ]; then
+    pm2 startup | grep "sudo env" | bash || true
+fi
 
 #==============================================================================
-# NGINX FIX
+# VERIFY
 #==============================================================================
 
-step "Nginx Configuration"
-
-info "Backing up current Nginx config..."
-sudo cp /etc/nginx/sites-available/default /etc/nginx/sites-available/default.backup.$(date +%Y%m%d_%H%M%S) 2>/dev/null || true
-
-info "Creating fixed Nginx configuration..."
-# (The fix-ssl-now.sh logic would go here, but keeping it simple)
-
-echo -e "${YELLOW}Nginx needs manual configuration or run fix-ssl-now.sh${NC}"
-
-#==============================================================================
-# DONE
-#==============================================================================
-
-step "Verification"
-
+echo ""
+echo -e "${BLUE}${BOLD}Status:${NC}"
 pm2 list
 
-echo -e "\n${GREEN}${BOLD}✅ Deployment Complete!${NC}"
-echo -e "\n${CYAN}Next: Run fix-ssl-now.sh to configure Nginx${NC}"
-echo -e "  ${BOLD}sudo ./fix-ssl-now.sh${NC}"
+echo ""
+curl -s http://localhost:5000/api/health > /dev/null && success "Backend: Healthy" || info "Backend: Check logs"
+curl -s http://localhost:3001/ > /dev/null && success "Frontend: Responding" || info "Frontend: Check logs"
+
+echo ""
+echo -e "${GREEN}${BOLD}✅ Deployment Complete!${NC}"
+echo ""
+echo -e "${CYAN}Test:${NC} curl https://foodpanda.site/"
+echo -e "${CYAN}Logs:${NC} pm2 logs"
+
+# Check if Nginx configured
+if ! grep -q "proxy_pass.*3001" /etc/nginx/sites-available/default 2>/dev/null; then
+    echo ""
+    echo -e "${YELLOW}⚠️  First time? Run: sudo ./fix-ssl-now.sh${NC}"
+fi
