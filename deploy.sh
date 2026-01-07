@@ -114,16 +114,36 @@ fi
 
 # Always rebuild (code might have changed) with production API URL
 info "Building frontend with production API URL..."
-NEXT_PUBLIC_API_URL=https://foodpanda.site npm run build 2>&1 | grep -E "✓|Compiled|Route" | head -5
+export NEXT_PUBLIC_API_URL=https://foodpanda.site
 
-# Restart frontend
-if pm2 list | grep -q "frontend.*online"; then
-    info "Restarting frontend..."
-    pm2 restart frontend
+# Run build and capture exit code
+if npm run build > /tmp/frontend-build.log 2>&1; then
+    success "Frontend build completed"
+    
+    # Verify build directory exists
+    if [ ! -d ".next" ] || [ ! -f ".next/BUILD_ID" ]; then
+        echo -e "${YELLOW}⚠️  Build directory incomplete, showing errors...${NC}"
+        tail -50 /tmp/frontend-build.log
+        exit 1
+    fi
 else
-    info "Starting frontend..."
-    PORT=3001 pm2 start npm --name frontend -- start -- --port 3001
+    echo -e "${YELLOW}⚠️  Build failed! Showing errors...${NC}"
+    tail -50 /tmp/frontend-build.log
+    exit 1
 fi
+
+# Stop frontend if running (to avoid conflicts)
+if pm2 list | grep -q "frontend"; then
+    info "Stopping old frontend process..."
+    pm2 stop frontend 2>/dev/null || true
+    pm2 delete frontend 2>/dev/null || true
+fi
+
+# Start frontend using ecosystem config
+info "Starting frontend with PM2..."
+cd ..
+pm2 start ecosystem.config.js --only frontend
+cd frontend
 
 success "Frontend updated (port 3001)"
 cd ..
