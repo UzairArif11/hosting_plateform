@@ -251,7 +251,10 @@ router.post('/',
       await project.save();
 
       // Update user's project count
-      req.user.currentUsage.projects += 1;
+      if (!req.user.currentUsage) {
+        req.user.currentUsage = { projects: 0, deployments: 0, containers: 0, storage: 0, bandwidth: 0 };
+      }
+      req.user.currentUsage.projects = (req.user.currentUsage.projects || 0) + 1;
       await req.user.save();
 
       logger.deployment('Project created', {
