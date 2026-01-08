@@ -146,15 +146,35 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                         throw new Error(`Missing required fields: username=${!!username}, email=${!!email}, displayName=${!!displayName}`);
                     }
 
-                    user = await User.create({
+                    // Get default plan for new user
+                    const Plan = require('../models/Plan');
+                    const defaultPlan = await Plan.findTrialPlan();
+
+                    // Create user with all required fields (matching createUserFromGitHubProfile)
+                    const newUser = new User({
                         githubId: profile.id,
                         email: email,
                         displayName: displayName,
                         username: username,
                         avatar: profile.photos?.[0]?.value || '',
                         githubAccessToken: accessToken,
-                        provider: 'github'
+                        provider: 'github',
+                        plan: defaultPlan?._id || null,
+                        planType: 'free',
+                        status: 'trial',
+                        subscriptionStatus: 'trial',
+                        isTrialActive: true,
+                        trialStarted: new Date(),
+                        trialExpiry: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days
                     });
+
+                    // Set resource allocation based on trial plan
+                    if (defaultPlan) {
+                        newUser.resourceAllocation = { ...defaultPlan.resources };
+                    }
+
+                    // Save user
+                    user = await newUser.save();
 
                     logger.info('✅ New user created with GitHub token!', {
                         userId: user._id,
@@ -165,21 +185,57 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
 
                     done(null, user);
                 } catch (error) {
-                    logger.error('❌ GitHub OAuth Error:', {
+                    // Log detailed error information
+                    const errorDetails = {
                         message: error.message,
-                        stack: error.stack,
+                        name: error.name,
+                        code: error.code,
                         githubId: profile?.id,
                         username: profile?.username,
                         email: profile.emails?.[0]?.value,
-                        errorName: error.name,
-                        errorCode: error.code,
-                        errors: error.errors ? Object.keys(error.errors) : null,
-                        validationErrors: error.errors ? Object.entries(error.errors).map(([key, val]) => ({
+                        profileData: {
+                            id: profile?.id,
+                            username: profile?.username,
+                            displayName: profile?.displayName,
+                            emails: profile?.emails,
+                            photos: profile?.photos
+                        }
+                    };
+
+                    // Handle Mongoose validation errors
+                    if (error.name === 'ValidationError' && error.errors) {
+                        errorDetails.validationErrors = Object.entries(error.errors).map(([key, val]) => ({
                             field: key,
                             message: val.message,
-                            value: val.value
-                        })) : null
-                    });
+                            value: val.value,
+                            kind: val.kind,
+                            path: val.path
+                        }));
+                    }
+
+                    // Handle MongoDB server errors
+                    if (error.name === 'MongoServerError') {
+                        errorDetails.mongoError = {
+                            code: error.code,
+                            codeName: error.codeName,
+                            errmsg: error.errmsg,
+                            writeErrors: error.writeErrors
+                        };
+                        
+                        // Try to get more details from writeErrors
+                        if (error.writeErrors && error.writeErrors.length > 0) {
+                            errorDetails.writeErrorDetails = error.writeErrors.map(err => ({
+                                code: err.code,
+                                errmsg: err.errmsg,
+                                op: err.op ? Object.keys(err.op) : null
+                            }));
+                        }
+                    }
+
+                    // Log full error details
+                    logger.error('❌ GitHub OAuth Error (Full Details):', errorDetails);
+                    logger.error('❌ Error Stack:', error.stack);
+                    
                     done(error, null);
                 }
             }
