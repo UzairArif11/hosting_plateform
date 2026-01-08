@@ -49,6 +49,16 @@ async function buildOnRemoteServer(buildPath, imageName, serverHost, serverKey, 
         const dockerfilePath = path.join(buildPath, 'Dockerfile');
         await ssh.putFile(dockerfilePath, `${remotePath}/Dockerfile`);
 
+        // CRITICAL: Also copy server.js if it exists (required for PM2 in shared containers)
+        const serverJsPath = path.join(buildPath, 'server.js');
+        try {
+            await fsPromises.access(serverJsPath);
+            await ssh.putFile(serverJsPath, `${remotePath}/server.js`);
+            await onLog('info', `✅ Copied server.js to remote server`);
+        } catch (err) {
+            await onLog('warn', `⚠️ server.js not found at ${serverJsPath} - Docker image build may fail for shared containers`);
+        }
+
         await onLog('info', `✅ Files copied successfully`);
 
         // Build Docker image on remote server
@@ -201,18 +211,20 @@ async function uploadToRemoteServer(buildPath, deploymentId, serverHost, serverK
 
         // Use system tar
         // Handle exclusions if provided (to skip node_modules for static sites)
+        // CRITICAL: server.js must NEVER be excluded
         let excludeCmd = '';
         if (options.exclude) {
             const excludes = Array.isArray(options.exclude) ? options.exclude : [options.exclude];
-            excludeCmd = excludes.map(ex => `--exclude="${ex}"`).join(' ') + ' ';
+            // Filter out any attempt to exclude server.js
+            const filteredExcludes = excludes.filter(ex => !ex.includes('server.js'));
+            excludeCmd = filteredExcludes.map(ex => `--exclude=\"${ex}\"`).join(' ') + ' ';
         }
 
         const normalizedBuildPath = buildPath.replace(/\\/g, '/');
-        
-        // Create tar archive - explicitly include server.js if it exists
-        // Use --no-wildcards-match-slash to ensure proper matching
-        const tarCommand = `tar ${excludeCmd}--no-wildcards-match-slash -czf "${localTarPath}" -C "${normalizedBuildPath}" .`;
-        await onLog('info', `Running: ${tarCommand.replace(/\s+/g, ' ')}`);
+
+        // Create tar archive with exclusions, but server.js is protected from being excluded
+        const tarCommand = `tar ${excludeCmd}-czf \"${localTarPath}\" -C \"${normalizedBuildPath}\" .`;
+        await onLog('info', `Creating tar (server.js protected): ${tarCommand.substring(0, 100)}...`);
         await execAsync(tarCommand);
 
         // Verify server.js is in the tar archive
