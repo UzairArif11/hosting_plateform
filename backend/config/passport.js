@@ -81,6 +81,9 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                 scope: ['user:email', 'repo'],
             },
             async (accessToken, refreshToken, profile, done) => {
+                // Declare variables outside try block for error logging
+                let username, email, displayName, defaultPlan, user;
+                
                 try {
                     logger.info('🔐 GitHub OAuth callback received', {
                         githubId: profile.id,
@@ -91,7 +94,7 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                     });
 
                     // Check if user already exists
-                    let user = await User.findOne({ githubId: profile.id });
+                    user = await User.findOne({ githubId: profile.id });
 
                     if (user) {
                         logger.info('✅ Existing user found, updating token...', {
@@ -116,9 +119,9 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
 
                     // Create new user
                     // Ensure all required fields are present
-                    let email = profile.emails?.[0]?.value || `${profile.username}@github.com`;
-                    let username = profile.username || `github_${profile.id}`;
-                    const displayName = profile.displayName || profile.username || username;
+                    email = profile.emails?.[0]?.value || `${profile.username}@github.com`;
+                    username = profile.username || `github_${profile.id}`;
+                    displayName = profile.displayName || profile.username || username;
 
                     // Check if username or email already exists and make them unique
                     let usernameExists = await User.findOne({ username });
@@ -149,7 +152,7 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                     // Get default plan for new user (same as createUserFromGitHubProfile)
                     logger.info('📋 Step 1: Looking up default plan...');
                     const Plan = require('../models/Plan');
-                    const defaultPlan = await Plan.findTrialPlan();
+                    defaultPlan = await Plan.findTrialPlan();
                     logger.info('📋 Plan lookup result:', {
                         found: !!defaultPlan,
                         planId: defaultPlan?._id?.toString(),
@@ -187,6 +190,10 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
 
                     // Create user with EXACT same fields as createUserFromGitHubProfile
                     logger.info('👤 Step 3: Creating User instance...');
+                    // Ensure createdAt is set (Mongoose should do this, but being explicit)
+                    if (!userData.createdAt) {
+                        userData.createdAt = new Date();
+                    }
                     const newUser = new User(userData);
 
                     // Set resource allocation based on trial plan (same as createUserFromGitHubProfile)
@@ -269,21 +276,25 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                         profileUrl: profile?.profileUrl
                     });
 
-                    // Processed data
-                    logger.error('📝 Processed User Data:', {
-                        username: username,
-                        email: email,
-                        displayName: displayName,
-                        githubId: profile?.id
-                    });
+                    // Processed data (only log if variables were set)
+                    if (typeof username !== 'undefined' || typeof email !== 'undefined') {
+                        logger.error('📝 Processed User Data:', {
+                            username: username || 'NOT SET',
+                            email: email || 'NOT SET',
+                            displayName: displayName || 'NOT SET',
+                            githubId: profile?.id
+                        });
+                    }
 
-                    // Plan info
-                    logger.error('📋 Plan Information:', {
-                        hasPlan: !!defaultPlan,
-                        planId: defaultPlan?._id?.toString() || null,
-                        planName: defaultPlan?.name || null,
-                        planResources: defaultPlan?.resources || null
-                    });
+                    // Plan info (only log if plan was looked up)
+                    if (typeof defaultPlan !== 'undefined') {
+                        logger.error('📋 Plan Information:', {
+                            hasPlan: !!defaultPlan,
+                            planId: defaultPlan?._id?.toString() || null,
+                            planName: defaultPlan?.name || null,
+                            planResources: defaultPlan?.resources || null
+                        });
+                    }
 
                     // Mongoose Validation Errors
                     if (error.name === 'ValidationError' && error.errors) {
