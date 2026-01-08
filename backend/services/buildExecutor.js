@@ -696,11 +696,22 @@ async function deployToContainer(buildPath, buildOutput, deployment, project, us
             // For shared containers, we just need to upload the files
             await onLog('info', 'Shared container: Uploading files only (skipping Docker image build)...');
 
+            // Verify server.js exists before upload (required for PM2)
+            const serverJsPath = path.join(buildPath, 'server.js');
+            try {
+                await fs.access(serverJsPath);
+                await onLog('info', '✅ Verified server.js exists before upload');
+            } catch (err) {
+                await onLog('error', `❌ server.js NOT FOUND at ${serverJsPath} before upload!`);
+                throw new Error(`server.js not found before upload: ${err.message}`);
+            }
+
             // Optimization: For frontend sites (React/Vue/Angular), we ONLY need the production build folder and 'server.js'
             // Exclude node_modules, src and .git to make transfer lighting fast (usually < 1MB)
             // Note: We keep 'public' for Svelte since its build output is often inside public/build
+            // IMPORTANT: Never exclude server.js - it's required for PM2
             const isCompiledFrontend = ['react', 'vue', 'angular', 'nextjs', 'vite', 'cra', 'nuxtjs'].includes(deployment.framework);
-            const options = isCompiledFrontend ? { exclude: ['node_modules', 'src', 'public', '.git', '.github'] } : { exclude: 'node_modules' };
+            const options = isCompiledFrontend ? { exclude: ['node_modules', 'src', 'public', '.git', '.github'], include: ['server.js'] } : { exclude: 'node_modules', include: ['server.js'] };
 
             await remoteBuild.uploadToRemoteServer(
                 buildPath,

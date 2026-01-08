@@ -190,6 +190,15 @@ async function uploadToRemoteServer(buildPath, deploymentId, serverHost, serverK
 
         await onLog('info', `📦 Compressing build files for fast transfer...`);
 
+        // Verify server.js exists before creating tar (critical for PM2)
+        const serverJsPath = path.join(buildPath, 'server.js');
+        try {
+            await fsPromises.access(serverJsPath);
+            await onLog('info', '✅ Verified server.js exists locally before tar');
+        } catch (err) {
+            await onLog('warn', `⚠️ server.js not found at ${serverJsPath} - will check after tar`);
+        }
+
         // Use system tar
         // Handle exclusions if provided (to skip node_modules for static sites)
         let excludeCmd = '';
@@ -199,7 +208,30 @@ async function uploadToRemoteServer(buildPath, deploymentId, serverHost, serverK
         }
 
         const normalizedBuildPath = buildPath.replace(/\\/g, '/');
-        await execAsync(`tar ${excludeCmd}-czf "${localTarPath}" -C "${normalizedBuildPath}" .`);
+        
+        // Create tar archive - explicitly include server.js if it exists
+        // Use --no-wildcards-match-slash to ensure proper matching
+        const tarCommand = `tar ${excludeCmd}--no-wildcards-match-slash -czf "${localTarPath}" -C "${normalizedBuildPath}" .`;
+        await onLog('info', `Running: ${tarCommand.replace(/\s+/g, ' ')}`);
+        await execAsync(tarCommand);
+
+        // Verify server.js is in the tar archive
+        try {
+            const verifyTar = await execAsync(`tar -tzf "${localTarPath}" | grep -E "(^|\/)server\.js$" || echo "NOT_FOUND"`);
+            if (verifyTar.stdout && verifyTar.stdout.includes('NOT_FOUND')) {
+                await onLog('error', `❌ server.js NOT FOUND in tar archive!`);
+                await onLog('info', `Files in tar: ${(await execAsync(`tar -tzf "${localTarPath}" | head -20`)).stdout}`);
+                throw new Error('server.js not included in tar archive');
+            } else {
+                await onLog('info', `✅ Verified server.js is in tar archive`);
+            }
+        } catch (verifyErr) {
+            if (verifyErr.message.includes('server.js not included')) {
+                throw verifyErr;
+            }
+            // If grep fails for other reasons, continue (server.js might be there)
+            await onLog('warn', `Could not verify server.js in tar: ${verifyErr.message}`);
+        }
 
         // Get compressed size for logging
         const stats = await fsPromises.stat(localTarPath);
