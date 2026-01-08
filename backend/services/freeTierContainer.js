@@ -27,6 +27,53 @@ async function createUserContainer(user, serverKey, server, resources) {
 
         // Create container with Node.js and PM2
         logger.info('🐳 [CREATE_CONTAINER] Calling docker.runContainer with node-pm2-alpine:latest');
+
+        // CRITICAL FIX: Build PM2 image on server if it doesn't exist
+        const { NodeSSH } = require('node-ssh');
+        const ssh = new NodeSSH();
+        const remoteBuild = require('./remoteBuild');
+
+        try {
+            const sshConfig = remoteBuild.getSSHConfig(serverKey, server.host);
+            await ssh.connect(sshConfig);
+
+            // Check if image exists
+            const checkImage = await ssh.execCommand('docker images node-pm2-alpine:latest -q');
+
+            if (!checkImage.stdout || checkImage.stdout.trim() === '') {
+                logger.info('📦 [CREATE_CONTAINER] PM2 image not found on ' + serverKey + ', building it now...');
+                logger.info('⏱️  [CREATE_CONTAINER] This is a one-time build (~30s). Image will be cached for future users.');
+
+                // Create Dockerfile content
+                const dockerfile = `FROM node:18-alpine\nRUN npm install -g pm2@latest --no-audit --no-fund --silent --prefer-offline --no-optional\nRUN pm2 --version\nWORKDIR /app\nENV NODE_ENV=production\nEXPOSE 3000\nCMD ["pm2-runtime", "start", "ecosystem.config.js"]`;
+
+                // Write Dockerfile to remote server
+                await ssh.execCommand(`mkdir -p /tmp/pm2-image && echo '${dockerfile}' > /tmp/pm2-image/Dockerfile`);
+
+                // Build image (tagged and persisted in Docker on this server)
+                const buildResult = await ssh.execCommand('cd /tmp/pm2-image && docker build -t node-pm2-alpine:latest .');
+
+                if (buildResult.code !== 0) {
+                    logger.error('❌ Failed to build PM2 image:', buildResult.stderr);
+                    throw new Error('PM2 image build failed: ' + buildResult.stderr);
+                }
+
+                logger.info('✅ [CREATE_CONTAINER] PM2 image built and cached on ' + serverKey);
+                logger.info('💾 [CREATE_CONTAINER] Future deployments on ' + serverKey + ' will use cached image (instant)');
+
+                // Cleanup temp directory (image remains in Docker cache)
+                await ssh.execCommand('rm -rf /tmp/pm2-image');
+            } else {
+                logger.info('✅ [CREATE_CONTAINER] PM2 image found in cache on ' + serverKey + ' (instant deployment)');
+                logger.info('⚡ [CREATE_CONTAINER] Skipping build - using cached image');
+            }
+
+            ssh.dispose();
+        } catch (sshError) {
+            logger.warn('⚠️ [CREATE_CONTAINER] Could not verify/build PM2 image:', sshError.message);
+            ssh.dispose();
+        }
+
         const result = await docker.runContainer('node-pm2-alpine:latest', containerName, {
             host: server.host,
             port: port,
@@ -164,11 +211,11 @@ async function deployProjectToUserContainer(user, project, buildPath, containerI
             // List what files actually exist
             const listResult = await ssh.execCommand(`docker exec ${containerName} find ${projectPath} -type f -name "*.js" | head -10`);
             logger.error(`❌ server.js not found in container! Files found: ${listResult.stdout || 'none'}`);
-            
+
             // Also check on remote host
             const checkRemote = await ssh.execCommand(`ls -la ${buildPath}/server.js 2>&1 || echo "NOT_FOUND"`);
             logger.error(`Remote server.js check: ${checkRemote.stdout || checkRemote.stderr}`);
-            
+
             throw new Error(`server.js not found in container at ${projectPath}/server.js. Files copied: ${listFiles.stdout}`);
         }
         logger.info(`✅ server.js verified: ${projectPath}/server.js`);

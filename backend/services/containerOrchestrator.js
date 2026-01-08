@@ -196,6 +196,33 @@ const allocateContainer = async (user, plan) => {
   try {
     logger.info(`allocateContainer called with plan: ${JSON.stringify(plan)}`);
 
+    // CRITICAL FIX: Load plan from database if string is passed
+    const Plan = require('../models/Plan');
+    let planObj;
+
+    if (typeof plan === 'string') {
+      // Plan is a string (plan name like 'free', 'pro')
+      logger.info(`Loading plan '${plan}' from database...`);
+      planObj = await Plan.findOne({ name: plan, isActive: true });
+
+      if (!planObj) {
+        // Fallback to free plan if specified plan not found
+        logger.warn(`Plan '${plan}' not found, falling back to 'free'`);
+        planObj = await Plan.findOne({ name: 'free', isActive: true });
+      }
+
+      if (!planObj) {
+        throw new Error('No active plan found in database. Please run database seeders.');
+      }
+
+      logger.info(`✅ Loaded plan: ${planObj.displayName} (CPU: ${planObj.resources.cpu}, RAM: ${planObj.resources.ram}GB)`);
+    } else if (plan && plan.resources) {
+      // Plan is already an object
+      planObj = plan;
+    } else {
+      throw new Error('Invalid plan parameter');
+    }
+
     // SIMPLIFIED: Every user gets their own dedicated container
     // No more shared vs dedicated confusion
     // Resource limits are applied via plan configuration
@@ -209,7 +236,7 @@ const allocateContainer = async (user, plan) => {
 
     // Always create dedicated container (can be on EC2 or EC3)
     logger.info('Creating dedicated container for user');
-    return await allocateDedicatedContainer(user, plan, targetServer, server);
+    return await allocateDedicatedContainer(user, planObj, targetServer, server);
   } catch (error) {
     logger.error('Container allocation failed:', error);
     throw error;  // Re-throw instead of returning error object
@@ -371,10 +398,11 @@ const allocateDedicatedContainer = async (user, plan, serverKey, server) => {
       };
     }
 
-    return { success: false, error: containerResult.error };
+    // CRITICAL FIX: Throw error instead of returning error object
+    throw new Error(containerResult.error || 'Container creation failed');
   } catch (error) {
     logger.error('Dedicated container allocation failed:', error);
-    return { success: false, error: error.message };
+    throw error;  // Throw instead of returning error object
   }
 };
 
