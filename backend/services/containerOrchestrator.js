@@ -361,15 +361,13 @@ const allocateDedicatedContainer = async (user, plan, serverKey, server) => {
         resources: planResources
       });
 
+      // Return in format expected by buildExecutor
       return {
-        success: true,
-        container: {
-          name: containerResult.containerName,
-          server: serverKey,
-          type: 'dedicated',
-          resources: planResources,
-          url: `http://${server.host}:${containerResult.port}`
-        }
+        containerName: containerResult.containerName,
+        containerId: containerResult.containerId,
+        port: containerResult.port,
+        serverKey: serverKey,
+        host: server.host
       };
     }
 
