@@ -48,6 +48,9 @@ require('./config/passport');
 const app = express();
 const server = http.createServer(app);
 
+// Trust proxy (required for rate limiting behind Nginx/reverse proxy)
+app.set('trust proxy', 1);
+
 // Initialize WebSocket for real-time deployment updates
 const websocketService = require('./services/websocket');
 websocketService.initializeWebSocket(server);

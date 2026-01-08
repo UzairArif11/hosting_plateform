@@ -332,12 +332,18 @@ const handleGitHubOAuthStart = passport.authenticate('github', {
 const handleGitHubCallback = async (req, res) => {
   try {
     // Log callback received for debugging
-    logger.info('GitHub OAuth callback received', {
+    logger.info('═══════════════════════════════════════════════════════════');
+    logger.info('🔐 GITHUB OAUTH CALLBACK HANDLER');
+    logger.info('═══════════════════════════════════════════════════════════');
+    logger.info('📥 Callback received:', {
       hasUser: !!req.user,
-      userId: req.user?._id,
+      userId: req.user?._id?.toString() || null,
+      username: req.user?.username || null,
+      email: req.user?.email || null,
       query: req.query,
       userAgent: req.get('User-Agent'),
-      ip: req.ip
+      ip: req.ip,
+      sessionId: req.sessionID
     });
 
     // Check if user exists (set by passport middleware)
@@ -353,12 +359,23 @@ const handleGitHubCallback = async (req, res) => {
     }
 
     // Generate JWT token
+    logger.info('🔑 Step 1: Generating JWT token...');
     const token = generateToken(req.user);
+    logger.info('✅ JWT token generated', {
+      tokenLength: token.length,
+      tokenPreview: token.substring(0, 20) + '...'
+    });
 
     // Set JWT as HTTP-only cookie
     // In production with HTTPS, use secure cookies with sameSite: 'none' for OAuth redirects
     const isProduction = process.env.NODE_ENV === 'production';
     const isHTTPS = process.env.FRONTEND_URL?.startsWith('https://') || isProduction;
+    
+    logger.info('🍪 Step 2: Setting authentication cookie...', {
+      isProduction,
+      isHTTPS,
+      frontendURL: process.env.FRONTEND_URL
+    });
     
     res.cookie('auth_token', token, {
       httpOnly: true,
@@ -367,11 +384,15 @@ const handleGitHubCallback = async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       domain: isProduction ? undefined : undefined // Let browser set domain automatically
     });
+    logger.info('✅ Cookie set successfully');
 
     // Log successful authentication
+    logger.info('✅ Step 3: Authentication successful!');
     logger.security('User authenticated successfully', {
-      userId: req.user._id,
+      userId: req.user._id.toString(),
       username: req.user.username,
+      email: req.user.email,
+      role: req.user.role,
       userAgent: req.get('User-Agent'),
       ip: req.ip
     });
@@ -379,14 +400,35 @@ const handleGitHubCallback = async (req, res) => {
     // Redirect to dashboard or admin panel based on role
     const frontendURL = process.env.FRONTEND_URL || 'http://localhost:3000';
     const targetPath = req.user.role === 'admin' ? '/admin' : '/dashboard';
-    res.redirect(`${frontendURL}${targetPath}`);
-  } catch (error) {
-    logger.error('Authentication callback error:', {
-      message: error.message,
-      stack: error.stack,
-      hasUser: !!req.user,
-      userId: req.user?._id
+    const redirectURL = `${frontendURL}${targetPath}`;
+    
+    logger.info('🔄 Step 4: Redirecting user...', {
+      redirectURL,
+      role: req.user.role,
+      targetPath
     });
+    logger.info('═══════════════════════════════════════════════════════════');
+    
+    res.redirect(redirectURL);
+  } catch (error) {
+    logger.error('═══════════════════════════════════════════════════════════');
+    logger.error('❌ CALLBACK HANDLER ERROR');
+    logger.error('═══════════════════════════════════════════════════════════');
+    logger.error('Error Details:', {
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      hasUser: !!req.user,
+      userId: req.user?._id?.toString() || null,
+      stack: error.stack
+    });
+    
+    if (error.errors) {
+      logger.error('Validation Errors:', error.errors);
+    }
+    
+    logger.error('═══════════════════════════════════════════════════════════');
+    
     const frontendURL = process.env.FRONTEND_URL || 'http://localhost:3000';
     res.redirect(`${frontendURL}/login?error=callback_failed`);
   }

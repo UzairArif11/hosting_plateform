@@ -146,17 +146,26 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                         throw new Error(`Missing required fields: username=${!!username}, email=${!!email}, displayName=${!!displayName}`);
                     }
 
-                    // Get default plan for new user
+                    // Get default plan for new user (same as createUserFromGitHubProfile)
+                    logger.info('📋 Step 1: Looking up default plan...');
                     const Plan = require('../models/Plan');
                     const defaultPlan = await Plan.findTrialPlan();
+                    logger.info('📋 Plan lookup result:', {
+                        found: !!defaultPlan,
+                        planId: defaultPlan?._id?.toString(),
+                        planName: defaultPlan?.name,
+                        hasResources: !!defaultPlan?.resources
+                    });
 
-                    // Create user with all required fields (matching createUserFromGitHubProfile)
-                    const newUser = new User({
+                    // Prepare user data
+                    const trialExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+                    const userData = {
                         githubId: profile.id,
+                        username: username,
                         email: email,
                         displayName: displayName,
-                        username: username,
                         avatar: profile.photos?.[0]?.value || '',
+                        profileUrl: profile.profileUrl || '',
                         githubAccessToken: accessToken,
                         provider: 'github',
                         plan: defaultPlan?._id || null,
@@ -165,16 +174,69 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                         subscriptionStatus: 'trial',
                         isTrialActive: true,
                         trialStarted: new Date(),
-                        trialExpiry: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days
+                        trialExpiry: trialExpiry
+                    };
+
+                    logger.info('📝 Step 2: Prepared user data:', {
+                        ...userData,
+                        githubAccessToken: userData.githubAccessToken ? `${userData.githubAccessToken.substring(0, 10)}...` : 'none',
+                        plan: userData.plan ? userData.plan.toString() : null,
+                        trialStarted: userData.trialStarted.toISOString(),
+                        trialExpiry: userData.trialExpiry.toISOString()
                     });
 
-                    // Set resource allocation based on trial plan
-                    if (defaultPlan) {
+                    // Create user with EXACT same fields as createUserFromGitHubProfile
+                    logger.info('👤 Step 3: Creating User instance...');
+                    const newUser = new User(userData);
+
+                    // Set resource allocation based on trial plan (same as createUserFromGitHubProfile)
+                    if (defaultPlan && defaultPlan.resources) {
+                        logger.info('📊 Step 4: Setting resource allocation:', defaultPlan.resources);
                         newUser.resourceAllocation = { ...defaultPlan.resources };
+                    } else {
+                        logger.warn('⚠️  No default plan resources found, resourceAllocation will use defaults');
                     }
+
+                    // Validate before save
+                    logger.info('✅ Step 5: Validating user document before save...');
+                    const validationError = newUser.validateSync();
+                    if (validationError) {
+                        logger.error('❌ Validation failed before save:', {
+                            errors: Object.keys(validationError.errors || {}),
+                            errorDetails: Object.entries(validationError.errors || {}).map(([key, val]) => ({
+                                field: key,
+                                message: val.message,
+                                value: val.value,
+                                kind: val.kind
+                            }))
+                        });
+                        throw validationError;
+                    }
+                    logger.info('✅ Validation passed');
+
+                    // Log the document that will be saved
+                    logger.info('💾 Step 6: Attempting to save user to database...');
+                    logger.info('📄 Document to save:', {
+                        _id: newUser._id,
+                        githubId: newUser.githubId,
+                        username: newUser.username,
+                        email: newUser.email,
+                        displayName: newUser.displayName,
+                        plan: newUser.plan?.toString() || null,
+                        planType: newUser.planType,
+                        status: newUser.status,
+                        subscriptionStatus: newUser.subscriptionStatus,
+                        hasResourceAllocation: !!newUser.resourceAllocation,
+                        resourceAllocation: newUser.resourceAllocation
+                    });
 
                     // Save user
                     user = await newUser.save();
+                    logger.info('✅ Step 7: User saved successfully!', {
+                        userId: user._id.toString(),
+                        username: user.username,
+                        email: user.email
+                    });
 
                     logger.info('✅ New user created with GitHub token!', {
                         userId: user._id,
@@ -185,56 +247,118 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
 
                     done(null, user);
                 } catch (error) {
-                    // Log detailed error information
-                    const errorDetails = {
-                        message: error.message,
+                    logger.error('═══════════════════════════════════════════════════════════');
+                    logger.error('❌ GITHUB OAUTH ERROR - COMPREHENSIVE DEBUG INFO');
+                    logger.error('═══════════════════════════════════════════════════════════');
+                    
+                    // Basic error info
+                    logger.error('📌 Basic Error Info:', {
                         name: error.name,
+                        message: error.message,
                         code: error.code,
-                        githubId: profile?.id,
+                        codeName: error.codeName
+                    });
+
+                    // Profile data received
+                    logger.error('📋 Profile Data Received:', {
+                        id: profile?.id,
                         username: profile?.username,
-                        email: profile.emails?.[0]?.value,
-                        profileData: {
-                            id: profile?.id,
-                            username: profile?.username,
-                            displayName: profile?.displayName,
-                            emails: profile?.emails,
-                            photos: profile?.photos
-                        }
-                    };
+                        displayName: profile?.displayName,
+                        emails: profile?.emails,
+                        photos: profile?.photos?.length || 0,
+                        profileUrl: profile?.profileUrl
+                    });
 
-                    // Handle Mongoose validation errors
+                    // Processed data
+                    logger.error('📝 Processed User Data:', {
+                        username: username,
+                        email: email,
+                        displayName: displayName,
+                        githubId: profile?.id
+                    });
+
+                    // Plan info
+                    logger.error('📋 Plan Information:', {
+                        hasPlan: !!defaultPlan,
+                        planId: defaultPlan?._id?.toString() || null,
+                        planName: defaultPlan?.name || null,
+                        planResources: defaultPlan?.resources || null
+                    });
+
+                    // Mongoose Validation Errors
                     if (error.name === 'ValidationError' && error.errors) {
-                        errorDetails.validationErrors = Object.entries(error.errors).map(([key, val]) => ({
-                            field: key,
-                            message: val.message,
-                            value: val.value,
-                            kind: val.kind,
-                            path: val.path
-                        }));
+                        logger.error('❌ Mongoose Validation Errors:');
+                        Object.entries(error.errors).forEach(([field, err]) => {
+                            logger.error(`  Field: ${field}`, {
+                                message: err.message,
+                                value: err.value,
+                                kind: err.kind,
+                                path: err.path,
+                                properties: err.properties
+                            });
+                        });
                     }
 
-                    // Handle MongoDB server errors
-                    if (error.name === 'MongoServerError') {
-                        errorDetails.mongoError = {
-                            code: error.code,
-                            codeName: error.codeName,
-                            errmsg: error.errmsg,
-                            writeErrors: error.writeErrors
-                        };
+                    // MongoDB Server Errors
+                    if (error.name === 'MongoServerError' || error.code === 121) {
+                        logger.error('❌ MongoDB Server Error Details:');
+                        logger.error('  Code:', error.code);
+                        logger.error('  Code Name:', error.codeName);
+                        logger.error('  Error Message:', error.errmsg || error.message);
                         
-                        // Try to get more details from writeErrors
+                        // Error Info (contains validation details)
+                        if (error.errorInfo) {
+                            logger.error('  Error Info:', JSON.stringify(error.errorInfo, null, 2));
+                        }
+                        if (error.errInfo) {
+                            logger.error('  Err Info:', JSON.stringify(error.errInfo, null, 2));
+                        }
+
+                        // Write Errors
                         if (error.writeErrors && error.writeErrors.length > 0) {
-                            errorDetails.writeErrorDetails = error.writeErrors.map(err => ({
-                                code: err.code,
-                                errmsg: err.errmsg,
-                                op: err.op ? Object.keys(err.op) : null
-                            }));
+                            logger.error('  Write Errors:');
+                            error.writeErrors.forEach((writeErr, idx) => {
+                                logger.error(`    Write Error ${idx + 1}:`, {
+                                    code: writeErr.code,
+                                    errmsg: writeErr.errmsg,
+                                    opKeys: writeErr.op ? Object.keys(writeErr.op) : null
+                                });
+                            });
+                        }
+
+                        // Try to get validation details from errorInfo
+                        if (error.errorInfo?.details) {
+                            logger.error('  Validation Details:', JSON.stringify(error.errorInfo.details, null, 2));
                         }
                     }
 
-                    // Log full error details
-                    logger.error('❌ GitHub OAuth Error (Full Details):', errorDetails);
-                    logger.error('❌ Error Stack:', error.stack);
+                    // Full error object (all properties)
+                    logger.error('📦 Full Error Object Properties:');
+                    try {
+                        const errorProps = {};
+                        Object.getOwnPropertyNames(error).forEach(prop => {
+                            try {
+                                const value = error[prop];
+                                if (typeof value === 'object' && value !== null) {
+                                    errorProps[prop] = typeof value.toString === 'function' ? value.toString() : '[Object]';
+                                } else {
+                                    errorProps[prop] = value;
+                                }
+                            } catch (e) {
+                                errorProps[prop] = '[Unable to access]';
+                            }
+                        });
+                        logger.error(JSON.stringify(errorProps, null, 2));
+                    } catch (e) {
+                        logger.error('  Could not serialize error properties:', e.message);
+                        logger.error('  Error keys:', Object.keys(error));
+                    }
+
+                    // Stack trace
+                    logger.error('📚 Stack Trace:');
+                    logger.error(error.stack);
+
+                    logger.error('═══════════════════════════════════════════════════════════');
                     
                     done(error, null);
                 }
