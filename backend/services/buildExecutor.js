@@ -6,6 +6,7 @@ const execAsync = promisify(exec);
 const Deployment = require('../models/Deployment');
 const Project = require('../models/Project');
 const User = require('../models/User');
+const Settings = require('../models/Settings');
 const docker = require('./docker');
 const containerOrchestrator = require('./containerOrchestrator');
 const githubService = require('./github');
