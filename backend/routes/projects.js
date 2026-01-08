@@ -157,16 +157,40 @@ router.post('/',
         });
       }
 
+      // Check if user has GitHub token
+      if (!req.user.githubAccessToken) {
+        logger.error('Project creation failed - no GitHub token', {
+          userId: req.user._id,
+          username: req.user.username
+        });
+        return res.status(400).json({
+          success: false,
+          error: 'GitHub access token is required. Please reconnect your GitHub account.'
+        });
+      }
+
       // Check if user has access to the repository
+      logger.info('Checking repository access', {
+        userId: req.user._id,
+        repository: repository.fullName,
+        hasToken: !!req.user.githubAccessToken
+      });
+
       const accessCheck = await githubService.checkRepositoryAccess(
         repository.fullName,
         req.user.githubAccessToken
       );
 
+      logger.info('Repository access check result', {
+        success: accessCheck.success,
+        hasAccess: accessCheck.data?.hasAccess,
+        error: accessCheck.error
+      });
+
       if (!accessCheck.success || !accessCheck.data.hasAccess) {
         return res.status(403).json({
           success: false,
-          error: 'You do not have access to this repository'
+          error: accessCheck.error || 'You do not have access to this repository'
         });
       }
 
@@ -244,9 +268,23 @@ router.post('/',
         message: 'Project created successfully'
       });
     } catch (error) {
-      logger.error('Create project error:', error.message);
+      logger.error('Create project error:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+        userId: req.user?._id,
+        projectData: {
+          name: req.body?.name,
+          repository: req.body?.repository?.fullName,
+          framework: req.body?.framework
+        }
+      });
       // Return specific error message for UI
-      res.status(400).json({ success: false, error: error.message });
+      res.status(400).json({ 
+        success: false, 
+        error: error.message || 'Failed to create project',
+        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      });
     }
   }
 );
