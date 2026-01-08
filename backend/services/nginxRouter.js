@@ -117,7 +117,55 @@ async function updateNginxRouting(projectName, port, serverHost, serverKey, depl
         }
 
         if (serverStartIndex === -1 || serverEndIndex === -1) {
-            throw new Error(`Could not find a server block for domain ${domain} in Nginx config`);
+            // FALLBACK: If ec3.foodpanda.site not found, try base domain (foodpanda.site)
+            const baseDomain = domain.split('.').slice(-2).join('.');
+            if (baseDomain !== domain) {
+                logger.warn(`Server block for ${domain} not found, falling back to ${baseDomain}`);
+
+                // Reset and search for base domain
+                serverStartIndex = -1;
+                serverEndIndex = -1;
+                foundDomain = false;
+
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i];
+                    const trimmed = line.trim();
+
+                    if (trimmed.startsWith('server {')) {
+                        serverStartIndex = i;
+                        depth = 1;
+                        foundDomain = false;
+                        continue;
+                    }
+
+                    if (serverStartIndex !== -1) {
+                        const open = (line.match(/{/g) || []).length;
+                        const close = (line.match(/}/g) || []).length;
+                        depth += open - close;
+
+                        if (trimmed.startsWith('server_name') &&
+                            (trimmed.includes(baseDomain) || trimmed.includes(`www.${baseDomain}`) ||
+                                trimmed.includes(`*.${baseDomain}`))) {
+                            foundDomain = true;
+                        }
+
+                        if (depth === 0) {
+                            serverEndIndex = i;
+                            if (foundDomain) {
+                                logger.info(`✅ Found fallback server block for ${baseDomain}`);
+                                break;
+                            } else {
+                                serverStartIndex = -1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // If still not found, throw error
+            if (serverStartIndex === -1 || serverEndIndex === -1) {
+                throw new Error(`Could not find a server block for ${domain} or ${baseDomain || 'base domain'} in Nginx config`);
+            }
         }
 
         // Pass 2: Reconstruct config with new location block inserted before the last brace of the server
