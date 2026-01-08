@@ -38,6 +38,8 @@ export default function DeploymentLogsPage() {
     // Socket.IO connection for real-time logs
     useEffect(() => {
         const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
+        console.log('🔌 Initializing Socket.IO connection to:', SOCKET_URL);
+
         const newSocket = io(SOCKET_URL, {
             withCredentials: true,
         });
