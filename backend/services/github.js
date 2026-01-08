@@ -354,18 +354,46 @@ const handlePushEvent = async (payload) => {
       return { success: true, message: 'No projects to deploy' };
     }
 
-    // Trigger deployments
-    const deploymentService = require('./builder');
-    const deploymentPromises = projects.map(project => {
-      return deploymentService.createDeployment({
-        projectId: project._id,
-        branch,
-        commitSha: payload.head_commit.id,
-        commitMessage: payload.head_commit.message,
-        author: payload.head_commit.author,
-        trigger: 'webhook',
-        triggerBy: payload.head_commit.author.username
-      });
+    // Trigger deployments - Create deployment records and add to queue
+    const Deployment = require('../models/Deployment');
+    const buildQueue = require('./buildQueue');
+
+    const deploymentPromises = projects.map(async project => {
+      try {
+        // Create deployment record
+        const deployment = await Deployment.create({
+          projectId: project._id,
+          userId: project.owner,
+          branch,
+          commitSha: payload.head_commit.id,
+          commitMessage: payload.head_commit.message,
+          commitAuthor: {
+            name: payload.head_commit.author.name,
+            email: payload.head_commit.author.email
+          },
+          status: 'queued',
+          environment: 'production',
+          trigger: 'webhook'
+        });
+
+        // Add to build queue
+        await buildQueue.addDeployment(
+          deployment._id.toString(),
+          project._id.toString(),
+          project.owner.toString(),
+          { priority: 5 } // Medium priority for webhook deployments
+        );
+
+        // Update project stats
+        project.stats.totalDeployments += 1;
+        project.deploymentCount = (project.deploymentCount || 0) + 1;
+        await project.save();
+
+        return { success: true, deploymentId: deployment._id };
+      } catch (error) {
+        logger.error('Failed to create webhook deployment:', error);
+        return { success: false, error: error.message, projectId: project._id };
+      }
     });
 
     const deployments = await Promise.allSettled(deploymentPromises);
@@ -422,24 +450,50 @@ const handlePullRequestEvent = async (payload) => {
       return { success: true, message: 'No projects found for PR' };
     }
 
-    // Create preview deployments
-    const deploymentService = require('./builder');
-    const deploymentPromises = projects.map(project => {
-      return deploymentService.createDeployment({
-        projectId: project._id,
-        branch: pr.head.ref,
-        commitSha: pr.head.sha,
-        commitMessage: pr.title,
-        author: pr.user,
-        trigger: 'pull_request',
-        triggerBy: pr.user.login,
-        isPreview: true,
-        pullRequest: {
-          number: pr.number,
-          title: pr.title,
-          url: pr.html_url
-        }
-      });
+    // Trigger deployment for preview
+    const Deployment = require('../models/Deployment');
+    const buildQueue = require('./buildQueue');
+
+    const deploymentPromises = projects.map(async project => {
+      try {
+        const deployment = await Deployment.create({
+          projectId: project._id,
+          userId: project.owner,
+          branch: pr.head.ref,
+          commitSha: pr.head.sha,
+          commitMessage: pr.title,
+          commitAuthor: {
+            name: pr.user.login,
+            email: pr.user.email || `${pr.user.login}@github.local` // GitHub API might not always provide email for PR user
+          },
+          status: 'queued',
+          environment: 'preview',
+          isPreview: true,
+          trigger: 'webhook',
+          pullRequest: {
+            number: pr.number,
+            title: pr.title,
+            url: pr.html_url
+          }
+        });
+
+        await buildQueue.addDeployment(
+          deployment._id.toString(),
+          project._id.toString(),
+          project.owner.toString(),
+          { priority: 5 } // Medium priority for webhook deployments
+        );
+
+        // Update project stats (optional, if preview deployments count towards total)
+        // project.stats.totalDeployments += 1;
+        // project.deploymentCount = (project.deploymentCount || 0) + 1;
+        // await project.save();
+
+        return { success: true, deploymentId: deployment._id };
+      } catch (error) {
+        logger.error(`Failed to create preview deployment for project ${project._id}:`, error);
+        return { success: false, error: error.message, projectId: project._id };
+      }
     });
 
     const deployments = await Promise.allSettled(deploymentPromises);

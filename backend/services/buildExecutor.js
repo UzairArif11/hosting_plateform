@@ -757,20 +757,11 @@ async function deployToContainer(buildPath, buildOutput, deployment, project, us
             deployment._id.toString()  // Pass deployment ID for unique URL
         );
 
-        // Cleanup old containers (for dedicated containers)
-        if (!isSharedUser) {
-            await onLog('info', 'Cleaning up old containers...');
-            const containerCleanup = require('./containerCleanup');
-            const cleanupResult = await containerCleanup.cleanupOnRedeploy(
-                project,
-                newContainerId,
-                newContainerName
-            );
 
-            if (cleanupResult.success && cleanupResult.cleaned > 0) {
-                await onLog('info', `✓ Removed ${cleanupResult.cleaned} old container(s)`);
-            }
-        }
+        // Note: Container cleanup not needed for PM2 deployments
+        // Projects run as PM2 processes in the user's container
+        // Old PM2 processes are automatically stopped/deleted before starting new ones
+
 
         // Generate deployment URL
         const deploymentUrl = routingResult.success
