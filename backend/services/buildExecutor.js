@@ -685,63 +685,37 @@ async function deployToContainer(buildPath, buildOutput, deployment, project, us
 
         await onLog('info', `Deploying to container: ${containerName} on ${host}:${port}`);
 
-        // Determine container type based on user plan
-        const isSharedUser = user.containerType === 'shared' ||
-            user.containerType === 'free' ||
-            user.plan?.oracleConfig?.accountType === 'shared';
+        // ALL USERS: Use PM2 container (node-pm2-alpine:latest) - no Docker image building needed
+        // All deployments run as PM2 processes inside the user's existing container
+        await onLog('info', '📦 Using PM2 container - uploading files only (no Docker image build)...');
+
+        // Verify server.js exists before upload (required for PM2)
+        const serverJsPath = path.join(buildPath, 'server.js');
+        try {
+            await fs.access(serverJsPath);
+            await onLog('info', '✅ Verified server.js exists before upload');
+        } catch (err) {
+            await onLog('error', `❌ server.js NOT FOUND at ${serverJsPath} before upload!`);
+            throw new Error(`server.js not found before upload: ${err.message}`);
+        }
 
         const remoteBuild = require('./remoteBuild');
 
-        if (isSharedUser) {
-            // For shared containers, we just need to upload the files
-            await onLog('info', 'Shared container: Uploading files only (skipping Docker image build)...');
+        // Optimization: For frontend sites (React/Vue/Angular), we ONLY need the production build folder and 'server.js'
+        // Exclude node_modules, src and .git to make transfer lighting fast (usually < 1MB)
+        // Note: We keep 'public' for Svelte since its build output is often inside public/build
+        // IMPORTANT: Never exclude server.js - it's required for PM2
+        const isCompiledFrontend = ['react', 'vue', 'angular', 'nextjs', 'vite', 'cra', 'nuxtjs'].includes(deployment.framework);
+        const options = isCompiledFrontend ? { exclude: ['node_modules', 'src', 'public', '.git', '.github'], include: ['server.js'] } : { exclude: 'node_modules', include: ['server.js'] };
 
-            // Verify server.js exists before upload (required for PM2)
-            const serverJsPath = path.join(buildPath, 'server.js');
-            try {
-                await fs.access(serverJsPath);
-                await onLog('info', '✅ Verified server.js exists before upload');
-            } catch (err) {
-                await onLog('error', `❌ server.js NOT FOUND at ${serverJsPath} before upload!`);
-                throw new Error(`server.js not found before upload: ${err.message}`);
-            }
-
-            // Optimization: For frontend sites (React/Vue/Angular), we ONLY need the production build folder and 'server.js'
-            // Exclude node_modules, src and .git to make transfer lighting fast (usually < 1MB)
-            // Note: We keep 'public' for Svelte since its build output is often inside public/build
-            // IMPORTANT: Never exclude server.js - it's required for PM2
-            const isCompiledFrontend = ['react', 'vue', 'angular', 'nextjs', 'vite', 'cra', 'nuxtjs'].includes(deployment.framework);
-            const options = isCompiledFrontend ? { exclude: ['node_modules', 'src', 'public', '.git', '.github'], include: ['server.js'] } : { exclude: 'node_modules', include: ['server.js'] };
-
-            await remoteBuild.uploadToRemoteServer(
-                buildPath,
-                deployment._id.toString(),
-                host,
-                serverKey,
-                onLog,
-                options
-            );
-        } else {
-            // For dedicated containers, we build a full Docker image
-
-            // Create Dockerfile based on framework
-            const dockerfile = generateDockerfile(framework, buildOutput.outputDir);
-            await fs.writeFile(path.join(buildPath, 'Dockerfile'), dockerfile);
-
-            // Build Docker image ON THE REMOTE SERVER (EC2/EC3)
-            const imageName = `${project.name}-${deployment._id}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-            await onLog('info', `Building Docker image: ${imageName}`);
-
-            // Build on the same server where container will run
-            await remoteBuild.buildOnRemoteServer(
-                buildPath,
-                imageName,
-                host,       // EC2 or EC3 host
-                serverKey,  // 'EC2' or 'EC3'
-                onLog
-            );
-            await onLog('info', `✅ Docker image built on ${serverKey}`);
-        }
+        await remoteBuild.uploadToRemoteServer(
+            buildPath,
+            deployment._id.toString(),
+            host,
+            serverKey,
+            onLog,
+            options
+        );
 
 
         let containerResult;
