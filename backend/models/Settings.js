@@ -16,7 +16,7 @@ const settingsSchema = new mongoose.Schema({
         },
         EC3: {
             type: String,
-            default: 'foodpanda.site'
+            default: 'ec3.foodpanda.site'
         },
         EC4: {
             type: String,
@@ -140,7 +140,7 @@ settingsSchema.statics.getSettings = async function () {
             baseDomain: process.env.BASE_DOMAIN || 'foodpanda.site',
             serverDomains: {
                 EC2: process.env.EC2_DOMAIN || 'ec2.foodpanda.site',
-                EC3: process.env.EC3_DOMAIN || 'foodpanda.site',
+                EC3: process.env.EC3_DOMAIN || 'ec3.foodpanda.site',
                 EC4: process.env.EC4_DOMAIN || 'ec4.foodpanda.site',
                 EC5: process.env.EC5_DOMAIN || 'ec5.foodpanda.site'
             },

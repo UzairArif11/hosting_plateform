@@ -63,18 +63,23 @@ buildQueue.process(async (job) => {
 
         await job.progress(100);
 
-        // Save deployment URL to database
+        // Save deployment URL to database (already done in buildExecutor, but ensure sync)
         const Deployment = require('../models/Deployment');
-        await Deployment.findByIdAndUpdate(deploymentId, {
-            deploymentUrl: result.deploymentUrl,
-            status: 'success',
-            completedAt: new Date()
-        });
+        const deployment = await Deployment.findById(deploymentId);
+
+        if (deployment) {
+            deployment.status = 'success';
+            deployment.completedAt = new Date();
+            if (result.url) deployment.deploymentUrl = result.url;
+            await deployment.save();
+        }
 
         // Emit completion with URL
         websocket.emitDeploymentStatus(deploymentId, 'success', {
             progress: 100,
-            url: result.deploymentUrl,
+            url: result.url,
+            status: 'success', // Explicitly include status
+            deploymentId: deploymentId, // Explicitly include deploymentId
             message: 'Deployment successful!'
         });
 

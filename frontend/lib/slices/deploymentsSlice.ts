@@ -80,13 +80,15 @@ const deploymentsSlice = createSlice({
             state.logs = [];
         },
         updateDeploymentStatus: (state, action) => {
-            const { deploymentId, status } = action.payload;
+            const { deploymentId, status, url } = action.payload;
             const deployment = state.deployments.find(d => d._id === deploymentId);
             if (deployment) {
                 deployment.status = status;
+                if (url) deployment.deploymentUrl = url;
             }
             if (state.currentDeployment && state.currentDeployment._id === deploymentId) {
                 state.currentDeployment.status = status;
+                if (url) state.currentDeployment.deploymentUrl = url;
             }
         },
     },

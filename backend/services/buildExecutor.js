@@ -764,14 +764,16 @@ async function deployToContainer(buildPath, buildOutput, deployment, project, us
 
 
         // Generate deployment URL
+        const domain = await Settings.getDomainForServer(serverKey);
+        const protocol = (await Settings.getSettings()).protocol || 'https';
+
         const deploymentUrl = routingResult.success
             ? routingResult.url
-            : deployment.isPreview
-                ? `https://preview-${project.name}-${deployment._id.toString().substring(0, 8)}.${process.env.BASE_DOMAIN || 'vcp.dev'}`
-                : `https://${project.name}.${process.env.BASE_DOMAIN || 'vcp.dev'}`;
+            : `${protocol}://${domain}/${project.name.toLowerCase().replace(/[^a-z0-9]/g, '')}-${deployment._id.toString().substring(0, 8)}/`;
 
         const deployTime = Date.now() - startTime;
         deployment.deployDuration = deployTime;
+        deployment.deploymentUrl = deploymentUrl; // Ensure it's saved to the model
         await deployment.save();
 
         await onLog('info', `✓ Container deployed in ${(deployTime / 1000).toFixed(2)}s`);

@@ -69,58 +69,64 @@ async function updateNginxRouting(projectName, port, serverHost, serverKey, depl
         proxy_cache_bypass $http_upgrade;
     }`;
 
-        // Parse config to find server blocks with our domain
+        // ROBUST PARSING: Find the correct server block and insert at the end
         const lines = config.split('\n');
         const newLines = [];
-        let inServerBlock = false;
-        let inLocationBlock = false;
-        let currentServerHasDomain = false;
-        let bracketDepth = 0;
-        let serverBracketDepth = 0;
+        let serverStartIndex = -1;
+        let serverEndIndex = -1;
+        let depth = 0;
+        let foundDomain = false;
 
+        // Pass 1: Find the target server block
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const trimmed = line.trim();
 
-            const openBraces = (line.match(/{/g) || []).length;
-            const closeBraces = (line.match(/}/g) || []).length;
-
             if (trimmed.startsWith('server {')) {
-                inServerBlock = true;
-                currentServerHasDomain = false;
-                serverBracketDepth = 0;
-                newLines.push(line);
+                serverStartIndex = i;
+                depth = 1;
+                foundDomain = false;
                 continue;
             }
 
-            if (inServerBlock && trimmed.startsWith('server_name') &&
-                (trimmed.includes(domain) || trimmed.includes(`www.${domain}`))) {
-                currentServerHasDomain = true;
-            }
+            if (serverStartIndex !== -1) {
+                const open = (line.match(/{/g) || []).length;
+                const close = (line.match(/}/g) || []).length;
+                depth += open - close;
 
-            if (trimmed.startsWith('location ')) {
-                inLocationBlock = true;
-                bracketDepth = 0;
-            }
+                // Check for domain in this server block
+                const baseDomain = domain.split('.').slice(-2).join('.');
+                if (trimmed.startsWith('server_name') &&
+                    (trimmed.includes(domain) || trimmed.includes(`www.${domain}`) ||
+                        trimmed.includes(`*.${baseDomain}`) ||
+                        (trimmed.includes(baseDomain) && !trimmed.includes('www.')))) {
+                    foundDomain = true;
+                }
 
-            if (inLocationBlock) {
-                bracketDepth += openBraces - closeBraces;
-                if (bracketDepth <= 0) inLocationBlock = false;
+                if (depth === 0) {
+                    serverEndIndex = i;
+                    if (foundDomain) {
+                        // Found our block!
+                        break;
+                    } else {
+                        // Not our block, reset
+                        serverStartIndex = -1;
+                    }
+                }
             }
+        }
 
-            if (inServerBlock) {
-                serverBracketDepth += openBraces - closeBraces;
-            }
+        if (serverStartIndex === -1 || serverEndIndex === -1) {
+            throw new Error(`Could not find a server block for domain ${domain} in Nginx config`);
+        }
 
-            if (inServerBlock && currentServerHasDomain && !inLocationBlock &&
-                trimmed === '}' && serverBracketDepth === 0) {
+        // Pass 2: Reconstruct config with new location block inserted before the last brace of the server
+        for (let i = 0; i < lines.length; i++) {
+            if (i === serverEndIndex) {
                 newLines.push(locationBlock);
                 newLines.push('');
-                inServerBlock = false;
-                currentServerHasDomain = false;
             }
-
-            newLines.push(line);
+            newLines.push(lines[i]);
         }
 
         const newConfig = newLines.join('\n');

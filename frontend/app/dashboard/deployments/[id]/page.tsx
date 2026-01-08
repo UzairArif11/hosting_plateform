@@ -47,15 +47,20 @@ export default function DeploymentLogsPage() {
             newSocket.emit('join-deployment', params.id);
         });
 
-        newSocket.on('deployment-log', (data: { deploymentId: string; log: string }) => {
+        newSocket.on('deployment-log', (data: { deploymentId: string; message: string; level: string }) => {
             if (data.deploymentId === params.id) {
-                dispatch(addLog(data.log));
+                dispatch(addLog(data.message));
             }
         });
 
-        newSocket.on('deployment-status', (data: { deploymentId: string; status: string }) => {
+        newSocket.on('deployment-status', (data: { deploymentId: string; status: string; url?: string }) => {
             if (data.deploymentId === params.id) {
-                dispatch(updateDeploymentStatus(data.status));
+                dispatch(updateDeploymentStatus(data));
+
+                // If success, we can also refresh the page data to get full object
+                if (data.status === 'success') {
+                    dispatch(fetchDeploymentLogs(params.id as string));
+                }
             }
         });
 
