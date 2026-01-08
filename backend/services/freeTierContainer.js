@@ -152,24 +152,30 @@ async function deployProjectToUserContainer(user, project, buildPath, containerI
             throw new Error(`Failed to copy files: ${cpResult.stderr}`);
         }
 
-
-        /* 
-        // SKIPPED: Internal Build (Replaced by Local Build in buildExecutor)
-        logger.info(`📦 Running npm install & build inside container...`);
-        const ramLimitMB = Math.floor((user.resourceAllocation?.ram || 1) * 1024);
-        const maxHeapSize = Math.floor(ramLimitMB * 0.75);
-        const buildCommand = `docker exec ${containerName} sh -c "cd ${projectPath} && [ -f package.json ] && npm install --no-audit --no-fund && NODE_OPTIONS='--max-old-space-size=${maxHeapSize}' PUBLIC_URL='.' GENERATE_SOURCEMAP=false npm run build --if-present"`;
-        const buildResult = await ssh.execCommand(buildCommand);
-        
-        if (buildResult.code !== 0) {
-            throw new Error(`Build failed with code ${buildResult.code}: ${buildResult.stderr}`);
-        }
-        */
         logger.info(`✅ Using pre-built artifacts from local build.`);
 
-        // Verify build directory was created
-        const checkBuildDir = await ssh.execCommand(`docker exec ${containerName} ls -la ${projectPath}/build`);
-        if (checkBuildDir.code !== 0) {
+        // Verify files were copied correctly
+        const listFiles = await ssh.execCommand(`docker exec ${containerName} ls -la ${projectPath}/`);
+        logger.info(`📁 Files in container: ${listFiles.stdout || 'none'}`);
+
+        // Verify server.js exists (required for PM2)
+        const checkServerJs = await ssh.execCommand(`docker exec ${containerName} test -f ${projectPath}/server.js && echo "EXISTS" || echo "MISSING"`);
+        if (!checkServerJs.stdout || !checkServerJs.stdout.includes('EXISTS')) {
+            // List what files actually exist
+            const listResult = await ssh.execCommand(`docker exec ${containerName} find ${projectPath} -type f -name "*.js" | head -10`);
+            logger.error(`❌ server.js not found in container! Files found: ${listResult.stdout || 'none'}`);
+            
+            // Also check on remote host
+            const checkRemote = await ssh.execCommand(`ls -la ${buildPath}/server.js 2>&1 || echo "NOT_FOUND"`);
+            logger.error(`Remote server.js check: ${checkRemote.stdout || checkRemote.stderr}`);
+            
+            throw new Error(`server.js not found in container at ${projectPath}/server.js. Files copied: ${listFiles.stdout}`);
+        }
+        logger.info(`✅ server.js verified: ${projectPath}/server.js`);
+
+        // Verify build directory was created (for static sites)
+        const checkBuildDir = await ssh.execCommand(`docker exec ${containerName} ls -la ${projectPath}/build 2>&1 || echo "NO_BUILD_DIR"`);
+        if (checkBuildDir.stdout && checkBuildDir.stdout.includes('NO_BUILD_DIR')) {
             logger.warn(`Build directory not found at ${projectPath}/build - may be using different output directory or is Node.js app`);
         } else {
             logger.info(`✅ Build directory verified: ${projectPath}/build`);
