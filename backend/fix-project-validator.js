@@ -11,8 +11,9 @@ async function fixValidator() {
     const db = mongoose.connection.db;
     
     console.log('Fixing projects collection validator...');
-    // Remove or fix validator to match Mongoose schema
-    // Projects schema requires: name, slug, repository, owner, framework, createdAt
+    // Fix validator to match Mongoose schema exactly
+    // Mongoose schema requires: name, slug, owner (NOT userId!), repository.url, repository.fullName, framework, createdAt
+    // The old validator used 'userId' but schema uses 'owner'
     await db.command({
       collMod: 'projects',
       validator: {
@@ -30,7 +31,7 @@ async function fixValidator() {
             },
             owner: {
               bsonType: 'objectId',
-              description: 'Project owner (required)'
+              description: 'Project owner/userId (required) - references User model'
             },
             framework: {
               enum: [
@@ -40,25 +41,41 @@ async function fixValidator() {
                 'laravel', 'symfony', 'django', 'flask',
                 'custom'
               ],
-              description: 'Project framework'
+              description: 'Project framework (required)'
             },
             createdAt: {
               bsonType: 'date',
-              description: 'Project creation date (required)'
+              description: 'Project creation date (required, added by Mongoose timestamps)'
             },
             repository: {
               bsonType: 'object',
-              description: 'Repository information',
+              required: ['url', 'fullName'],
+              description: 'Repository information (required)',
               properties: {
-                url: { bsonType: 'string' },
-                fullName: { bsonType: 'string' },
-                branch: { bsonType: 'string' },
-                provider: { enum: ['github', 'gitlab'] },
-                isPrivate: { bsonType: 'bool' }
+                url: { 
+                  bsonType: 'string',
+                  description: 'Repository URL (required)'
+                },
+                fullName: { 
+                  bsonType: 'string',
+                  description: 'Repository full name like owner/repo (required)'
+                },
+                branch: { 
+                  bsonType: 'string',
+                  description: 'Default branch'
+                },
+                provider: { 
+                  enum: ['github', 'gitlab'],
+                  description: 'Repository provider'
+                },
+                isPrivate: { 
+                  bsonType: 'bool',
+                  description: 'Whether repository is private'
+                }
               }
             },
             status: {
-              enum: ['active', 'inactive', 'suspended'],
+              enum: ['active', 'paused', 'archived', 'error'],
               description: 'Project status'
             }
           }
