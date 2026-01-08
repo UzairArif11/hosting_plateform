@@ -12,6 +12,10 @@ echo ""
 
 cd backend
 
+echo "→ Running migrations (removing old validators)..."
+node migrations/remove-plan-validator.js
+
+echo ""
 echo "→ Seeding subscription plans..."
 node seeders/planSeeder.js
 
