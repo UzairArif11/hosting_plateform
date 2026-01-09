@@ -61,35 +61,54 @@ else
     echo "  Will attempt to obtain new certificate..."
 fi
 
-# Step 2: Check Nginx config
+# Step 2: Find Nginx config file for this domain
 echo ""
-echo -e "${BLUE}━━━ Step 2: Checking Nginx Config ━━━${NC}"
-if sudo cat /etc/nginx/sites-available/default | grep -q "listen 443"; then
-    echo -e "${GREEN}✓ HTTPS server block exists${NC}"
-else
-    echo -e "${YELLOW}⚠ No HTTPS server block found${NC}"
-    echo "  Certbot will add it..."
-fi
+echo -e "${BLUE}━━━ Step 2: Finding Nginx Config File ━━━${NC}"
 
-# Step 3: Check if domain is in Nginx config
-echo ""
-echo -e "${BLUE}━━━ Step 3: Checking Domain in Nginx ━━━${NC}"
-if sudo cat /etc/nginx/sites-available/default | grep -q "server_name.*$DOMAIN"; then
-    echo -e "${GREEN}✓ Domain $DOMAIN found in Nginx config${NC}"
+# Try to find config file for this domain
+CONFIG_FILE=""
+if [ "$DOMAIN" = "foodpanda.site" ] || [ "$DOMAIN" = "www.foodpanda.site" ]; then
+    # Main platform - use platform config
+    CONFIG_FILE="/etc/nginx/sites-available/platform-foodpanda-site.conf"
+    if [ ! -f "$CONFIG_FILE" ]; then
+        echo -e "${YELLOW}⚠ Platform config not found, will create it${NC}"
+        CONFIG_FILE=""  # Will be created by certbot or manually
+    fi
 else
-    echo -e "${RED}✗ Domain $DOMAIN NOT found in Nginx config${NC}"
-    echo ""
-    echo -e "${YELLOW}WARNING: You need to run setup-deployment-server.sh first!${NC}"
-    echo "  Or manually add this domain to /etc/nginx/sites-available/default"
-    echo ""
-    read -p "Continue anyway? (y/n): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        exit 1
+    # Deployment server - find deployment config
+    CONFIG_FILE=$(sudo find /etc/nginx/sites-available -name "user-deployments-*.conf" -type f 2>/dev/null | head -1)
+    if [ -z "$CONFIG_FILE" ]; then
+        # Try to find by domain
+        CONFIG_FILE=$(sudo grep -l "server_name.*$DOMAIN" /etc/nginx/sites-available/*.conf 2>/dev/null | head -1)
     fi
 fi
 
-# Step 4: Re-run Certbot
+if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
+    echo -e "${GREEN}✓ Found config file: $CONFIG_FILE${NC}"
+    if sudo grep -q "listen 443" "$CONFIG_FILE"; then
+        echo -e "${GREEN}✓ HTTPS server block exists${NC}"
+    else
+        echo -e "${YELLOW}⚠ No HTTPS server block found${NC}"
+    fi
+    
+    if sudo grep -q "server_name.*$DOMAIN" "$CONFIG_FILE"; then
+        echo -e "${GREEN}✓ Domain $DOMAIN found in config${NC}"
+    else
+        echo -e "${YELLOW}⚠ Domain $DOMAIN not found, certbot will add it${NC}"
+    fi
+else
+    echo -e "${YELLOW}⚠ Config file not found for $DOMAIN${NC}"
+    echo "  Will search for deployment config or create new one..."
+    CONFIG_FILE=""
+fi
+
+# Step 3: Clean up old backups (keep only last 10)
+echo ""
+echo -e "${BLUE}━━━ Step 3: Cleaning Up Old Backups ━━━${NC}"
+sudo ls -t /etc/nginx/sites-available/*.backup.* 2>/dev/null | tail -n +11 | sudo xargs rm -f 2>/dev/null || true
+echo "✓ Cleaned up old backups (kept last 10)"
+
+# Step 4: Configure SSL
 echo ""
 echo -e "${BLUE}━━━ Step 4: Configuring SSL ━━━${NC}"
 echo "This will:"
@@ -101,11 +120,47 @@ echo ""
 
 # Check if certificate exists
 if sudo certbot certificates 2>/dev/null | grep -q "$DOMAIN"; then
-    echo "Using existing certificate..."
-    sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --reinstall --redirect
+    echo "→ Certificate exists, configuring nginx..."
+    
+    # If config file exists, update SSL paths manually (certbot may not work with separate files)
+    if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
+        echo "→ Updating SSL certificate paths in $CONFIG_FILE..."
+        
+        # Get certificate path
+        CERT_PATH=$(sudo certbot certificates 2>/dev/null | grep -A 10 "$DOMAIN" | grep "Certificate Path" | awk '{print $3}' | head -1)
+        KEY_PATH=$(sudo certbot certificates 2>/dev/null | grep -A 10 "$DOMAIN" | grep "Private Key Path" | awk '{print $4}' | head -1)
+        
+        if [ -n "$CERT_PATH" ] && [ -n "$KEY_PATH" ]; then
+            # Backup
+            sudo cp "$CONFIG_FILE" "${CONFIG_FILE}.backup.$(date +%Y%m%d_%H%M%S)"
+            
+            # Update SSL certificate paths (uncomment and set paths)
+            sudo sed -i "s|# ssl_certificate /etc/letsencrypt/live/\$DOMAIN|ssl_certificate $CERT_PATH|g" "$CONFIG_FILE"
+            sudo sed -i "s|# ssl_certificate_key /etc/letsencrypt/live/\$DOMAIN|ssl_certificate_key $KEY_PATH|g" "$CONFIG_FILE"
+            sudo sed -i "s|# ssl_certificate|ssl_certificate|g" "$CONFIG_FILE" 2>/dev/null || true
+            
+            # Also handle paths without $DOMAIN variable
+            sudo sed -i "s|ssl_certificate /etc/letsencrypt/live/\$DOMAIN|ssl_certificate $CERT_PATH|g" "$CONFIG_FILE"
+            sudo sed -i "s|ssl_certificate_key /etc/letsencrypt/live/\$DOMAIN|ssl_certificate_key $KEY_PATH|g" "$CONFIG_FILE"
+            
+            echo "✓ SSL paths updated"
+        fi
+    else
+        # Try certbot
+        sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --reinstall --redirect --non-interactive || echo "⚠ Certbot failed, SSL paths may need manual update"
+    fi
 else
-    echo "Obtaining new certificate..."
-    sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --agree-tos --email $EMAIL --redirect --non-interactive
+    echo "→ Obtaining new certificate..."
+    
+    # If config file doesn't exist, create basic one first
+    if [ -z "$CONFIG_FILE" ] || [ ! -f "$CONFIG_FILE" ]; then
+        echo "⚠ Config file not found, certbot will create one..."
+    fi
+    
+    sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --agree-tos --email $EMAIL --redirect --non-interactive || {
+        echo -e "${YELLOW}⚠ Certbot failed - this is normal if domain DNS is not pointing here yet${NC}"
+        echo "  You can run this script again after DNS is configured"
+    }
 fi
 
 # Step 5: Test Nginx
