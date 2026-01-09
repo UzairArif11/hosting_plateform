@@ -207,4 +207,102 @@ async function updateNginxRouting(projectName, port, serverHost, serverKey, depl
     }
 }
 
-module.exports = { updateNginxRouting };
+/**
+ * Remove Nginx location block for a deployment
+ * Called when deployment is deleted to clean up Nginx config
+ */
+async function removeNginxRouting(deploymentId, serverHost, serverKey) {
+    const ssh = new NodeSSH();
+
+    try {
+        logger.info(`Removing Nginx routing for deployment ${deploymentId}`);
+
+        // Get SSH key based on server
+        const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
+            : serverKey === 'EC3' ? process.env.SSH_EC3_KEY
+                : serverKey === 'EC4' ? process.env.SSH_EC4_KEY
+                    : serverKey === 'EC5' ? process.env.SSH_EC5_KEY
+                        : process.env.SSH_EC3_KEY;
+
+        const keyContent = fs.readFileSync(keyPath, 'utf8');
+
+        await ssh.connect({
+            host: serverHost,
+            username: process.env.SSH_USERNAME || 'ubuntu',
+            privateKey: keyContent
+        });
+
+        // Read existing config
+        const readResult = await ssh.execCommand('sudo cat /etc/nginx/sites-available/default');
+        if (readResult.code !== 0) {
+            throw new Error(`Failed to read Nginx config: ${readResult.stderr}`);
+        }
+        let config = readResult.stdout;
+
+        // Remove location block(s) for this deployment ID
+        // Pattern: # projectname - Port XXXX - deploymentId
+        const lines = config.split('\n');
+        const newLines = [];
+        let skipBlock = false;
+        let removed = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            // Check if this is the start of a location block for this deployment
+            if (trimmed.includes(`- ${deploymentId}`) && trimmed.startsWith('#')) {
+                skipBlock = true;
+                removed = true;
+                logger.info(`Found location block for deployment ${deploymentId}, removing...`);
+                continue; // Skip the comment line
+            }
+
+            // If we're skipping, continue until we find the closing brace
+            if (skipBlock) {
+                // Check if this is the closing brace of the location block
+                if (trimmed === '}' && (i === 0 || lines[i - 1].trim().endsWith('$http_upgrade;'))) {
+                    skipBlock = false;
+                    continue; // Skip the closing brace
+                }
+                // Skip all lines in the block
+                continue;
+            }
+
+            // Keep all other lines
+            newLines.push(line);
+        }
+
+        if (!removed) {
+            logger.warn(`No Nginx location block found for deployment ${deploymentId}`);
+            ssh.dispose();
+            return { success: true, message: 'No location block found (may have been already removed)' };
+        }
+
+        const newConfig = newLines.join('\n');
+        const tempFile = path.join(os.tmpdir(), `nginx-remove-${Date.now()}.conf`);
+        fs.writeFileSync(tempFile, newConfig);
+
+        await ssh.putFile(tempFile, '/tmp/nginx-default.conf');
+        await ssh.execCommand('sudo mv /tmp/nginx-default.conf /etc/nginx/sites-available/default');
+        try { fs.unlinkSync(tempFile); } catch (e) { }
+
+        const testResult = await ssh.execCommand('sudo nginx -t 2>&1');
+        if (!testResult.stdout.includes('successful') && !testResult.stdout.includes('syntax is ok')) {
+            throw new Error(`Nginx config test failed: ${testResult.stdout}`);
+        }
+
+        await ssh.execCommand('sudo systemctl reload nginx');
+        logger.info(`✅ Nginx location block removed for deployment ${deploymentId}`);
+
+        ssh.dispose();
+        return { success: true, message: 'Nginx location block removed successfully' };
+
+    } catch (error) {
+        logger.error(`Failed to remove Nginx routing: ${error.message}`);
+        ssh.dispose();
+        return { success: false, error: error.message };
+    }
+}
+
+module.exports = { updateNginxRouting, removeNginxRouting };

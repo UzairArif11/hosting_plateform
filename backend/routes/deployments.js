@@ -703,4 +703,89 @@ router.get('/project/:projectId', async (req, res) => {
   }
 });
 
+// Delete deployment
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const deployment = await Deployment.findById(id);
+    if (!deployment) {
+      return res.status(404).json({
+        success: false,
+        error: 'Deployment not found'
+      });
+    }
+
+    // Verify user has access to the project
+    const project = await Project.findById(deployment.projectId);
+    if (!project || !project.hasAccess(req.user._id, 'admin')) {
+      return res.status(403).json({
+        success: false,
+        error: 'Admin permissions required to delete deployment'
+      });
+    }
+
+    // Remove Nginx location block if deployment has URL
+    if (deployment.deploymentUrl && deployment.server) {
+      try {
+        const nginxRouter = require('../services/nginxRouter');
+        const serverKey = deployment.server; // 'EC2', 'EC3', etc.
+        const serverHost = process.env[`${serverKey}_SERVER_IP`] || 
+                         (serverKey === 'EC2' ? process.env.EC2_SERVER_IP : process.env.EC3_SERVER_IP);
+        
+        if (serverHost) {
+          await nginxRouter.removeNginxRouting(
+            deployment._id.toString(),
+            serverHost,
+            serverKey
+          );
+          logger.info(`Removed Nginx config for deployment ${deployment._id}`);
+        }
+      } catch (nginxError) {
+        logger.warn(`Failed to remove Nginx config for deployment ${deployment._id}: ${nginxError.message}`);
+        // Continue with deletion even if Nginx cleanup fails
+      }
+    }
+
+    // Stop PM2 process if running
+    if (deployment.containerName && deployment.server) {
+      try {
+        const freeTierContainer = require('../services/freeTierContainer');
+        const containerOrchestrator = require('../services/containerOrchestrator');
+        const server = containerOrchestrator.ORACLE_SERVERS[deployment.server];
+        
+        if (server) {
+          await freeTierContainer.removeProjectFromUserContainer(
+            project,
+            deployment.containerName,
+            server.host,
+            deployment.server
+          );
+          logger.info(`Removed PM2 process for deployment ${deployment._id}`);
+        }
+      } catch (pm2Error) {
+        logger.warn(`Failed to remove PM2 process for deployment ${deployment._id}: ${pm2Error.message}`);
+        // Continue with deletion
+      }
+    }
+
+    // Delete deployment from database
+    await Deployment.findByIdAndDelete(id);
+
+    logger.info('Deployment deleted', {
+      deploymentId: id,
+      projectId: deployment.projectId,
+      userId: req.user._id
+    });
+
+    res.json({
+      success: true,
+      message: 'Deployment deleted successfully'
+    });
+  } catch (error) {
+    logger.error('Delete deployment error:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete deployment' });
+  }
+});
+
 module.exports = router;

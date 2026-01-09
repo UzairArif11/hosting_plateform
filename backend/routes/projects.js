@@ -417,7 +417,34 @@ router.delete('/:id', requireProjectAccess('admin'), async (req, res) => {
       }
     }
 
-    // 3. Delete all deployment records from DB
+    // 3. Get all deployments before deleting to clean up Nginx
+    const allDeployments = await Deployment.find({ projectId: project._id });
+    
+    // 4. Remove Nginx location blocks for each deployment
+    const nginxRouter = require('../services/nginxRouter');
+    for (const deployment of allDeployments) {
+        if (deployment.deploymentUrl && deployment.server) {
+            try {
+                const serverKey = deployment.server; // 'EC2', 'EC3', etc.
+                const serverHost = process.env[`${serverKey}_SERVER_IP`] || 
+                                 (serverKey === 'EC2' ? process.env.EC2_SERVER_IP : process.env.EC3_SERVER_IP);
+                
+                if (serverHost) {
+                    await nginxRouter.removeNginxRouting(
+                        deployment._id.toString(),
+                        serverHost,
+                        serverKey
+                    );
+                    logger.info(`Removed Nginx config for deployment ${deployment._id}`);
+                }
+            } catch (err) {
+                logger.warn(`Failed to remove Nginx config for deployment ${deployment._id}: ${err.message}`);
+                // Continue with deletion even if Nginx cleanup fails
+            }
+        }
+    }
+
+    // 5. Delete all deployment records from DB
     await Deployment.deleteMany({ projectId: project._id });
     logger.info(`Deleted all deployment records for project: ${project._id}`);
 
