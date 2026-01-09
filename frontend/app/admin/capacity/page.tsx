@@ -75,7 +75,7 @@ export default function CapacityManagementPage() {
 
     const fetchCapacity = async () => {
         try {
-            const res = await api.get(`/api/admin/servers/${selectedServer}/capacity`);
+            const res = await api.get(`/admin/servers/${selectedServer}/capacity`);
             setCapacity(res.data.capacity);
             setResourceForm({
                 totalResources: res.data.capacity.totalResources,
@@ -92,7 +92,7 @@ export default function CapacityManagementPage() {
 
     const handleUpdateResources = async () => {
         try {
-            await api.put(`/api/admin/servers/${selectedServer}/capacity/resources`, {
+            await api.put(`/admin/servers/${selectedServer}/capacity/resources`, {
                 totalResources: resourceForm.totalResources,
                 reservedResources: resourceForm.reservedResources,
                 warningThresholds: resourceForm.warningThresholds,
@@ -114,7 +114,7 @@ export default function CapacityManagementPage() {
         }
 
         try {
-            await api.put(`/api/admin/servers/${selectedServer}/capacity/plan-limits`, {
+            await api.put(`/admin/servers/${selectedServer}/capacity/plan-limits`, {
                 planName: planLimitForm.planName,
                 maxUsers: planLimitForm.maxUsers,
                 priority: planLimitForm.priority

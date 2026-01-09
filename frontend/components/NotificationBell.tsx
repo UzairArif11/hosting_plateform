@@ -11,7 +11,7 @@ export default function NotificationBell() {
 
     const fetchNotifications = async () => {
         try {
-            const res = await api.get('/api/user/notifications');
+            const res = await api.get('/user/notifications');
             if (res.data) {
                 setNotifications(res.data.notifications);
                 setUnreadCount(res.data.unreadCount);
@@ -40,7 +40,7 @@ export default function NotificationBell() {
 
     const markAsRead = async (id: string) => {
         try {
-            await api.put(`/api/user/notifications/${id}/read`);
+            await api.put(`/user/notifications/${id}/read`);
             setNotifications(prev => prev.map(n => n._id === id ? { ...n, read: true } : n));
             setUnreadCount(prev => Math.max(0, prev - 1));
         } catch (error) { }

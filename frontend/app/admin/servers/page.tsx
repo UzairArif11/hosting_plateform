@@ -37,7 +37,7 @@ export default function ServerManagement() {
 
     const fetchServers = async () => {
         try {
-            const res = await api.get('/api/settings/servers');
+            const res = await api.get('/settings/servers');
             setServers(res.data.servers || {});
             setDnsInstructions(res.data.dnsInstructions || {});
             setLoading(false);
@@ -50,7 +50,7 @@ export default function ServerManagement() {
     const verifyDNS = async (serverKey: string, domain: string) => {
         setVerifying(serverKey);
         try {
-            const res = await api.post('/api/settings/verify-dns', { serverKey, domain });
+            const res = await api.post('/settings/verify-dns', { serverKey, domain });
             setVerificationResults({
                 ...verificationResults,
                 [serverKey]: res.data

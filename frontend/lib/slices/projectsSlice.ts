@@ -46,7 +46,7 @@ export const fetchProjects = createAsyncThunk(
     'projects/fetchProjects',
     async ({ page = 1, limit = 20 }: { page?: number; limit?: number }, { rejectWithValue }) => {
         try {
-            const response = await api.get(`/api/projects?page=${page}&limit=${limit}`);
+            const response = await api.get(`/projects?page=${page}&limit=${limit}`);
             return response.data;
         } catch (error: any) {
             return rejectWithValue(error.response?.data?.error || 'Failed to fetch projects');
@@ -58,7 +58,7 @@ export const fetchProject = createAsyncThunk(
     'projects/fetchProject',
     async (projectId: string, { rejectWithValue }) => {
         try {
-            const response = await api.get(`/api/projects/${projectId}`);
+            const response = await api.get(`/projects/${projectId}`);
             return response.data.project;
         } catch (error: any) {
             return rejectWithValue(error.response?.data?.error || 'Failed to fetch project');
@@ -70,7 +70,7 @@ export const createProject = createAsyncThunk(
     'projects/createProject',
     async (projectData: any, { rejectWithValue }) => {
         try {
-            const response = await api.post('/api/projects', projectData);
+            const response = await api.post('/projects', projectData);
             return response.data.project;
         } catch (error: any) {
             return rejectWithValue(error.response?.data?.error || 'Failed to create project');
@@ -82,7 +82,7 @@ export const deleteProject = createAsyncThunk(
     'projects/deleteProject',
     async (projectId: string, { rejectWithValue }) => {
         try {
-            await api.delete(`/api/projects/${projectId}`);
+            await api.delete(`/projects/${projectId}`);
             return projectId;
         } catch (error: any) {
             return rejectWithValue(error.response?.data?.error || 'Failed to delete project');

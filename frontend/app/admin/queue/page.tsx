@@ -50,7 +50,7 @@ export default function DeploymentQueuePage() {
 
     const fetchQueueStats = async () => {
         try {
-            const res = await api.get('/api/admin/deployment-queue/stats');
+            const res = await api.get('/admin/deployment-queue/stats');
             setQueueStats(res.data.queue);
             setLoading(false);
         } catch (error: any) {

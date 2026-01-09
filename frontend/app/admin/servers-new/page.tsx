@@ -120,7 +120,7 @@ export default function ServersPage() {
     const fetchServers = async () => {
         try {
             // silent refresh - don't show loading spinner if we already have data
-            const res = await api.get('/api/admin/servers');
+            const res = await api.get('/admin/servers');
             setServers(res.data.servers || []);
             setLoading(false);
         } catch (error) {
@@ -133,7 +133,7 @@ export default function ServersPage() {
     const fetchDockerStats = async (serverKey: string, silent = false) => {
         if (!silent) setRefreshing(serverKey);
         try {
-            const res = await api.get(`/api/admin/servers/${serverKey}/docker-stats`);
+            const res = await api.get(`/admin/servers/${serverKey}/docker-stats`);
             setDockerStats(prev => ({
                 ...prev,
                 [serverKey]: res.data.docker
@@ -165,7 +165,7 @@ export default function ServersPage() {
         setLogs(''); // clear previous
 
         try {
-            const res = await api.get(`/api/admin/servers/${serverKey}/containers/${containerId}/logs`);
+            const res = await api.get(`/admin/servers/${serverKey}/containers/${containerId}/logs`);
             setLogs(res.data.logs);
         } catch (error: any) {
             setLogs(`Error fetching logs: ${error.response?.data?.error || error.message}`);

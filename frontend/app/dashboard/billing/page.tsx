@@ -24,7 +24,7 @@ export default function BillingPage() {
 
     const fetchPlans = async () => {
         try {
-            const res = await api.get('/api/billing/plans');
+            const res = await api.get('/billing/plans');
             setAvailablePlans(res.data.plans || []);
         } catch (error) {
             console.error('Failed to fetch plans', error);

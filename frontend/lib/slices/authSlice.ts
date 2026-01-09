@@ -53,7 +53,7 @@ export const getCurrentUser = createAsyncThunk(
     'auth/getCurrentUser',
     async (_, { rejectWithValue }) => {
         try {
-            const response = await api.get('/api/auth/me');
+            const response = await api.get('/auth/me');
             return response.data.user;
         } catch (error: any) {
             return rejectWithValue(error.response?.data?.error || 'Failed to get user');
@@ -65,7 +65,7 @@ export const logout = createAsyncThunk(
     'auth/logout',
     async (_, { rejectWithValue }) => {
         try {
-            await api.post('/api/auth/logout');
+            await api.post('/auth/logout');
             return null;
         } catch (error: any) {
             return rejectWithValue(error.response?.data?.error || 'Failed to logout');
@@ -77,7 +77,7 @@ export const refreshToken = createAsyncThunk(
     'auth/refreshToken',
     async (_, { rejectWithValue }) => {
         try {
-            const response = await api.post('/api/auth/refresh');
+            const response = await api.post('/auth/refresh');
             return response.data.token;
         } catch (error: any) {
             return rejectWithValue(error.response?.data?.error || 'Failed to refresh token');

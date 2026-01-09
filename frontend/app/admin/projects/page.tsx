@@ -28,7 +28,7 @@ export default function AdminProjectsPage() {
 
     const fetchProjects = async () => {
         try {
-            const response = await api.get('/api/admin/projects?limit=1000');
+            const response = await api.get('/admin/projects?limit=1000');
             setProjects(response.data.projects || []);
         } catch (error) {
             console.error('Failed to fetch projects:', error);
@@ -44,7 +44,7 @@ export default function AdminProjectsPage() {
         }
 
         try {
-            await api.delete(`/api/projects/${projectId}`);
+            await api.delete(`/projects/${projectId}`);
             toast.success('Project deleted successfully');
             fetchProjects();
         } catch (error) {
@@ -58,7 +58,7 @@ export default function AdminProjectsPage() {
         setRebuilding(projectId);
         try {
             // This endpoint will be added to admin.js
-            await api.post(`/api/admin/projects/${projectId}/rebuild`);
+            await api.post(`/admin/projects/${projectId}/rebuild`);
             toast.success('Rebuild queued successfully');
         } catch (error) {
             toast.error('Failed to queue rebuild');

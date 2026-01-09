@@ -43,7 +43,7 @@ export default function UserManagement() {
             if (filter.plan !== 'all') params.append('plan', filter.plan);
             if (filter.search) params.append('search', filter.search);
 
-            const res = await api.get(`/api/admin/users?${params}`);
+            const res = await api.get(`/admin/users?${params}`);
 
             setUsers(res.data.users || []);
             setLoading(false);
@@ -73,7 +73,7 @@ export default function UserManagement() {
 
     const handleSuspendUser = async (userId: string, reason: string) => {
         try {
-            await api.put(`/api/admin/users/${userId}/suspend`, { reason });
+            await api.put(`/admin/users/${userId}/suspend`, { reason });
             alert('User suspended successfully');
             fetchUsers();
         } catch (error) {
@@ -83,7 +83,7 @@ export default function UserManagement() {
 
     const handleUnsuspendUser = async (userId: string) => {
         try {
-            await api.put(`/api/admin/users/${userId}/unsuspend`);
+            await api.put(`/admin/users/${userId}/unsuspend`);
             alert('User unsuspended successfully');
             fetchUsers();
         } catch (error) {
@@ -93,7 +93,7 @@ export default function UserManagement() {
 
     const handleDeleteUser = async (userId: string) => {
         try {
-            await api.delete(`/api/admin/users/${userId}`, {
+            await api.delete(`/admin/users/${userId}`, {
                 data: { confirm: 'DELETE' }
             });
             alert('User deleted successfully (15-day recovery period)');
@@ -105,7 +105,7 @@ export default function UserManagement() {
 
     const handleRecoverUser = async (userId: string) => {
         try {
-            await api.put(`/api/admin/users/${userId}/recover`);
+            await api.put(`/admin/users/${userId}/recover`);
             alert('User recovered successfully');
             fetchUsers();
         } catch (error: any) {
@@ -116,7 +116,7 @@ export default function UserManagement() {
 
     const handleChangePlan = async (userId: string, plan: string) => {
         try {
-            await api.put(`/api/admin/users/${userId}/plan`, {
+            await api.put(`/admin/users/${userId}/plan`, {
                 plan,
                 containerType: plan === 'free' ? 'shared' : 'dedicated',
                 upgradeContainers: true
@@ -234,7 +234,7 @@ export default function UserManagement() {
                                 onChangePlan={(plan: string) => handleChangePlan(user._id, plan)}
                                 onToggleProtection={async (isProtected: boolean) => {
                                     try {
-                                        await api.put(`/api/admin/users/${user._id}/protection`, { isProtected });
+                                        await api.put(`/admin/users/${user._id}/protection`, { isProtected });
                                         fetchUsers();
                                         toast.success(isProtected ? 'User marked as PROTECTED' : 'User protection removed');
                                     } catch (err) {

@@ -52,7 +52,7 @@ export default function AdminSettingsPage() {
 
     const fetchSettings = async () => {
         try {
-            const res = await api.get('/api/settings');
+            const res = await api.get('/settings');
             const data = res.data;
             if (data) {
                 // Populate state (mapping backend fields to frontend state)
@@ -88,7 +88,7 @@ export default function AdminSettingsPage() {
                 resourceLimits
             };
 
-            await api.put('/api/settings', payload);
+            await api.put('/settings', payload);
             toast.success('Settings saved successfully');
         } catch (error) {
             console.error(error);

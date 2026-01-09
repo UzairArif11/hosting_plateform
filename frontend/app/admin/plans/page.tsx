@@ -67,7 +67,7 @@ export default function PlanManagement() {
 
     const fetchPlans = async () => {
         try {
-            const res = await api.get('/api/admin/plans');
+            const res = await api.get('/admin/plans');
             setPlans(res.data.plans || []);
             setLoading(false);
         } catch (error) {
@@ -126,10 +126,10 @@ export default function PlanManagement() {
             }
 
             if (editingPlan._id) {
-                await api.put(`/api/admin/plans/${editingPlan._id}`, payload);
+                await api.put(`/admin/plans/${editingPlan._id}`, payload);
                 toast.success('Plan updated successfully');
             } else {
-                await api.post('/api/admin/plans', payload);
+                await api.post('/admin/plans', payload);
                 toast.success('Plan created successfully');
             }
             setShowModal(false);
@@ -147,7 +147,7 @@ export default function PlanManagement() {
         if (!confirm(`Delete plan "${planName}"? This cannot be undone.`)) return;
 
         try {
-            await api.delete(`/api/admin/plans/${planId}`);
+            await api.delete(`/admin/plans/${planId}`);
             toast.success('Plan deleted');
             fetchPlans();
         } catch (error: any) {

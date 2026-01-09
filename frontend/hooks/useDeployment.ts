@@ -39,7 +39,8 @@ export function useDeployment(deploymentId: string | null) {
             transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionAttempts: 5,
-            reconnectionDelay: 1000
+            reconnectionDelay: 1000,
+            path: '/api/socket.io/'
         });
 
         newSocket.on('connect', () => {

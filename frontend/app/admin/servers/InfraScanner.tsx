@@ -50,7 +50,7 @@ export default function InfraScanner() {
     const runScan = async () => {
         setScanning(true);
         try {
-            const res = await api.get('/api/admin/infra/scan');
+            const res = await api.get('/admin/infra/scan');
             setScanData(res.data);
             toast.success('Infrastructure scan complete');
         } catch (error) {
@@ -65,7 +65,7 @@ export default function InfraScanner() {
 
         setPruning(name);
         try {
-            await api.delete(`/api/admin/infra/containers/${server}/${name}`);
+            await api.delete(`/admin/infra/containers/${server}/${name}`);
             toast.success(`Pruned ${name}`);
             // Refresh scan data
             setScanData(prev => {

@@ -38,8 +38,8 @@ export const fetchDeployments = createAsyncThunk(
     async (projectId: string | undefined, { rejectWithValue }) => {
         try {
             const url = projectId 
-                ? `/api/deployments?projectId=${projectId}`
-                : '/api/deployments/user';
+                ? `/deployments?projectId=${projectId}`
+                : '/deployments/user';
             const response = await api.get(url);
             return response.data.deployments;
         } catch (error: any) {
@@ -52,7 +52,7 @@ export const createDeployment = createAsyncThunk(
     'deployments/createDeployment',
     async (deploymentData: any, { rejectWithValue }) => {
         try {
-            const response = await api.post('/api/deployments', deploymentData);
+            const response = await api.post('/deployments', deploymentData);
             return response.data.deployment;
         } catch (error: any) {
             return rejectWithValue(error.response?.data?.error || 'Failed to create deployment');
@@ -64,7 +64,7 @@ export const fetchDeploymentLogs = createAsyncThunk(
     'deployments/fetchLogs',
     async (deploymentId: string, { rejectWithValue }) => {
         try {
-            const response = await api.get(`/api/deployments/${deploymentId}/logs`);
+            const response = await api.get(`/deployments/${deploymentId}/logs`);
             return response.data.logs;
         } catch (error: any) {
             return rejectWithValue(error.response?.data?.error || 'Failed to fetch logs');
