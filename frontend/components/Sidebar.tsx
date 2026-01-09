@@ -82,6 +82,7 @@ export default function Sidebar() {
                         <Link
                             key={item.name}
                             href={item.href}
+                            prefetch={false}
                             className={`flex items-center space-x-3 px-3 py-2 rounded-lg transition-colors ${isActive
                                 ? 'bg-purple-600 text-white'
                                 : 'text-gray-400 hover:bg-gray-800 hover:text-white'

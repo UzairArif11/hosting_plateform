@@ -346,6 +346,7 @@ export default function ProjectDetailPage() {
                                 <Link
                                     key={deployment._id}
                                     href={`/dashboard/deployments/${deployment._id}`}
+                                    prefetch={false}
                                     className="block bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-lg p-6 transition-colors"
                                 >
                                     <div className="flex items-center justify-between">
