@@ -21,6 +21,8 @@ export default function DeploymentLogsPage() {
     const dispatch = useDispatch<AppDispatch>();
     const { currentDeployment, logs } = useSelector((state: RootState) => state.deployments);
     const [socket, setSocket] = useState<Socket | null>(null);
+    const [socketStatus, setSocketStatus] = useState<string>('Initializing');
+    const [debugUrl, setDebugUrl] = useState<string>('');
     const logsEndRef = useRef<HTMLDivElement>(null);
 
     // Auto-scroll to bottom
@@ -37,16 +39,33 @@ export default function DeploymentLogsPage() {
 
     // Socket.IO connection for real-time logs
     useEffect(() => {
-        const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
-        console.log('🔌 Initializing Socket.IO connection to:', SOCKET_URL);
+        // Determine URL
+        const envUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
+        const fallbackUrl = window.location.origin; // Use current origin as fallback instead of localhost
+        const SOCKET_URL = envUrl || fallbackUrl;
 
+        setDebugUrl(SOCKET_URL);
+        console.log(`🔌 Connecting to Socket.IO at: ${SOCKET_URL} for deployment: ${params.id}`);
+
+        // Initialize socket
         const newSocket = io(SOCKET_URL, {
             withCredentials: true,
+            transports: ['websocket', 'polling'], // Allow both
+            path: '/socket.io/', // Explicit path
+            reconnectionAttempts: 5
         });
 
+        setSocketStatus('Connecting...');
+
         newSocket.on('connect', () => {
-            console.log('✅ Connected to deployment logs');
+            console.log('✅ Connected to deployment logs', newSocket.id);
+            setSocketStatus('Connected');
             newSocket.emit('join-deployment', params.id);
+        });
+
+        newSocket.on('connect_error', (err) => {
+            console.error('❌ Socket Connection Error:', err);
+            setSocketStatus(`Error: ${err.message}`);
         });
 
         newSocket.on('deployment-log', (data: { deploymentId: string; message: string; level: string }) => {
@@ -58,21 +77,21 @@ export default function DeploymentLogsPage() {
         newSocket.on('deployment-status', (data: { deploymentId: string; status: string; url?: string }) => {
             if (data.deploymentId === params.id) {
                 dispatch(updateDeploymentStatus(data));
-
-                // If success, we can also refresh the page data to get full object
                 if (data.status === 'success') {
                     dispatch(fetchDeploymentLogs(params.id as string));
                 }
             }
         });
 
-        newSocket.on('disconnect', () => {
-            console.log('❌ Disconnected from deployment logs');
+        newSocket.on('disconnect', (reason) => {
+            console.log('❌ Disconnected:', reason);
+            setSocketStatus('Disconnected');
         });
 
         setSocket(newSocket);
 
         return () => {
+            console.log('🔌 Cleaning up socket');
             newSocket.emit('leave-deployment', params.id);
             newSocket.close();
         };
@@ -145,6 +164,13 @@ export default function DeploymentLogsPage() {
 
     return (
         <div className="space-y-6">
+            {/* Debug Info Bar (Temporary) */}
+            <div className="bg-gray-800 text-gray-400 text-xs p-2 rounded flex justify-between items-center font-mono">
+                <span>Status: <span className={socketStatus === 'Connected' ? 'text-green-400' : 'text-yellow-400'}>{socketStatus}</span></span>
+                <span>URL: {debugUrl}</span>
+                <span>ID: {params.id}</span>
+            </div>
+
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
