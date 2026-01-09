@@ -423,9 +423,9 @@ router.delete('/:id', requireProjectAccess('admin'), async (req, res) => {
     // 4. Remove Nginx location blocks for each deployment
     const nginxRouter = require('../services/nginxRouter');
     for (const deployment of allDeployments) {
-        if (deployment.deploymentUrl && deployment.server) {
+        if (deployment.deploymentUrl && deployment.serverKey) {
             try {
-                const serverKey = deployment.server; // 'EC2', 'EC3', etc.
+                const serverKey = deployment.serverKey; // 'EC2', 'EC3', etc.
                 const serverHost = process.env[`${serverKey}_SERVER_IP`] || 
                                  (serverKey === 'EC2' ? process.env.EC2_SERVER_IP : process.env.EC3_SERVER_IP);
                 

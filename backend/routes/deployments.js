@@ -726,10 +726,10 @@ router.delete('/:id', async (req, res) => {
     }
 
     // Remove Nginx location block if deployment has URL
-    if (deployment.deploymentUrl && deployment.server) {
+    if (deployment.deploymentUrl && deployment.serverKey) {
       try {
         const nginxRouter = require('../services/nginxRouter');
-        const serverKey = deployment.server; // 'EC2', 'EC3', etc.
+        const serverKey = deployment.serverKey; // 'EC2', 'EC3', etc.
         const serverHost = process.env[`${serverKey}_SERVER_IP`] || 
                          (serverKey === 'EC2' ? process.env.EC2_SERVER_IP : process.env.EC3_SERVER_IP);
         
@@ -748,18 +748,18 @@ router.delete('/:id', async (req, res) => {
     }
 
     // Stop PM2 process if running
-    if (deployment.containerName && deployment.server) {
+    if (deployment.containerName && deployment.serverKey) {
       try {
         const freeTierContainer = require('../services/freeTierContainer');
         const containerOrchestrator = require('../services/containerOrchestrator');
-        const server = containerOrchestrator.ORACLE_SERVERS[deployment.server];
+        const server = containerOrchestrator.ORACLE_SERVERS[deployment.serverKey];
         
         if (server) {
           await freeTierContainer.removeProjectFromUserContainer(
             project,
             deployment.containerName,
             server.host,
-            deployment.server
+            deployment.serverKey
           );
           logger.info(`Removed PM2 process for deployment ${deployment._id}`);
         }
