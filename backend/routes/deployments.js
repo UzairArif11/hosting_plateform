@@ -95,6 +95,42 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Get all deployments for the current user
+// This route must come before /:id to avoid matching "user" as an ID
+router.get('/user', async (req, res) => {
+  try {
+    const { page = 1, limit = 20, status = null } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const query = { userId: req.user._id };
+    if (status) {
+      query.status = status;
+    }
+
+    const deployments = await Deployment.find(query)
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip)
+      .populate('projectId', 'name repository')
+      .select('_id status createdAt completedAt deploymentUrl branch commitSha commitMessage error projectId');
+
+    const total = await Deployment.countDocuments(query);
+
+    res.json({
+      success: true,
+      deployments,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total
+      }
+    });
+  } catch (error) {
+    logger.error('Get user deployments error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch user deployments' });
+  }
+});
+
 // Get deployment status (lightweight endpoint for polling)
 router.get('/:id/status', async (req, res) => {
   try {
