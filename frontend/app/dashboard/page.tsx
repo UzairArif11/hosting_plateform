@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { AppDispatch, RootState } from '@/lib/store';
 import { fetchProjects } from '@/lib/slices/projectsSlice';
 import Link from 'next/link';
+import { io, Socket } from 'socket.io-client';
 import {
     FolderIcon,
     RocketLaunchIcon,
@@ -15,14 +16,68 @@ import {
     Cog6ToothIcon,
 } from '@heroicons/react/24/outline';
 
+// TEST: Module-level logging
+console.log('═══════════════════════════════════════════════════════');
+console.log('🏠 DASHBOARD PAGE LOADED - VERSION 2.0-SOCKET-TEST');
+console.log('📁 File: /dashboard/page.tsx');
+console.log('⏰ Loaded at:', new Date().toISOString());
+console.log('═══════════════════════════════════════════════════════');
+
 export default function DashboardPage() {
+    console.log('🎯 DashboardPage component mounting...');
+
     const dispatch = useDispatch<AppDispatch>();
     const { projects, loading } = useSelector((state: RootState) => state.projects);
     const { user } = useSelector((state: RootState) => state.auth);
 
+    // Socket state for testing
+    const [socketStatus, setSocketStatus] = useState<string>('Initializing');
+    const [socketUrl, setSocketUrl] = useState<string>('');
+    const [socket, setSocket] = useState<Socket | null>(null);
+
     useEffect(() => {
         dispatch(fetchProjects({ page: 1, limit: 5 }));
     }, [dispatch]);
+
+    // TEST: Socket.IO Connection
+    useEffect(() => {
+        const envUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
+        const fallbackUrl = typeof window !== 'undefined' ? window.location.origin : '';
+        const SOCKET_URL = envUrl || fallbackUrl;
+
+        setSocketUrl(SOCKET_URL);
+        console.log(`🔌 TESTING: Connecting to Socket.IO at: ${SOCKET_URL}`);
+
+        const newSocket = io(SOCKET_URL, {
+            withCredentials: true,
+            transports: ['websocket', 'polling'],
+            path: '/socket.io/',
+        });
+
+        setSocketStatus('Connecting...');
+
+        newSocket.on('connect', () => {
+            console.log('✅ Socket connected!', newSocket.id);
+            setSocketStatus('Connected');
+        });
+
+        newSocket.on('connect_error', (err) => {
+            console.error('❌ Socket error:', err);
+            setSocketStatus(`Error: ${err.message}`);
+        });
+
+        newSocket.on('disconnect', (reason) => {
+            console.log('❌ Socket disconnected:', reason);
+            setSocketStatus('Disconnected');
+        });
+
+        setSocket(newSocket);
+
+        return () => {
+            console.log('🔌 Cleaning up socket');
+            newSocket.close();
+        };
+    }, []);
 
     const stats = [
         {
@@ -61,6 +116,14 @@ export default function DashboardPage() {
 
     return (
         <div className="space-y-6">
+            {/* Socket Test Status Bar */}
+            <div className="bg-gray-800 text-gray-300 text-xs p-3 rounded-lg border border-gray-700 font-mono flex justify-between items-center">
+                <span className="font-bold text-purple-400">🧪 Socket Test v2.0</span>
+                <span>Status: <span className={socketStatus === 'Connected' ? 'text-green-400 font-bold' : 'text-yellow-400'}>{socketStatus}</span></span>
+                <span>URL: {socketUrl || 'Loading...'}</span>
+                {socket && <span>ID: {socket.id || 'None'}</span>}
+            </div>
+
             {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {stats.map((stat) => (
