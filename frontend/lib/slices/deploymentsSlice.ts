@@ -35,11 +35,11 @@ const initialState: DeploymentsState = {
 
 export const fetchDeployments = createAsyncThunk(
     'deployments/fetchDeployments',
-    async (projectId?: string, { rejectWithValue }) => {
+    async (projectId: string | undefined, { rejectWithValue }) => {
         try {
             const url = projectId 
                 ? `/api/deployments?projectId=${projectId}`
-                : '/api/deployments';
+                : '/api/deployments/user';
             const response = await api.get(url);
             return response.data.deployments;
         } catch (error: any) {
