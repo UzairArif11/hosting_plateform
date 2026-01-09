@@ -47,8 +47,87 @@ echo ""
 # ============================================================================
 echo -e "${BLUE}→ Step 3: Configuring Nginx for Socket.IO...${NC}"
 
+# Check if default config exists, if not create it (for main platform server)
+if [ ! -f "/etc/nginx/sites-available/default" ]; then
+    echo "→ Default nginx config not found, creating for main platform..."
+    
+    # Create basic default config for main platform
+    sudo tee /etc/nginx/sites-available/default > /dev/null << 'DEFAULTBLOCK'
+# Default server block (for IP access)
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    
+    server_name _;
+    
+    location /api/ {
+        proxy_pass http://127.0.0.1:5000/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+}
+
+# Main domain server block
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    
+    ssl_certificate /etc/letsencrypt/live/foodpanda.site/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/foodpanda.site/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    
+    server_name foodpanda.site www.foodpanda.site;
+    
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    
+    client_max_body_size 100M;
+    
+    # Platform Backend API
+    location /api/ {
+        proxy_pass http://127.0.0.1:5000/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+    }
+    
+    # Platform Frontend (catch-all)
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+DEFAULTBLOCK
+    
+    # Enable default config
+    if [ ! -f "/etc/nginx/sites-enabled/default" ]; then
+        sudo ln -s /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
+    fi
+    
+    echo "✅ Created default nginx config for main platform"
+fi
+
 # Check if socket.io location already exists
-if sudo grep -q "location /socket.io/" /etc/nginx/sites-available/default; then
+if sudo grep -q "location /api/socket.io/" /etc/nginx/sites-available/default || sudo grep -q "location /socket.io/" /etc/nginx/sites-available/default; then
     echo "✅ Socket.IO location already configured"
 else
     echo "→ Adding Socket.IO proxy to Nginx..."
@@ -56,12 +135,12 @@ else
     # Backup Nginx config
     sudo cp /etc/nginx/sites-available/default /etc/nginx/sites-available/default.backup.$(date +%s)
     
-    # Create socket.io location block
+    # Create socket.io location block (use /api/socket.io/ path)
     sudo tee /tmp/socket-io-nginx.conf > /dev/null << 'SOCKETBLOCK'
 
-    # WebSocket/Socket.IO Support
-    location /socket.io/ {
-        proxy_pass http://localhost:5000;
+    # Socket.IO WebSocket Support
+    location /api/socket.io/ {
+        proxy_pass http://127.0.0.1:5000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -74,9 +153,9 @@ else
     }
 SOCKETBLOCK
     
-    # Insert socket.io block after /api location
+    # Insert socket.io block after /api/ location block
     sudo awk '
-    /location \/api/ { in_api=1 }
+    /location \/api\/ \{/ { in_api=1 }
     in_api && /^[[:space:]]*}[[:space:]]*$/ && !added {
         print
         while ((getline line < "/tmp/socket-io-nginx.conf") > 0) print line
