@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useSelector } from 'react-redux';
-import { RootState } from '@/lib/store';
+import { useAppSelector } from '@/lib/hooks';
 import {
     ChartBarIcon,
     ArrowTrendingUpIcon,
@@ -11,7 +10,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 export default function AnalyticsPage() {
-    const { user } = useSelector((state: RootState) => state.auth);
+    const { user } = useAppSelector((state) => state.auth);
     const [stats, setStats] = useState({
         totalDeployments: 0,
         successfulDeployments: 0,
