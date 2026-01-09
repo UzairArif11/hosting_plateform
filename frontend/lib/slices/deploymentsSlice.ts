@@ -3,7 +3,7 @@ import api from '../api';
 
 interface Deployment {
     _id: string;
-    projectId: string;
+    projectId: string | { _id: string; name: string; repository?: any };
     status: string;
     branch: string;
     commitSha: string;

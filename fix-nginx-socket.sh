@@ -11,11 +11,21 @@ echo "🔧 Fixing Socket.IO path in Nginx..."
 sudo cp "$NGINX_CONFIG" "$BACKUP_FILE"
 echo "✅ Backup created: $BACKUP_FILE"
 
-# Fix Socket.IO path
-sudo sed -i 's|location /socket.io/ {|location /api/socket.io/ {|g' "$NGINX_CONFIG"
-sudo sed -i 's|proxy_pass http://localhost:5000;|proxy_pass http://127.0.0.1:5000;|g' "$NGINX_CONFIG"
+# Remove old /socket.io/ location block if it exists
+# Check if /api/socket.io/ already exists
+if sudo grep -q "location /api/socket.io/" "$NGINX_CONFIG"; then
+    echo "⚠️  /api/socket.io/ already exists, removing old /socket.io/ block..."
+    # Remove the old /socket.io/ location block
+    sudo sed -i '/location \/socket\.io\/ {/,/^[[:space:]]*}$/d' "$NGINX_CONFIG"
+    echo "✅ Removed old /socket.io/ location block"
+else
+    # Change /socket.io/ to /api/socket.io/
+    sudo sed -i 's|location /socket.io/ {|location /api/socket.io/ {|g' "$NGINX_CONFIG"
+    echo "✅ Socket.IO path updated to /api/socket.io/"
+fi
 
-echo "✅ Socket.IO path updated to /api/socket.io/"
+# Fix proxy_pass to use 127.0.0.1
+sudo sed -i 's|proxy_pass http://localhost:5000;|proxy_pass http://127.0.0.1:5000;|g' "$NGINX_CONFIG"
 
 # Test and reload
 if sudo nginx -t; then
