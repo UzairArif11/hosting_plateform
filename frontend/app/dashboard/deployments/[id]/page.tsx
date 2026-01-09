@@ -15,7 +15,16 @@ import {
     ArrowPathIcon,
 } from '@heroicons/react/24/outline';
 
+// IMMEDIATE MODULE-LEVEL LOGGING (runs when file is imported)
+const CODE_VERSION = '2.0-SOCKET-FIX';
+console.log('═══════════════════════════════════════════════════════');
+console.log(`🚀 DEPLOYMENT PAGE LOADED - VERSION ${CODE_VERSION}`);
+console.log('📁 File: /dashboard/deployments/[id]/page.tsx');
+console.log('⏰ Loaded at:', new Date().toISOString());
+console.log('═══════════════════════════════════════════════════════');
+
 export default function DeploymentLogsPage() {
+    console.log('🎯 DeploymentLogsPage component mounting...');
     const params = useParams();
     const router = useRouter();
     const dispatch = useDispatch<AppDispatch>();
@@ -166,6 +175,7 @@ export default function DeploymentLogsPage() {
         <div className="space-y-6">
             {/* Debug Info Bar (Temporary) */}
             <div className="bg-gray-800 text-gray-400 text-xs p-2 rounded flex justify-between items-center font-mono">
+                <span className="font-bold text-purple-400">v{CODE_VERSION}</span>
                 <span>Status: <span className={socketStatus === 'Connected' ? 'text-green-400' : 'text-yellow-400'}>{socketStatus}</span></span>
                 <span>URL: {debugUrl}</span>
                 <span>ID: {params.id}</span>
