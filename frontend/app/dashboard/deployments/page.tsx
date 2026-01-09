@@ -105,9 +105,13 @@ export default function DeploymentsPage() {
                                 <tr key={deployment._id} className="hover:bg-gray-700">
                                     <td className="px-6 py-4 whitespace-nowrap">
                                         <div className="text-sm font-medium text-white">
-                                            {typeof deployment.projectId === 'object' && deployment.projectId !== null && 'name' in deployment.projectId
-                                                ? (deployment.projectId as { name: string }).name
-                                                : 'Unknown'}
+                                            {(() => {
+                                                const project = deployment.projectId;
+                                                if (typeof project === 'object' && project !== null && 'name' in project) {
+                                                    return (project as { name: string }).name;
+                                                }
+                                                return 'Unknown';
+                                            })()}
                                         </div>
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
