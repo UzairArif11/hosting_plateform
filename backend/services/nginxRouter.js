@@ -6,15 +6,111 @@ const logger = require('../utils/logger');
 const Settings = require('../models/Settings');
 
 /**
- * FIXED VERSION - Correctly adds location blocks to Nginx
- * Handles multiple server blocks and prevents nesting issues
- * Gets domain configuration from database
+ * Get the deployment config file name for a server
+ */
+function getDeploymentConfigFile(serverKey) {
+    return `user-deployments-${serverKey.toLowerCase()}.conf`;
+}
+
+/**
+ * Ensure deployment config file exists and is properly configured
+ * Returns the full config file path
+ */
+async function ensureDeploymentConfigFile(ssh, serverKey, domain) {
+    const configFileName = getDeploymentConfigFile(serverKey);
+    const configPath = `/etc/nginx/sites-available/${configFileName}`;
+    const enabledPath = `/etc/nginx/sites-enabled/${configFileName}`;
+
+    // Check if config file exists
+    const checkResult = await ssh.execCommand(`sudo test -f ${configPath} && echo "exists" || echo "missing"`);
+    
+    if (checkResult.stdout.trim() === 'missing') {
+        logger.info(`Creating deployment config file: ${configFileName}`);
+        
+        // Create the deployment config file
+        const configContent = '# User Deployments Configuration for ' + domain + '\n' +
+            '# This file is managed by nginxRouter.js - DO NOT manually edit\n' +
+            '\n' +
+            '# HTTP to HTTPS redirect\n' +
+            'server {\n' +
+            '    listen 80;\n' +
+            '    listen [::]:80;\n' +
+            '    \n' +
+            '    server_name ' + domain + ' www.' + domain + ';\n' +
+            '    \n' +
+            '    # Redirect HTTP to HTTPS\n' +
+            '    return 301 https://$server_name$request_uri;\n' +
+            '}\n' +
+            '\n' +
+            '# HTTPS server block for user deployments\n' +
+            'server {\n' +
+            '    listen 443 ssl http2;\n' +
+            '    listen [::]:443 ssl http2;\n' +
+            '    \n' +
+            '    server_name ' + domain + ' www.' + domain + ';\n' +
+            '    \n' +
+            '    # SSL Configuration (update paths if certificate exists)\n' +
+            '    # ssl_certificate /etc/letsencrypt/live/' + domain + '/fullchain.pem;\n' +
+            '    # ssl_certificate_key /etc/letsencrypt/live/' + domain + '/privkey.pem;\n' +
+            '    ssl_protocols TLSv1.2 TLSv1.3;\n' +
+            '    ssl_prefer_server_ciphers on;\n' +
+            '    \n' +
+            '    # Security headers\n' +
+            '    add_header X-Frame-Options "SAMEORIGIN" always;\n' +
+            '    add_header X-Content-Type-Options "nosniff" always;\n' +
+            '    add_header X-XSS-Protection "1; mode=block" always;\n' +
+            '    \n' +
+            '    client_max_body_size 100M;\n' +
+            '    \n' +
+            '    # Root location (health check)\n' +
+            '    location / {\n' +
+            '        return 200 \'User Deployments Server - ' + domain + '\';\n' +
+            '        add_header Content-Type text/plain;\n' +
+            '    }\n' +
+            '    \n' +
+            '    # User deployment locations will be added here automatically by nginxRouter.js\n' +
+            '    # Format: location /projectname-{id}/ { proxy_pass http://localhost:{port}/; }\n' +
+            '}\n';
+
+        // Write config file
+        const tempFile = path.join(os.tmpdir(), `nginx-${configFileName}-${Date.now()}`);
+        fs.writeFileSync(tempFile, configContent);
+        
+        await ssh.putFile(tempFile, `/tmp/${configFileName}`);
+        await ssh.execCommand(`sudo mv /tmp/${configFileName} ${configPath}`);
+        try { fs.unlinkSync(tempFile); } catch (e) { }
+        
+        logger.info(`✅ Created deployment config file: ${configFileName}`);
+    }
+
+    // Check if SSL certificate exists and update config
+    const certCheck = await ssh.execCommand(`sudo test -f /etc/letsencrypt/live/${domain}/fullchain.pem && echo "exists" || echo "missing"`);
+    if (certCheck.stdout.trim() === 'exists') {
+        // Update SSL paths in config file (uncomment SSL certificate lines)
+        await ssh.execCommand(`sudo sed -i 's|# ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem|ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem|g' ${configPath}`);
+        await ssh.execCommand(`sudo sed -i 's|# ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem|ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem|g' ${configPath}`);
+        logger.info(`✅ SSL certificate paths updated in ${configFileName}`);
+    }
+
+    // Enable the config file in sites-enabled
+    const enabledCheck = await ssh.execCommand(`sudo test -f ${enabledPath} && echo "exists" || echo "missing"`);
+    if (enabledCheck.stdout.trim() === 'missing') {
+        await ssh.execCommand(`sudo ln -s ${configPath} ${enabledPath}`);
+        logger.info(`✅ Enabled deployment config: ${configFileName}`);
+    }
+
+    return configPath;
+}
+
+/**
+ * FIXED VERSION - Uses separate config file instead of modifying default
+ * Adds location blocks to user-deployments-{serverKey}.conf
  */
 async function updateNginxRouting(projectName, port, serverHost, serverKey, deploymentId) {
     const ssh = new NodeSSH();
 
     try {
-        logger.info(`Updating Nginx routing for ${projectName} on port ${port}`);
+        logger.info(`Updating Nginx routing for ${projectName} on port ${port} on server ${serverKey}`);
 
         // Get SSH key based on server
         const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
@@ -48,10 +144,13 @@ async function updateNginxRouting(projectName, port, serverHost, serverKey, depl
         const domain = await Settings.getDomainForServer(serverKey);
         logger.info(`Using domain: ${domain} for server ${serverKey}`);
 
-        // Read existing config
-        const readResult = await ssh.execCommand('sudo cat /etc/nginx/sites-available/default');
+        // Ensure deployment config file exists
+        const configPath = await ensureDeploymentConfigFile(ssh, serverKey, domain);
+
+        // Read existing deployment config (NOT default)
+        const readResult = await ssh.execCommand(`sudo cat ${configPath}`);
         if (readResult.code !== 0) {
-            throw new Error(`Failed to read Nginx config: ${readResult.stderr}`);
+            throw new Error(`Failed to read Nginx deployment config: ${readResult.stderr}`);
         }
         let config = readResult.stdout;
 
@@ -69,120 +168,58 @@ async function updateNginxRouting(projectName, port, serverHost, serverKey, depl
         proxy_cache_bypass $http_upgrade;
     }`;
 
-        // ROBUST PARSING: Find the correct server block and insert at the end
+        // Find the HTTPS server block (443) and insert location block before the closing brace
         const lines = config.split('\n');
         const newLines = [];
-        let serverStartIndex = -1;
-        let serverEndIndex = -1;
-        let depth = 0;
-        let foundDomain = false;
+        let inHttpsServer = false;
+        let httpsServerDepth = 0;
+        let lastBraceIndex = -1;
 
-        // Pass 1: Find the target server block
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const trimmed = line.trim();
 
-            if (trimmed.startsWith('server {')) {
-                serverStartIndex = i;
-                depth = 1;
-                foundDomain = false;
-                continue;
+            // Detect HTTPS server block (443 ssl)
+            if (trimmed.includes('listen 443') && trimmed.includes('ssl')) {
+                inHttpsServer = true;
+                httpsServerDepth = 1;
             }
 
-            if (serverStartIndex !== -1) {
+            if (inHttpsServer) {
                 const open = (line.match(/{/g) || []).length;
                 const close = (line.match(/}/g) || []).length;
-                depth += open - close;
+                httpsServerDepth += open - close;
 
-                // Check for domain in this server block
-                const baseDomain = domain.split('.').slice(-2).join('.');
-                if (trimmed.startsWith('server_name') &&
-                    (trimmed.includes(domain) || trimmed.includes(`www.${domain}`) ||
-                        trimmed.includes(`*.${baseDomain}`) ||
-                        (trimmed.includes(baseDomain) && !trimmed.includes('www.')))) {
-                    foundDomain = true;
-                }
-
-                if (depth === 0) {
-                    serverEndIndex = i;
-                    if (foundDomain) {
-                        // Found our block!
-                        break;
-                    } else {
-                        // Not our block, reset
-                        serverStartIndex = -1;
-                    }
+                // Check if this is the closing brace of the HTTPS server block
+                if (httpsServerDepth === 0 && trimmed === '}') {
+                    lastBraceIndex = i;
+                    // Insert location block before this closing brace
+                    newLines.push(locationBlock);
+                    newLines.push('');
                 }
             }
+
+            newLines.push(line);
         }
 
-        if (serverStartIndex === -1 || serverEndIndex === -1) {
-            // FALLBACK: If ec3.foodpanda.site not found, try base domain (foodpanda.site)
-            const baseDomain = domain.split('.').slice(-2).join('.');
-            if (baseDomain !== domain) {
-                logger.warn(`Server block for ${domain} not found, falling back to ${baseDomain}`);
-
-                // Reset and search for base domain
-                serverStartIndex = -1;
-                serverEndIndex = -1;
-                foundDomain = false;
-
-                for (let i = 0; i < lines.length; i++) {
-                    const line = lines[i];
-                    const trimmed = line.trim();
-
-                    if (trimmed.startsWith('server {')) {
-                        serverStartIndex = i;
-                        depth = 1;
-                        foundDomain = false;
-                        continue;
-                    }
-
-                    if (serverStartIndex !== -1) {
-                        const open = (line.match(/{/g) || []).length;
-                        const close = (line.match(/}/g) || []).length;
-                        depth += open - close;
-
-                        if (trimmed.startsWith('server_name') &&
-                            (trimmed.includes(baseDomain) || trimmed.includes(`www.${baseDomain}`) ||
-                                trimmed.includes(`*.${baseDomain}`))) {
-                            foundDomain = true;
-                        }
-
-                        if (depth === 0) {
-                            serverEndIndex = i;
-                            if (foundDomain) {
-                                logger.info(`✅ Found fallback server block for ${baseDomain}`);
-                                break;
-                            } else {
-                                serverStartIndex = -1;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // If still not found, throw error
-            if (serverStartIndex === -1 || serverEndIndex === -1) {
-                throw new Error(`Could not find a server block for ${domain} or ${baseDomain || 'base domain'} in Nginx config`);
-            }
-        }
-
-        // Pass 2: Reconstruct config with new location block inserted before the last brace of the server
-        for (let i = 0; i < lines.length; i++) {
-            if (i === serverEndIndex) {
+        // If we didn't find the HTTPS server block, append to end (shouldn't happen)
+        if (lastBraceIndex === -1) {
+            logger.warn('HTTPS server block not found, appending location block to end');
+            // Remove last closing brace, add location block, then add closing brace back
+            if (newLines[newLines.length - 1].trim() === '}') {
+                newLines.pop();
                 newLines.push(locationBlock);
                 newLines.push('');
+                newLines.push('}');
             }
-            newLines.push(lines[i]);
         }
 
         const newConfig = newLines.join('\n');
-        const tempFile = path.join(os.tmpdir(), `nginx-${Date.now()}.conf`);
+        const tempFile = path.join(os.tmpdir(), `nginx-deployment-${Date.now()}.conf`);
         fs.writeFileSync(tempFile, newConfig);
 
-        await ssh.putFile(tempFile, '/tmp/nginx-default.conf');
-        await ssh.execCommand('sudo mv /tmp/nginx-default.conf /etc/nginx/sites-available/default');
+        await ssh.putFile(tempFile, `/tmp/deployment-${getDeploymentConfigFile(serverKey)}`);
+        await ssh.execCommand(`sudo mv /tmp/deployment-${getDeploymentConfigFile(serverKey)} ${configPath}`);
         try { fs.unlinkSync(tempFile); } catch (e) { }
 
         const testResult = await ssh.execCommand('sudo nginx -t 2>&1');
@@ -193,9 +230,9 @@ async function updateNginxRouting(projectName, port, serverHost, serverKey, depl
         await ssh.execCommand('sudo systemctl reload nginx');
 
         const settings = await Settings.getSettings();
-        const protocol = settings.protocol;
+        const protocol = settings.protocol || 'https';
         const fullUrl = `${protocol}://${domain}/${urlPath}/`;
-        logger.info(`✅ Nginx routing updated: ${fullUrl} → localhost:${port}`);
+        logger.info(`✅ Nginx routing updated in ${configPath}: ${fullUrl} → localhost:${port}`);
 
         ssh.dispose();
         return { success: true, url: fullUrl, urlPath: urlPath };
@@ -209,13 +246,13 @@ async function updateNginxRouting(projectName, port, serverHost, serverKey, depl
 
 /**
  * Remove Nginx location block for a deployment
- * Called when deployment is deleted to clean up Nginx config
+ * Uses separate deployment config file instead of default
  */
 async function removeNginxRouting(deploymentId, serverHost, serverKey) {
     const ssh = new NodeSSH();
 
     try {
-        logger.info(`Removing Nginx routing for deployment ${deploymentId}`);
+        logger.info(`Removing Nginx routing for deployment ${deploymentId} from server ${serverKey}`);
 
         // Get SSH key based on server
         const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
@@ -232,11 +269,16 @@ async function removeNginxRouting(deploymentId, serverHost, serverKey) {
             privateKey: keyContent
         });
 
-        // Read existing config
-        const readResult = await ssh.execCommand('sudo cat /etc/nginx/sites-available/default');
+        const configPath = `/etc/nginx/sites-available/${getDeploymentConfigFile(serverKey)}`;
+
+        // Read existing deployment config (NOT default)
+        const readResult = await ssh.execCommand(`sudo cat ${configPath}`);
         if (readResult.code !== 0) {
-            throw new Error(`Failed to read Nginx config: ${readResult.stderr}`);
+            logger.warn(`Deployment config file ${configPath} not found, assuming already removed`);
+            ssh.dispose();
+            return { success: true, message: 'Config file not found (may have been already removed)' };
         }
+
         let config = readResult.stdout;
 
         // Remove location block(s) for this deployment ID
@@ -261,11 +303,11 @@ async function removeNginxRouting(deploymentId, serverHost, serverKey) {
             // If we're skipping, continue until we find the closing brace
             if (skipBlock) {
                 // Check if this is the closing brace of the location block
-                if (trimmed === '}' && (i === 0 || lines[i - 1].trim().endsWith('$http_upgrade;'))) {
+                if (trimmed === '}' && (i === 0 || lines[i - 1].trim().includes('$http_upgrade'))) {
                     skipBlock = false;
                     continue; // Skip the closing brace
                 }
-                // Skip all lines in the block
+                // Skip all lines in the block (including the location line and proxy_pass lines)
                 continue;
             }
 
@@ -283,8 +325,8 @@ async function removeNginxRouting(deploymentId, serverHost, serverKey) {
         const tempFile = path.join(os.tmpdir(), `nginx-remove-${Date.now()}.conf`);
         fs.writeFileSync(tempFile, newConfig);
 
-        await ssh.putFile(tempFile, '/tmp/nginx-default.conf');
-        await ssh.execCommand('sudo mv /tmp/nginx-default.conf /etc/nginx/sites-available/default');
+        await ssh.putFile(tempFile, `/tmp/deployment-remove-${getDeploymentConfigFile(serverKey)}`);
+        await ssh.execCommand(`sudo mv /tmp/deployment-remove-${getDeploymentConfigFile(serverKey)} ${configPath}`);
         try { fs.unlinkSync(tempFile); } catch (e) { }
 
         const testResult = await ssh.execCommand('sudo nginx -t 2>&1');
@@ -293,7 +335,7 @@ async function removeNginxRouting(deploymentId, serverHost, serverKey) {
         }
 
         await ssh.execCommand('sudo systemctl reload nginx');
-        logger.info(`✅ Nginx location block removed for deployment ${deploymentId}`);
+        logger.info(`✅ Nginx location block removed from ${configPath} for deployment ${deploymentId}`);
 
         ssh.dispose();
         return { success: true, message: 'Nginx location block removed successfully' };

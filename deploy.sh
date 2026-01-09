@@ -103,53 +103,12 @@ fi
 echo ""
 
 # ============================================================================
-# STEP 4: SETUP EC3 NGINX (IF SSL CERT EXISTS)
+# STEP 4: SKIP EC3 NGINX SETUP (Managed by setup-deployment-server.sh)
 # ============================================================================
-echo -e "${BLUE}→ Step 4: Checking EC3 SSL configuration...${NC}"
-
-# SSH to EC3 and setup if cert exists
-EC3_SETUP_COMPLETE=false
-ssh -i ~/.ssh/ec3_key ubuntu@129.154.255.90 -o ConnectTimeout=5 << 'EC3SSH' 2>/dev/null && EC3_SETUP_COMPLETE=true || echo "⚠️  EC3 SSH failed, skipping"
-    if [ -d "/etc/letsencrypt/live/ec3.foodpanda.site" ]; then
-        if ! sudo grep -q "server_name ec3.foodpanda.site" /etc/nginx/sites-available/default; then
-            echo "→ Adding ec3.foodpanda.site server block..."
-            sudo tee -a /etc/nginx/sites-available/default > /dev/null << 'NGINXBLOCK'
-
-# EC3 Subdomain - User Deployments
-server {
-    listen 80;
-    server_name ec3.foodpanda.site;
-    return 301 https://$server_name$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name ec3.foodpanda.site;
-
-    ssl_certificate /etc/letsencrypt/live/ec3.foodpanda.site/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/ec3.foodpanda.site/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-
-    location / {
-        return 200 'EC3 Server Active';
-        add_header Content-Type text/plain;
-    }
-}
-NGINXBLOCK
-            
-            if sudo nginx -t 2>&1 | grep -q "successful"; then
-                sudo systemctl reload nginx
-                echo "✅ EC3 Nginx configured"
-            fi
-        else
-            echo "✅ EC3 already configured"
-        fi
-    else
-        echo "⚠️  EC3 SSL cert not found, skipping"
-    fi
-EC3SSH
-
-echo -e "${GREEN}✅ EC3 setup checked${NC}"
+echo -e "${BLUE}→ Step 4: Skipping EC3 configuration...${NC}"
+echo "   ℹ️  EC3 user deployments are managed by setup-deployment-server.sh"
+echo "   ℹ️  EC3 uses separate config file: /etc/nginx/sites-available/user-deployments-EC3.conf"
+echo -e "${GREEN}✅ Step 4 complete${NC}"
 echo ""
 
 # ============================================================================
