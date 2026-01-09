@@ -775,6 +775,9 @@ async function deployToContainer(buildPath, buildOutput, deployment, project, us
         const deployTime = Date.now() - startTime;
         deployment.deployDuration = deployTime;
         deployment.deploymentUrl = deploymentUrl; // Ensure it's saved to the model
+        deployment.serverKey = serverKey; // Save serverKey for cleanup
+        deployment.port = port; // Save port for reference
+        deployment.containerName = newContainerName; // Save container name
         await deployment.save();
 
         await onLog('info', `✓ Container deployed in ${(deployTime / 1000).toFixed(2)}s`);
