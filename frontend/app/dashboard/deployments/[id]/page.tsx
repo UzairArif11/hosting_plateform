@@ -60,7 +60,7 @@ export default function DeploymentLogsPage() {
         const newSocket = io(SOCKET_URL, {
             withCredentials: true,
             transports: ['websocket', 'polling'], // Allow both
-            path: '/socket.io/', // Explicit path
+            path: '/api/socket.io/', // Use /api prefix
             reconnectionAttempts: 5
         });
 

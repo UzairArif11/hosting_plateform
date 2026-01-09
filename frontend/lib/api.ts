@@ -2,8 +2,11 @@ import axios from 'axios';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
+// Ensure API_URL ends with /api for all routes
+const baseURL = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
+
 const api = axios.create({
-    baseURL: API_URL,
+    baseURL: baseURL,
     withCredentials: true, // Important for cookies
     headers: {
         'Content-Type': 'application/json',

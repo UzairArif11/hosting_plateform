@@ -81,6 +81,49 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Get deployment status (lightweight endpoint for polling)
+router.get('/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const deployment = await Deployment.findById(id)
+      .select('_id status projectId createdAt completedAt deploymentUrl error buildLogs');
+
+    if (!deployment) {
+      return res.status(404).json({
+        success: false,
+        error: 'Deployment not found'
+      });
+    }
+
+    // Verify user has access to the project
+    const project = await Project.findById(deployment.projectId);
+    if (!project || !project.hasAccess(req.user._id, 'viewer')) {
+      return res.status(403).json({
+        success: false,
+        error: 'Insufficient permissions'
+      });
+    }
+
+    res.json({
+      success: true,
+      deployment: {
+        _id: deployment._id,
+        status: deployment.status,
+        deploymentUrl: deployment.deploymentUrl,
+        error: deployment.error,
+        createdAt: deployment.createdAt,
+        completedAt: deployment.completedAt,
+        isComplete: ['success', 'failed', 'cancelled'].includes(deployment.status),
+        hasLogs: deployment.buildLogs && deployment.buildLogs.length > 0
+      }
+    });
+  } catch (error) {
+    logger.error('Get deployment status error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch deployment status' });
+  }
+});
+
 // Get specific deployment
 router.get('/:id', async (req, res) => {
   try {

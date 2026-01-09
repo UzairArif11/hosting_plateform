@@ -51,7 +51,7 @@ export default function DashboardPage() {
         const newSocket = io(SOCKET_URL, {
             withCredentials: true,
             transports: ['websocket', 'polling'],
-            path: '/socket.io/',
+            path: '/api/socket.io/',
         });
 
         setSocketStatus('Connecting...');

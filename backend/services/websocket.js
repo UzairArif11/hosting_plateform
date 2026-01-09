@@ -8,6 +8,7 @@ let io = null;
  */
 function initializeWebSocket(server) {
     io = new Server(server, {
+        path: '/api/socket.io/',
         cors: {
             origin: process.env.FRONTEND_URL || 'http://localhost:3000',
             methods: ['GET', 'POST'],
