@@ -20,15 +20,29 @@ const handleValidationErrors = (req, res, next) => {
   next();
 };
 
-// Get deployments for a project
+// Get deployments for a project or all user deployments
 router.get('/', async (req, res) => {
   try {
     const { projectId, status, page = 1, limit = 20 } = req.query;
 
+    // If no projectId, return all deployments for the user
     if (!projectId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Project ID is required'
+      const deployments = await Deployment.find({ userId: req.user._id })
+        .populate('projectId', 'name repository')
+        .sort({ createdAt: -1 })
+        .limit(parseInt(limit))
+        .skip((parseInt(page) - 1) * parseInt(limit));
+
+      const total = await Deployment.countDocuments({ userId: req.user._id });
+
+      return res.json({
+        success: true,
+        deployments,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total
+        }
       });
     }
 

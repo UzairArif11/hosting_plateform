@@ -35,9 +35,12 @@ const initialState: DeploymentsState = {
 
 export const fetchDeployments = createAsyncThunk(
     'deployments/fetchDeployments',
-    async (projectId: string, { rejectWithValue }) => {
+    async (projectId?: string, { rejectWithValue }) => {
         try {
-            const response = await api.get(`/api/deployments?projectId=${projectId}`);
+            const url = projectId 
+                ? `/api/deployments?projectId=${projectId}`
+                : '/api/deployments';
+            const response = await api.get(url);
             return response.data.deployments;
         } catch (error: any) {
             return rejectWithValue(error.response?.data?.error || 'Failed to fetch deployments');

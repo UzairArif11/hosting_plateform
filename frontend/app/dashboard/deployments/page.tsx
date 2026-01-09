@@ -19,6 +19,7 @@ export default function DeploymentsPage() {
 
     useEffect(() => {
         if (user) {
+            // Fetch all deployments for the user (no projectId = all deployments)
             dispatch(fetchDeployments());
         }
     }, [dispatch, user]);
@@ -70,41 +71,43 @@ export default function DeploymentsPage() {
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-bold text-gray-900">Deployments</h1>
+                <h1 className="text-2xl font-bold text-white">Deployments</h1>
             </div>
 
             {deployments.length === 0 ? (
-                <div className="bg-white rounded-lg shadow p-8 text-center">
-                    <p className="text-gray-500">No deployments yet</p>
+                <div className="bg-gray-800 rounded-lg shadow p-8 text-center">
+                    <p className="text-gray-400">No deployments yet</p>
                 </div>
             ) : (
-                <div className="bg-white rounded-lg shadow overflow-hidden">
-                    <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
+                <div className="bg-gray-800 rounded-lg shadow overflow-hidden">
+                    <table className="min-w-full divide-y divide-gray-700">
+                        <thead className="bg-gray-900">
                             <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
                                     Project
                                 </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
                                     Status
                                 </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
                                     Branch
                                 </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
                                     Created
                                 </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
                                     Actions
                                 </th>
                             </tr>
                         </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
+                        <tbody className="bg-gray-800 divide-y divide-gray-700">
                             {deployments.map((deployment) => (
-                                <tr key={deployment._id} className="hover:bg-gray-50">
+                                <tr key={deployment._id} className="hover:bg-gray-700">
                                     <td className="px-6 py-4 whitespace-nowrap">
-                                        <div className="text-sm font-medium text-gray-900">
-                                            {deployment.projectId?.name || 'Unknown'}
+                                        <div className="text-sm font-medium text-white">
+                                            {typeof deployment.projectId === 'object' && deployment.projectId?.name 
+                                                ? deployment.projectId.name 
+                                                : 'Unknown'}
                                         </div>
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
@@ -113,16 +116,16 @@ export default function DeploymentsPage() {
                                             {deployment.status}
                                         </span>
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
                                         {deployment.branch}
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
                                         {new Date(deployment.createdAt).toLocaleDateString()}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                                         <button
                                             onClick={() => router.push(`/dashboard/deployments/${deployment._id}`)}
-                                            className="text-blue-600 hover:text-blue-900"
+                                            className="text-blue-400 hover:text-blue-300"
                                         >
                                             View
                                         </button>
