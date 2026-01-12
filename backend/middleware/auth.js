@@ -282,6 +282,17 @@ const requireProjectAccess = (requiredRole = 'viewer') => {
         });
       }
 
+      // Platform admins can access any project
+      if (req.user.role === 'admin') {
+        logger.info('Platform admin accessing project', {
+          adminId: req.user._id,
+          projectId,
+          projectOwner: project.owner.toString()
+        });
+        req.project = project;
+        return next();
+      }
+
       // Check if user has access to this project
       if (!project.hasAccess(req.user._id, requiredRole)) {
         logAuthEvent('Unauthorized project access', req.user._id, {

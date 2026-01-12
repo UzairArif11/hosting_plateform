@@ -369,34 +369,41 @@ router.delete('/:id', requireProjectAccess('admin'), async (req, res) => {
       }
     }
 
-    // Update user's project count
-    if (project.owner.toString() === req.user._id.toString()) {
-      req.user.currentUsage.projects = Math.max(0, req.user.currentUsage.projects - 1);
+    // Update user's project count (only if deleting own project, or if admin deleting someone else's project)
+    const projectOwner = await User.findById(project.owner);
+    if (projectOwner) {
+      // If admin is deleting, update the project owner's count, not admin's
+      // If owner is deleting, update their own count
+      const userToUpdate = project.owner.toString() === req.user._id.toString() ? req.user : projectOwner;
+      
+      if (!userToUpdate.currentUsage) {
+        userToUpdate.currentUsage = { projects: 0, deployments: 0, containers: 0, storage: 0, bandwidth: 0 };
+      }
+      userToUpdate.currentUsage.projects = Math.max(0, userToUpdate.currentUsage.projects - 1);
 
       // Auto-cleanup container if no projects left (Frees resources immediately)
-      if (req.user.currentUsage.projects === 0) {
+      if (userToUpdate.currentUsage.projects === 0) {
         try {
-          const User = require('../models/User');
-          const freshUser = await User.findById(req.user._id);
+          const freshUser = await User.findById(userToUpdate._id);
 
           const freeTierContainer = require('../services/freeTierContainer');
-          const cleanupResult = await freeTierContainer.removeUserContainer(freshUser || req.user);
+          const cleanupResult = await freeTierContainer.removeUserContainer(freshUser || userToUpdate);
 
           if (cleanupResult.success) {
             // Reset user resource tracking only if physically removed
-            req.user.assignedServer = null;
-            req.user.containerName = null;
-            req.user.containerId = null;
-            logger.info(`[AUTO-CLEANUP] Physically removed empty container for user ${req.user.email}`);
+            userToUpdate.assignedServer = null;
+            userToUpdate.containerName = null;
+            userToUpdate.containerId = null;
+            logger.info(`[AUTO-CLEANUP] Physically removed empty container for user ${userToUpdate.email}`);
           } else {
-            logger.info(`[AUTO-CLEANUP] No container found to remove for user ${req.user.email} (Already clean)`);
+            logger.info(`[AUTO-CLEANUP] No container found to remove for user ${userToUpdate.email} (Already clean)`);
           }
         } catch (e) {
           logger.warn(`Failed to cleanup empty container: ${e.message}`);
         }
       }
 
-      await req.user.save();
+      await userToUpdate.save();
     }
 
     // 1. Find all active or queued deployments for this project
