@@ -21,7 +21,7 @@ npm install --production
 cd ..
 
 cd frontend
-npm install --production
+npm install
 npm run build  # Build frontend for production
 cd ..
 
