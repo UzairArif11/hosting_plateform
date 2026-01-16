@@ -53,22 +53,29 @@ fi
 echo "🔄 Step 4: Restarting services..."
 
 # Stop existing processes
-pkill -f "node.*backend/server.js" || true
-pkill -f "next.*dev" || true
+if command -v pm2 &> /dev/null && pm2 list | grep -q "backend"; then
+    echo "pm2 detected, reloading ecosystem..."
+    pm2 reload backend
+    pm2 reload frontend
+else
+    echo "pm2 not found or not configured, using manual start..."
+    pkill -f "node.*backend/server.js" || true
+    pkill -f "next.*dev" || true
+    
+    # Start backend
+    cd backend
+    npm start > ../logs/backend.log 2>&1 &
+    BACKEND_PID=$!
+    echo "Backend started (PID: $BACKEND_PID)"
+    cd ..
 
-# Start backend
-cd backend
-npm start > ../logs/backend.log 2>&1 &
-BACKEND_PID=$!
-echo "Backend started (PID: $BACKEND_PID)"
-cd ..
-
-# Start frontend (production mode)
-cd frontend
-npm start > ../logs/frontend.log 2>&1 &
-FRONTEND_PID=$!
-echo "Frontend started (PID: $FRONTEND_PID)"
-cd ..
+    # Start frontend (production mode)
+    cd frontend
+    npm start > ../logs/frontend.log 2>&1 &
+    FRONTEND_PID=$!
+    echo "Frontend started (PID: $FRONTEND_PID)"
+    cd ..
+fi
 
 # Wait for services to start
 sleep 5
