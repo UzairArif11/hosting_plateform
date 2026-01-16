@@ -32,14 +32,18 @@ cd ..
 # 3. Run Database Seeders (ONLY FIRST TIME or when templates updated)
 echo "🌱 Step 3: Checking database..."
 
+# Load env vars from backend/.env for the check
+export $(grep -v '^#' backend/.env | xargs)
+
 # Check if templates exist
 TEMPLATE_COUNT=$(node -e "
 const mongoose = require('mongoose');
 const Template = require('./backend/models/Template');
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/vercel-clone')
+// Use the exported env var
+mongoose.connect(process.env.MONGODB_URI)
   .then(() => Template.countDocuments())
   .then(count => { console.log(count); process.exit(0); })
-  .catch(() => { console.log(0); process.exit(0); });
+  .catch((err) => { console.error(err); console.log(0); process.exit(0); });
 " 2>/dev/null || echo "0")
 
 if [ "$TEMPLATE_COUNT" -eq "0" ]; then
@@ -55,8 +59,8 @@ echo "🔄 Step 4: Restarting services..."
 # Stop existing processes
 if command -v pm2 &> /dev/null && pm2 list | grep -q "backend"; then
     echo "pm2 detected, reloading ecosystem..."
-    pm2 reload backend
-    pm2 reload frontend
+    pm2 reload backend --update-env
+    pm2 reload frontend --update-env
 else
     echo "pm2 not found or not configured, using manual start..."
     pkill -f "node.*backend/server.js" || true
