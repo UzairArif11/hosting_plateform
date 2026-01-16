@@ -149,10 +149,15 @@ const planSchema = new mongoose.Schema({
   },
 
   // Features included in this plan
+  // Features included in this plan
   features: [{
     name: {
       type: String,
       required: true
+    },
+    displayName: {
+      type: String,
+      default: ''
     },
     description: {
       type: String,
@@ -161,6 +166,10 @@ const planSchema = new mongoose.Schema({
     enabled: {
       type: Boolean,
       default: true
+    },
+    config: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
     }
   }],
 

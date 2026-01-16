@@ -4,18 +4,26 @@ const nextConfig = {
     swcMinify: true,
     // ❌ Remove static export - we need dynamic routes!
     // output: 'export',
-    
+
     // ✅ Keep these optimizations
     images: {
         domains: ['avatars.githubusercontent.com', 'lh3.googleusercontent.com'],
     },
-    
+
     // Environment variables (Next.js automatically exposes NEXT_PUBLIC_* vars)
     // These are just for documentation - set them in .env.local or .env.production
     env: {
         NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000',
         NEXT_PUBLIC_SOCKET_URL: process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000',
-    }
+    },
+    async rewrites() {
+        return [
+            {
+                source: '/api/:path*',
+                destination: 'http://localhost:5000/api/:path*', // Proxy to Backend
+            },
+        ];
+    },
 };
 
 module.exports = nextConfig;

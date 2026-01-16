@@ -9,6 +9,7 @@ import { fetchDeployments, createDeployment } from '@/lib/slices/deploymentsSlic
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import DeploymentStatus from '@/components/DeploymentStatus';
+import DeploymentSettings from '@/components/DeploymentSettings';
 import {
     RocketLaunchIcon,
     Cog6ToothIcon,
@@ -318,6 +319,15 @@ export default function ProjectDetailPage() {
                     >
                         Environment Variables
                     </button>
+                    <button
+                        onClick={() => setActiveTab('deployment_settings')}
+                        className={`pb-4 px-1 border-b-2 transition-colors ${activeTab === 'deployment_settings'
+                            ? 'border-purple-500 text-white'
+                            : 'border-transparent text-gray-400 hover:text-white'
+                            }`}
+                    >
+                        Deployment
+                    </button>
                 </div>
             </div>
 
@@ -488,6 +498,10 @@ export default function ProjectDetailPage() {
                             )}
                         </div>
                     </div>
+                )}
+
+                {activeTab === 'deployment_settings' && (
+                    <DeploymentSettings project={currentProject} />
                 )}
             </div>
         </div >

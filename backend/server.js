@@ -36,6 +36,9 @@ const billingRoutes = require('./routes/billing');
 const adminRoutes = require('./routes/admin');
 const webhookRoutes = require('./routes/webhooks');
 const settingsRoutes = require('./routes/settings');
+const templateRoutes = require('./routes/templates');
+const analyticsRoutes = require('./routes/analytics');
+const invitationsRoutes = require('./routes/invitations');
 
 // Import middleware
 const { requireAuth } = require('./middleware/auth');
@@ -58,6 +61,7 @@ websocketService.initializeWebSocket(server);
 // Global middleware
 app.use(helmet());
 app.use(compression());
+app.use(express.static('public')); // Serve static files (e.g. tracker.js)
 app.use(cors({
   origin: process.env.FRONTEND_URL || "http://localhost:3000",
   credentials: true
@@ -136,6 +140,9 @@ app.use('/api/admin', requireAuth, requireAdmin, adminRoutes);
 app.use('/api/settings', settingsRoutes); // Settings (public domain lookup, admin for updates)
 app.use('/api/test', require('./routes/test')); // Test endpoints (no auth required)
 app.use('/api/webhooks', webhookRoutes);
+app.use('/api/templates', templateRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/invitations', invitationsRoutes);
 
 // User self-service routes
 const userRoutes = require('./routes/user');

@@ -138,6 +138,12 @@ const projectSchema = new mongoose.Schema({
       type: Boolean,
       default: false
     },
+    verificationToken: {
+      type: String
+    },
+    verifiedAt: {
+      type: Date
+    },
     addedAt: {
       type: Date,
       default: Date.now

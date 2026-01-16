@@ -542,7 +542,6 @@ const handleWebhookEvent = async (eventType, payload) => {
   }
 };
 
-// Repository access functions
 const checkRepositoryAccess = async (repoFullName, userToken) => {
   try {
     const headers = createGitHubHeaders(userToken);
@@ -580,12 +579,39 @@ const checkRepositoryAccess = async (repoFullName, userToken) => {
   }
 };
 
+const forkRepository = async (repoFullName, userToken) => {
+  try {
+    const headers = createGitHubHeaders(userToken);
+
+    // GitHub API requires POST to /repos/:owner/:repo/forks
+    const response = await axios.post(
+      `${config.apiUrl}/repos/${repoFullName}/forks`,
+      {}, // Empty body for default fork behavior
+      { headers }
+    );
+
+    logGitHubOperation('Repository forked', {
+      originalRepo: repoFullName,
+      newRepo: response.data.full_name
+    });
+
+    return createSuccessResponse(response.data);
+  } catch (error) {
+    logGitHubOperation('Failed to fork repository', {
+      repoFullName,
+      error: error.response?.data || error.message
+    }, true);
+    return createErrorResponse(error, 'Failed to fork repository');
+  }
+};
+
 module.exports = {
   // Repository information
   getRepositoryInfo,
   listUserRepositories,
   getRepositoryBranches,
   checkRepositoryAccess,
+  forkRepository,
 
   // Framework detection
   detectFramework,
@@ -600,6 +626,7 @@ module.exports = {
 
   // Utility functions
   createGitHubHeaders,
+
   createSuccessResponse,
   createErrorResponse,
 

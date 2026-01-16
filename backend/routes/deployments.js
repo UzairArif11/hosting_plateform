@@ -780,9 +780,9 @@ router.delete('/:id', async (req, res) => {
       try {
         const nginxRouter = require('../services/nginxRouter');
         const serverKey = deployment.serverKey; // 'EC2', 'EC3', etc.
-        const serverHost = process.env[`${serverKey}_SERVER_IP`] || 
-                         (serverKey === 'EC2' ? process.env.EC2_SERVER_IP : process.env.EC3_SERVER_IP);
-        
+        const serverHost = process.env[`${serverKey}_SERVER_IP`] ||
+          (serverKey === 'EC2' ? process.env.EC2_SERVER_IP : process.env.EC3_SERVER_IP);
+
         if (serverHost) {
           await nginxRouter.removeNginxRouting(
             deployment._id.toString(),
@@ -803,7 +803,7 @@ router.delete('/:id', async (req, res) => {
         const freeTierContainer = require('../services/freeTierContainer');
         const containerOrchestrator = require('../services/containerOrchestrator');
         const server = containerOrchestrator.ORACLE_SERVERS[deployment.serverKey];
-        
+
         if (server) {
           await freeTierContainer.removeProjectFromUserContainer(
             project,
@@ -835,6 +835,108 @@ router.delete('/:id', async (req, res) => {
   } catch (error) {
     logger.error('Delete deployment error:', error);
     res.status(500).json({ success: false, error: 'Failed to delete deployment' });
+  }
+});
+
+// POST /:id/rollback - Rollback to a previous deployment
+router.post('/:id/rollback', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get the deployment to rollback to
+    const targetDeployment = await Deployment.findById(id).populate('projectId');
+
+    if (!targetDeployment) {
+      return res.status(404).json({ success: false, error: 'Deployment not found' });
+    }
+
+    // Verify deployment was successful
+    if (targetDeployment.status !== 'success') {
+      return res.status(400).json({
+        success: false,
+        error: 'Can only rollback to successful deployments'
+      });
+    }
+
+    const project = targetDeployment.projectId;
+
+    // Check user access (developer or admin required)
+    if (!project.hasAccess(req.user._id, 'developer')) {
+      return res.status(403).json({
+        success: false,
+        error: 'Developer access required to rollback'
+      });
+    }
+
+    // CHECK PLAN FEATURE - Rollback
+    const owner = await User.findById(project.owner).populate('plan');
+    if (!owner || !owner.plan) {
+      return res.status(403).json({ success: false, error: 'Plan information unavailable' });
+    }
+
+    const rollbackFeature = owner.plan.features?.find(f => f.name === 'rollback');
+    if (!rollbackFeature || !rollbackFeature.enabled) {
+      return res.status(403).json({
+        success: false,
+        error: 'Rollback not available in your plan',
+        upgrade: true
+      });
+    }
+
+    // Check rollback retention (how far back can we go?)
+    const retentionDays = rollbackFeature.config?.retentionDays || 30;
+    const cutoffDate = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+
+    if (targetDeployment.createdAt < cutoffDate) {
+      return res.status(403).json({
+        success: false,
+        error: `Can only rollback to deployments within the last ${retentionDays} days`,
+        upgrade: true
+      });
+    }
+
+    // Create new deployment with rollback flag
+    const newDeployment = await Deployment.create({
+      projectId: project._id,
+      userId: req.user._id,
+      branch: targetDeployment.branch,
+      commitSha: targetDeployment.commitSha,
+      commitMessage: targetDeployment.commitMessage || 'Rollback deployment',
+      commitAuthor: targetDeployment.commitAuthor,
+      environment: targetDeployment.environment,
+      trigger: 'rollback',
+      rollbackFrom: targetDeployment._id,
+      status: 'queued',
+      buildCommand: targetDeployment.buildCommand,
+      installCommand: targetDeployment.installCommand,
+      outputDirectory: targetDeployment.outputDirectory,
+      framework: targetDeployment.framework
+    });
+
+    // Add to build queue
+    await buildQueue.addDeployment(
+      newDeployment._id.toString(),
+      project._id.toString(),
+      req.user._id.toString(),
+      { priority: 5 } // High priority for rollbacks
+    );
+
+    logger.info('Rollback initiated', {
+      projectId: project._id,
+      userId: req.user._id,
+      targetDeploymentId: targetDeployment._id,
+      newDeploymentId: newDeployment._id
+    });
+
+    res.json({
+      success: true,
+      deployment: newDeployment,
+      message: `Rolling back to deployment from ${targetDeployment.createdAt.toLocaleString()}`
+    });
+
+  } catch (error) {
+    logger.error('Rollback error:', error);
+    res.status(500).json({ success: false, error: 'Failed to initiate rollback' });
   }
 });
 

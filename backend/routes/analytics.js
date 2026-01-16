@@ -1,0 +1,184 @@
+const express = require('express');
+const router = express.Router();
+const mongoose = require('mongoose');
+const AnalyticsEvent = require('../models/AnalyticsEvent');
+const Project = require('../models/Project');
+const User = require('../models/User'); // Ensure User model is loaded
+const { requireAuth, requireProjectAccess } = require('../middleware/auth');
+const logger = require('../utils/logger');
+// Simple IP-to-Country lookup (mock/placeholder if geoip-lite not available, but usually we'd add it)
+// For now, we'll try to use headers from Nginx or a simple lookup if possible.
+// Note: In a real deploy, 'x-forwarded-for' or specific geo headers from load balancer (Cloudflare/AWS) are best.
+const MockGeo = {
+    lookup: (ip) => ({ country: 'US' })
+};
+
+// POST /api/analytics/collect
+// Public endpoint - called by the tracking script
+router.post('/collect', async (req, res) => {
+    try {
+        const { projectId, path, referrer, visitorId, browser, os, device, screenWidth } = req.body;
+
+        if (!projectId || !visitorId) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        // 1. Load Project and Owner to check Plan Limits
+        // Optimization: Cache this or use a lightweight check if possible. 
+        // For now, standard DB query.
+        const project = await Project.findById(projectId).populate({
+            path: 'owner',
+            populate: { path: 'plan' }
+        });
+
+        if (!project) {
+            return res.status(404).json({ error: 'Project not found' });
+        }
+
+        // 2. CHECK PLAN FEATURE
+        // "admin have power to give feutre to any plain or remove"
+        const owner = project.owner;
+
+        // Safety check if owner or plan is missing (shouldn't happen for active projects)
+        if (!owner || !owner.plan) {
+            // Default to allow or block? Block to save load.
+            return res.status(403).json({ error: 'Plan status unknown' });
+        }
+
+        const analyticsFeature = owner.plan.features?.find(f => f.name === 'analytics');
+
+        // If analytics is strictly disabled for this plan
+        if (!analyticsFeature || !analyticsFeature.enabled) {
+            // We return 200 to not break the client script with errors, but we DO NOT save the event.
+            // This effectively "removes" the feature load from the DB layer.
+            return res.status(200).json({ success: true, ignored: true });
+        }
+
+        // 3. Check Retention/Limits (Optional optimization)
+        // const maxEvents = analyticsFeature.config?.maxEventsPerMonth || 10000;
+        // ... check current month count ...
+
+        // 4. Determine Country (from IP)
+        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        // const geo = geoip.lookup(ip);
+        const country = 'Unknown'; // Placeholder for actual GeoIP impl
+
+        // 5. Save Event
+        await AnalyticsEvent.create({
+            projectId,
+            visitorId, // Created by client fingerprinting usually
+            path,
+            referrer: referrer || 'Direct',
+            browser,
+            os,
+            device,
+            country,
+            timestamp: new Date()
+        });
+
+        res.status(200).json({ success: true });
+
+    } catch (error) {
+        // Don't log full error stack for harmless analytics noise
+        logger.warn('Analytics collect error:', error.message);
+        res.status(500).json({ error: 'Internal error' });
+    }
+});
+
+// GET /api/projects/:id/analytics/summary
+// Protected - used by Dashboard
+router.get('/projects/:id/analytics/summary', requireProjectAccess('viewer'), async (req, res) => {
+    try {
+        const { timeframe = '24h' } = req.query;
+        const project = req.project; // Populated by middleware
+
+        // 1. Check if user has access to VIEW analytics (could be plan restricted too)
+        // If the PROJECT OWNER's plan doesn't have analytics, we shouldn't show data
+        const owner = await User.findById(project.owner).populate('plan');
+        const analyticsFeature = owner.plan?.features?.find(f => f.name === 'analytics');
+
+        if (!analyticsFeature?.enabled) {
+            return res.status(403).json({
+                error: 'Analytics not enabled for this project plan',
+                plan: owner.plan.name
+            });
+        }
+
+        // 2. Calculate Date Range
+        const now = new Date();
+        let startDate = new Date();
+
+        // Default 24h
+        if (timeframe === '7d') startDate.setDate(now.getDate() - 7);
+        else if (timeframe === '30d') startDate.setDate(now.getDate() - 30);
+        else startDate.setHours(now.getHours() - 24);
+
+        // 3. Aggregate Data
+        // Aggregate Page Views by hour/day
+        const matchStage = {
+            projectId: project._id,
+            timestamp: { $gte: startDate }
+        };
+
+        const stats = await AnalyticsEvent.aggregate([
+            { $match: matchStage },
+            {
+                $group: {
+                    _id: {
+                        $dateToString: {
+                            format: timeframe === '24h' ? "%Y-%m-%d %H:00" : "%Y-%m-%d",
+                            date: "$timestamp"
+                        }
+                    },
+                    visitors: { $addToSet: "$visitorId" }, // approx unique visitors
+                    pageViews: { $sum: 1 }
+                }
+            },
+            {
+                $project: {
+                    date: "$_id",
+                    visitors: { $size: "$visitors" },
+                    pageViews: 1,
+                    _id: 0
+                }
+            },
+            { $sort: { date: 1 } }
+        ]);
+
+        // Get Top breakdowns
+        const getTop = async (field) => {
+            return AnalyticsEvent.aggregate([
+                { $match: matchStage },
+                { $group: { _id: `$${field}`, count: { $sum: 1 } } },
+                { $sort: { count: -1 } },
+                { $limit: 5 }
+            ]);
+        };
+
+        const [topPaths, topReferrers, topDevices, topCountries] = await Promise.all([
+            getTop('path'),
+            getTop('referrer'),
+            getTop('device'),
+            getTop('country')
+        ]);
+
+        res.json({
+            success: true,
+            data: {
+                chart: stats,
+                top: {
+                    paths: topPaths,
+                    referrers: topReferrers,
+                    devices: topDevices,
+                    countries: topCountries
+                }
+            }
+        });
+
+    } catch (error) {
+        logger.error('Analytics summary error:', error);
+        res.status(500).json({ error: 'Failed to fetch analytics' });
+    }
+});
+
+module.exports = router;
