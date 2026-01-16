@@ -5,6 +5,7 @@ interface TemplateProps {
     template: {
         _id: string;
         name: string;
+        displayName?: string;
         description: string;
         framework: string;
         previewImage: string;
