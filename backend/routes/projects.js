@@ -628,7 +628,7 @@ router.post('/:id/domains', requireProjectAccess('admin'), async (req, res) => {
   }
 });
 
-});
+
 
 // Verify domain
 router.post('/:id/domains/:domainId/verify', requireProjectAccess('admin'), async (req, res) => {
