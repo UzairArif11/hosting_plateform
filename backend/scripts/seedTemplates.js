@@ -54,7 +54,7 @@ const templates = [
         slug: 'vue-starter',
         displayName: 'Vue.js App',
         description: 'A simple Vue 3 starter project with Vite.',
-        category: 'starting',
+        category: 'other',
         tags: ['vue', 'vite', 'starter'],
         githubRepo: 'vuejs/create-vue', // Placeholder
         githubBranch: 'main',
