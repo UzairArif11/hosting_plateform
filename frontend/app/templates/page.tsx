@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import TemplateCard from '@/components/TemplateCard';
+import TemplateCard from '../../components/TemplateCard';
 
 interface Template {
     _id: string;
