@@ -3,8 +3,6 @@
 # Production/Live Testing Script for Vercel Clone Platform
 # Run this on your production server to verify deployment
 
-set -e
-
 echo "🌐 Vercel Clone Platform - Production Testing Suite"
 echo "===================================================="
 echo ""
@@ -48,10 +46,11 @@ else
     test_failed "DNS resolution failed for $PROD_DOMAIN"
 fi
 
-if curl -sI https://$PROD_DOMAIN | grep -q "200 OK"; then
-    test_passed "HTTPS connection successful"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://$PROD_DOMAIN)
+if [ "$HTTP_CODE" -eq 200 ]; then
+    test_passed "HTTPS connection successful (Status: $HTTP_CODE)"
 else
-    test_info "HTTPS connection status check"
+    test_failed "HTTPS connection failed (Status: $HTTP_CODE)"
 fi
 
 echo ""
@@ -60,11 +59,12 @@ echo ""
 echo "🏥 Step 2: API Health Checks"
 echo "------------------------------"
 
-HEALTH_RESPONSE=$(curl -s $PROD_API_URL/health)
-if echo $HEALTH_RESPONSE | grep -q "healthy"; then
-    test_passed "API health endpoint responding"
+HEALTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" $PROD_API_URL/health)
+if [ "$HEALTH_CODE" -eq 200 ]; then
+    test_passed "API health endpoint responding (Status: $HEALTH_CODE)"
 else
-    test_info "API health check completed"
+    # Try alternate path just in case
+    test_failed "API health check failed (Status: $HEALTH_CODE) at $PROD_API_URL/health"
 fi
 
 echo ""
@@ -74,12 +74,24 @@ echo "🧪 Step 3: Testing Feature Endpoints"
 echo "--------------------------------------"
 
 # Test templates
-curl -s $PROD_API_URL/templates > /dev/null && test_passed "Templates endpoint accessible"
+TEMPLATES_CODE=$(curl -s -o /dev/null -w "%{http_code}" $PROD_API_URL/templates)
+if [ "$TEMPLATES_CODE" -eq 200 ]; then
+    test_passed "Templates endpoint accessible (Status: 200)"
+else
+    test_failed "Templates endpoint failed (Status: $TEMPLATES_CODE)"
+fi
 
 # Test analytics collection
-curl -s -X POST $PROD_API_URL/analytics/collect \
+ANALYTICS_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST $PROD_API_URL/analytics/collect \
   -H "Content-Type: application/json" \
-  -d '{"projectId":"test","visitorId":"test","path":"/"}' > /dev/null && test_passed "Analytics collection responding"
+  -d '{"projectId":"test","visitorId":"test","path":"/"}')
+
+# Analytics might return 200 or 201 or 204
+if [[ "$ANALYTICS_CODE" =~ ^2 ]]; then
+    test_passed "Analytics collection responding (Status: $ANALYTICS_CODE)"
+else
+    test_failed "Analytics collection failed (Status: $ANALYTICS_CODE)"
+fi
 
 echo ""
 
@@ -88,8 +100,17 @@ echo "===================================================="
 echo "📊 Production Test Summary"
 echo "===================================================="
 echo -e "Tests Passed: ${GREEN}$TESTS_PASSED${NC}"
+echo -e "Tests Failed: ${RED}$TESTS_FAILED${NC}"
 echo ""
 echo "Production Environment:"
 echo "  Domain:   https://$PROD_DOMAIN"
 echo "  API:      $PROD_API_URL"
 echo ""
+
+if [ "$TESTS_FAILED" -eq 0 ]; then
+    echo -e "${GREEN}🎉 ALL SYSTEMS OPERATIONAL${NC}"
+    exit 0
+else
+    echo -e "${RED}⚠️  SOME CHECKS FAILED${NC}"
+    exit 1
+fi

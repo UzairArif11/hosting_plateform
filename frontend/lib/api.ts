@@ -37,6 +37,14 @@ api.interceptors.response.use(
     async (error) => {
         const originalRequest = error.config;
 
+        // Skip if the request is already for the refresh endpoint to prevent infinite loops
+        if (originalRequest.url?.includes('/auth/refresh')) {
+            if (typeof window !== 'undefined') {
+                window.location.href = '/login';
+            }
+            return Promise.reject(error);
+        }
+
         // If 401 and not already retried, try to refresh token
         if (error.response?.status === 401 && !originalRequest._retry) {
             originalRequest._retry = true;
