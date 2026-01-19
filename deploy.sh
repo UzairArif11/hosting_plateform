@@ -33,7 +33,7 @@ cd ..
 echo "🌱 Step 3: Checking database..."
 
 # Load env vars from backend/.env for the check
-export $(grep -v '^#' backend/.env | xargs)
+export $(grep -v '^#' backend/.env | sed 's/#.*//g' | xargs)
 
 # Check if templates exist
 TEMPLATE_COUNT=$(node -e "
