@@ -24,6 +24,12 @@ const nextConfig = {
             },
         ];
     },
+    // Allow Server Actions from specific origins (fix for "Missing origin header" behind proxy)
+    experimental: {
+        serverActions: {
+            allowedOrigins: ['foodpanda.site', 'www.foodpanda.site', 'localhost:3000'],
+        },
+    },
 };
 
 module.exports = nextConfig;
