@@ -567,43 +567,98 @@ export default function PlanManagement() {
                             <div>
                                 <div className="flex justify-between items-center mb-3">
                                     <h3 className="text-lg font-semibold text-white">Features</h3>
-                                    <button
-                                        type="button"
-                                        onClick={addFeature}
-                                        className="text-sm text-purple-400 hover:text-purple-300 flex items-center gap-1"
-                                    >
-                                        <PlusIcon className="h-4 w-4" />
-                                        Add Feature
-                                    </button>
+                                    <div className="flex gap-2">
+                                        {/* Predefined Features Dropdown */}
+                                        <select
+                                            onChange={(e) => {
+                                                if (!e.target.value) return;
+                                                // Check if feature already exists
+                                                if (editingPlan.features?.some(f => f.name === e.target.value)) return;
+
+                                                const predefinedFeatures: Record<string, string> = {
+                                                    'templates': 'Access to deployment templates',
+                                                    'rollback': 'Instant deployment rollback',
+                                                    'environments': 'Multiple environments (Staging, Prod)',
+                                                    'teamCollaboration': 'Invite members to projects',
+                                                    'analytics': 'Detailed usage analytics',
+                                                    'customDomains': 'Use your own domain names',
+                                                    'ssl': 'Free automated SSL',
+                                                    'ddos': 'Basic DDoS mitigation',
+                                                    'prioritySupport': '24/7 priority email support',
+                                                    'sso': 'Single Sign-On (Enterprise)',
+                                                    'auditLogs': 'Security audit trails',
+                                                    'sla': '99.9% Uptime SLA'
+                                                };
+
+                                                setEditingPlan({
+                                                    ...editingPlan,
+                                                    features: [...(editingPlan.features || []), {
+                                                        name: e.target.value,
+                                                        description: predefinedFeatures[e.target.value] || ''
+                                                    }]
+                                                });
+                                                e.target.value = ''; // Reset select
+                                            }}
+                                            className="bg-gray-800 text-sm text-gray-300 border border-gray-700 rounded-lg px-3 py-1 outline-none focus:border-purple-500"
+                                        >
+                                            <option value="">+ Add System Feature</option>
+                                            <option value="templates">Templates Access</option>
+                                            <option value="rollback">Rollbacks</option>
+                                            <option value="environments">Environments</option>
+                                            <option value="teamCollaboration">Team Collaboration</option>
+                                            <option value="analytics">Analytics</option>
+                                            <option value="customDomains">Custom Domains</option>
+                                            <option value="ssl">SSL Certificates</option>
+                                            <option value="ddos">DDoS Protection</option>
+                                            <option value="prioritySupport">Priority Support</option>
+                                            <option value="sso">SSO</option>
+                                            <option value="auditLogs">Audit Logs</option>
+                                            <option value="sla">SLA Guarantee</option>
+                                        </select>
+
+                                        <button
+                                            type="button"
+                                            onClick={addFeature}
+                                            className="text-sm text-purple-400 hover:text-purple-300 flex items-center gap-1 bg-purple-500/10 px-3 py-1 rounded-lg"
+                                        >
+                                            <PlusIcon className="h-4 w-4" />
+                                            Custom
+                                        </button>
+                                    </div>
                                 </div>
-                                <div className="space-y-3">
+                                <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
                                     {editingPlan.features?.map((feature, index) => (
-                                        <div key={index} className="flex gap-2 items-start bg-gray-800/50 p-3 rounded-lg">
-                                            <div className="flex-1 grid grid-cols-2 gap-2">
+                                        <div key={index} className="flex gap-2 items-start bg-gray-800/50 p-3 rounded-lg border border-gray-700/50">
+                                            <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-2">
                                                 <input
                                                     type="text"
                                                     value={feature.name}
                                                     onChange={(e) => updateFeature(index, 'name', e.target.value)}
-                                                    className="bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm"
+                                                    className="bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm font-medium"
                                                     placeholder="Feature name"
                                                 />
                                                 <input
                                                     type="text"
                                                     value={feature.description}
                                                     onChange={(e) => updateFeature(index, 'description', e.target.value)}
-                                                    className="bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm"
+                                                    className="bg-gray-700 border border-gray-600 rounded px-3 py-2 text-gray-300 text-sm"
                                                     placeholder="Description"
                                                 />
                                             </div>
                                             <button
                                                 type="button"
                                                 onClick={() => removeFeature(index)}
-                                                className="text-red-400 hover:text-red-300 p-2"
+                                                className="text-red-400 hover:text-red-300 p-2 hover:bg-red-500/10 rounded transition"
                                             >
                                                 <XMarkIcon className="h-5 w-5" />
                                             </button>
                                         </div>
                                     ))}
+                                    {(!editingPlan.features || editingPlan.features.length === 0) && (
+                                        <p className="text-sm text-gray-500 text-center py-4 bg-gray-800/30 rounded border border-dashed border-gray-700">
+                                            No features added. Select a preset or add a custom one.
+                                        </p>
+                                    )}
                                 </div>
                             </div>
 

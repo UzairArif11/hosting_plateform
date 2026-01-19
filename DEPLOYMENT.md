@@ -95,6 +95,7 @@ cd d:/work/platform
 ```bash
 cd d:/work/platform
 node backend/scripts/seedTemplates.js  # Seed database
+chmod +x deploy.sh
 ./deploy.sh                             # Deploy
 ./test-production.sh                    # Verify
 ```
