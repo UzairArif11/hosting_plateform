@@ -72,6 +72,9 @@ export default function AdminLayout({
                         <a href="/admin/plans" className="block px-4 py-2 text-gray-300 hover:bg-gray-800 rounded-lg">
                             💳 Plans
                         </a>
+                        <a href="/admin/templates" className="block px-4 py-2 text-gray-300 hover:bg-gray-800 rounded-lg">
+                            📑 Templates
+                        </a>
                         <a href="/admin/capacity" className="block px-4 py-2 text-gray-300 hover:bg-gray-800 rounded-lg">
                             📊 Capacity Management
                         </a>

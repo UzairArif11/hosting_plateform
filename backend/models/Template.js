@@ -118,6 +118,11 @@ const templateSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    minPlan: {
+        type: String,
+        enum: ['free', 'pro', 'enterprise'],
+        default: 'free'
+    },
     isPublished: {
         type: Boolean,
         default: true

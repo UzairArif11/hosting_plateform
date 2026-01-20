@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useSelector } from 'react-redux';
+import { RootState } from '@/lib/store';
 import TemplateCard from '../../components/TemplateCard';
 
 interface Template {
@@ -13,10 +15,13 @@ interface Template {
     category: string;
     tags: string[];
     isPremium: boolean;
+    minPlan?: 'free' | 'pro' | 'enterprise';
+    previewUrl?: string;
     deployCount: number;
 }
 
 export default function TemplatesPage() {
+    const { user } = useSelector((state: RootState) => state.auth);
     const [templates, setTemplates] = useState<Template[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
@@ -113,7 +118,11 @@ export default function TemplatesPage() {
                         {templates.length > 0 ? (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 {templates.map(template => (
-                                    <TemplateCard key={template._id} template={template} />
+                                    <TemplateCard
+                                        key={template._id}
+                                        template={template}
+                                        userPlan={user?.plan?.name?.toLowerCase() || 'free'}
+                                    />
                                 ))}
                             </div>
                         ) : (

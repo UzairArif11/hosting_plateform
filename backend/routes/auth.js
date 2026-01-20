@@ -370,13 +370,13 @@ const handleGitHubCallback = async (req, res) => {
     // In production with HTTPS, use secure cookies with sameSite: 'none' for OAuth redirects
     const isProduction = process.env.NODE_ENV === 'production';
     const isHTTPS = process.env.FRONTEND_URL?.startsWith('https://') || isProduction;
-    
+
     logger.info('🍪 Step 2: Setting authentication cookie...', {
       isProduction,
       isHTTPS,
       frontendURL: process.env.FRONTEND_URL
     });
-    
+
     res.cookie('auth_token', token, {
       httpOnly: true,
       secure: isHTTPS, // Must be true for HTTPS
@@ -401,14 +401,14 @@ const handleGitHubCallback = async (req, res) => {
     const frontendURL = process.env.FRONTEND_URL || 'http://localhost:3000';
     const targetPath = req.user.role === 'admin' ? '/admin' : '/dashboard';
     const redirectURL = `${frontendURL}${targetPath}`;
-    
+
     logger.info('🔄 Step 4: Redirecting user...', {
       redirectURL,
       role: req.user.role,
       targetPath
     });
     logger.info('═══════════════════════════════════════════════════════════');
-    
+
     res.redirect(redirectURL);
   } catch (error) {
     logger.error('═══════════════════════════════════════════════════════════');
@@ -422,13 +422,13 @@ const handleGitHubCallback = async (req, res) => {
       userId: req.user?._id?.toString() || null,
       stack: error.stack
     });
-    
+
     if (error.errors) {
       logger.error('Validation Errors:', error.errors);
     }
-    
+
     logger.error('═══════════════════════════════════════════════════════════');
-    
+
     const frontendURL = process.env.FRONTEND_URL || 'http://localhost:3000';
     res.redirect(`${frontendURL}/login?error=callback_failed`);
   }
@@ -478,7 +478,12 @@ const getCurrentUser = async (req, res) => {
         role: user.role,
         status: user.status,
         subscriptionStatus: user.subscriptionStatus,
-        plan: user.plan,
+        plan: user.plan ? {
+          name: user.plan.name,
+          displayName: user.plan.displayName,
+          features: user.plan.features,
+          resources: user.plan.resources
+        } : null,
         trialDaysRemaining: user.trialDaysRemaining,
         isTrialActive: user.isTrialActive,
 
@@ -675,7 +680,7 @@ const refreshToken = async (req, res) => {
 router.get('/github', handleGitHubOAuthStart);
 
 router.get('/github/callback',
-  passport.authenticate('github', { 
+  passport.authenticate('github', {
     failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login?error=auth_failed`,
     session: false // OAuth doesn't need sessions
   }),
@@ -816,7 +821,12 @@ const handleLogin = async (req, res) => {
         email: user.email,
         displayName: user.displayName,
         role: user.role, // Added for frontend redirection
-        plan: user.plan?.name || 'free'
+        plan: user.plan ? {
+          name: user.plan.name,
+          displayName: user.plan.displayName,
+          features: user.plan.features,
+          resources: user.plan.resources
+        } : null
       }
     });
 
