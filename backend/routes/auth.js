@@ -479,6 +479,7 @@ const getCurrentUser = async (req, res) => {
         status: user.status,
         subscriptionStatus: user.subscriptionStatus,
         plan: user.plan ? {
+          _id: user.plan._id,
           name: user.plan.name,
           displayName: user.plan.displayName,
           features: user.plan.features,
@@ -822,11 +823,12 @@ const handleLogin = async (req, res) => {
         displayName: user.displayName,
         role: user.role, // Added for frontend redirection
         plan: user.plan ? {
+          _id: user.plan._id,
           name: user.plan.name,
           displayName: user.plan.displayName,
           features: user.plan.features,
           resources: user.plan.resources
-        } : null
+        } : null,
       }
     });
 
