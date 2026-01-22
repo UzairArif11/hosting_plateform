@@ -153,16 +153,22 @@ export default function BillingPage() {
                                         <ul className="space-y-3 mb-6">
                                             {/* Auto-generated features based on resources if features list is empty or generic */}
                                             {plan.features && plan.features.length > 0 ? (
-                                                plan.features.map((feature: any, index: number) => (
-                                                    <li key={index} className="flex items-start space-x-2">
-                                                        <CheckIcon className="h-5 w-5 text-green-500 flex-shrink-0 mt-0.5" />
-                                                        <span className="text-gray-300 text-sm">
-                                                            {typeof feature === 'string'
-                                                                ? feature
-                                                                : feature.name || feature.description || feature.text || JSON.stringify(feature)}
-                                                        </span>
-                                                    </li>
-                                                ))
+                                                plan.features
+                                                    .filter((feature: any) => {
+                                                        // Only show enabled features
+                                                        if (typeof feature === 'string') return true;
+                                                        return feature.enabled !== false; // Default to enabled if not specified
+                                                    })
+                                                    .map((feature: any, index: number) => (
+                                                        <li key={index} className="flex items-start space-x-2">
+                                                            <CheckIcon className="h-5 w-5 text-green-500 flex-shrink-0 mt-0.5" />
+                                                            <span className="text-gray-300 text-sm">
+                                                                {typeof feature === 'string'
+                                                                    ? feature
+                                                                    : feature.displayName || feature.name || feature.description || feature.text || JSON.stringify(feature)}
+                                                            </span>
+                                                        </li>
+                                                    ))
                                             ) : (
                                                 <>
                                                     <li className="flex items-start space-x-2">

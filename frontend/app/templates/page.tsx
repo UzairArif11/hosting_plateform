@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useSelector } from 'react-redux';
 import { RootState } from '@/lib/store';
 import TemplateCard from '../../components/TemplateCard';
+import FeatureGuard from '@/components/FeatureGuard';
 
 interface Template {
     _id: string;
@@ -21,6 +22,14 @@ interface Template {
 }
 
 export default function TemplatesPage() {
+    return (
+        <FeatureGuard feature="templates">
+            <TemplatesPageContent />
+        </FeatureGuard>
+    );
+}
+
+function TemplatesPageContent() {
     const { user } = useSelector((state: RootState) => state.auth);
     const [templates, setTemplates] = useState<Template[]>([]);
     const [loading, setLoading] = useState(true);

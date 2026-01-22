@@ -16,22 +16,13 @@ import {
 } from '@heroicons/react/24/outline';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
+import { hasFeature } from '@/lib/features';
 
 export default function Sidebar() {
     const pathname = usePathname();
     const dispatch = useDispatch<AppDispatch>();
     const router = useRouter();
     const { user } = useSelector((state: RootState) => state.auth);
-
-    // Helper to check if a feature is enabled
-    const hasFeature = (key: string) => {
-        if (!user?.plan?.features) return false;
-        // Handle both array of strings and array of objects
-        return user.plan.features.some((f: any) => {
-            if (typeof f === 'string') return f === key;
-            return f.name === key && f.enabled;
-        });
-    };
 
     const navigation = [
         { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
