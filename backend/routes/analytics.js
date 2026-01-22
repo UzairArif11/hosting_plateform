@@ -23,6 +23,10 @@ router.post('/collect', async (req, res) => {
             return res.status(400).json({ error: 'Missing required fields' });
         }
 
+        if (!mongoose.Types.ObjectId.isValid(projectId)) {
+            return res.status(400).json({ error: 'Invalid Project ID format' });
+        }
+
         // 1. Load Project and Owner to check Plan Limits
         // Optimization: Cache this or use a lightweight check if possible. 
         // For now, standard DB query.
