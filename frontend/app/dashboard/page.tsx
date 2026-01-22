@@ -14,7 +14,11 @@ import {
     PlusIcon,
     CreditCardIcon,
     Cog6ToothIcon,
+    CheckIcon,
+    LockClosedIcon,
+    SparklesIcon,
 } from '@heroicons/react/24/outline';
+import { useFeaturesStatus } from '@/lib/features';
 
 // TEST: Module-level logging
 console.log('═══════════════════════════════════════════════════════');
@@ -29,6 +33,7 @@ export default function DashboardPage() {
     const dispatch = useDispatch<AppDispatch>();
     const { projects, loading } = useSelector((state: RootState) => state.projects);
     const { user } = useSelector((state: RootState) => state.auth);
+    const featuresStatus = useFeaturesStatus();
 
     // Socket state for testing
     const [socketStatus, setSocketStatus] = useState<string>('Initializing');
@@ -144,6 +149,55 @@ export default function DashboardPage() {
                 ))}
             </div>
 
+            {/* Your Features */}
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-xl font-semibold text-white">Your Plan Features</h2>
+                    <Link
+                        href="/dashboard/billing"
+                        className="text-sm text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1"
+                    >
+                        <SparklesIcon className="h-4 w-4" />
+                        Upgrade
+                    </Link>
+                </div>
+                <p className="text-gray-400 text-sm mb-4">
+                    Features enabled for your current plan. Upgrade to unlock more.
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                    {featuresStatus.map(({ key, label, enabled }) => (
+                        <div
+                            key={key}
+                            className={`flex items-center gap-2 rounded-lg px-3 py-2.5 border transition-colors ${
+                                enabled
+                                    ? 'bg-green-500/10 border-green-500/30 text-green-300'
+                                    : 'bg-gray-800/50 border-gray-700 text-gray-500'
+                            }`}
+                        >
+                            {enabled ? (
+                                <CheckIcon className="h-5 w-5 text-green-500 flex-shrink-0" />
+                            ) : (
+                                <LockClosedIcon className="h-5 w-5 text-gray-600 flex-shrink-0" />
+                            )}
+                            <span className="text-sm font-medium truncate" title={label}>
+                                {label}
+                            </span>
+                        </div>
+                    ))}
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                    {featuresStatus.some((f) => !f.enabled) && (
+                        <Link
+                            href="/dashboard/billing"
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-colors"
+                        >
+                            <SparklesIcon className="h-4 w-4" />
+                            Unlock more features
+                        </Link>
+                    )}
+                </div>
+            </div>
+
             {/* Recent Projects */}
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
                 <div className="flex items-center justify-between mb-6">
@@ -214,7 +268,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Quick Actions */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className={`grid grid-cols-1 gap-6 ${featuresStatus.find((f) => f.key === 'templates')?.enabled ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
                 <Link
                     href="/dashboard/projects"
                     className="bg-gradient-to-br from-purple-600 to-purple-700 rounded-xl p-6 hover:from-purple-700 hover:to-purple-800 transition-all transform hover:scale-105"
@@ -223,6 +277,17 @@ export default function DashboardPage() {
                     <h3 className="text-lg font-semibold text-white mb-2">New Project</h3>
                     <p className="text-purple-100 text-sm">Deploy a new project from GitHub</p>
                 </Link>
+
+                {featuresStatus.find((f) => f.key === 'templates')?.enabled && (
+                    <Link
+                        href="/templates"
+                        className="bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-xl p-6 hover:from-indigo-700 hover:to-indigo-800 transition-all transform hover:scale-105"
+                    >
+                        <SparklesIcon className="h-8 w-8 text-white mb-3" />
+                        <h3 className="text-lg font-semibold text-white mb-2">Deploy from Template</h3>
+                        <p className="text-indigo-100 text-sm">One-click starter templates</p>
+                    </Link>
+                )}
 
                 <Link
                     href="/dashboard/billing"

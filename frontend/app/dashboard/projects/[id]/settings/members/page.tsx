@@ -3,8 +3,17 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { toast } from 'react-hot-toast';
+import FeatureGuard from '@/components/FeatureGuard';
 
 export default function MembersPage() {
+    return (
+        <FeatureGuard feature="teamCollaboration">
+            <MembersPageContent />
+        </FeatureGuard>
+    );
+}
+
+function MembersPageContent() {
     const params = useParams();
     const [project, setProject] = useState<any>(null);
     const [invitations, setInvitations] = useState<any[]>([]);

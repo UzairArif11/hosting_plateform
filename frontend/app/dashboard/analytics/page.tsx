@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useAppSelector } from '@/lib/hooks';
 import api from '@/lib/api';
+import FeatureGuard from '@/components/FeatureGuard';
 import {
     ChartBarIcon,
     ArrowTrendingUpIcon,
@@ -11,6 +12,14 @@ import {
 } from '@heroicons/react/24/outline';
 
 export default function AnalyticsPage() {
+    return (
+        <FeatureGuard feature="analytics">
+            <AnalyticsPageContent />
+        </FeatureGuard>
+    );
+}
+
+function AnalyticsPageContent() {
     const { user } = useAppSelector((state) => state.auth);
     const [stats, setStats] = useState({
         totalDeployments: 0,

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import api from '@/lib/api';
+import FeatureGuard from '@/components/FeatureGuard';
 import {
     ShieldCheckIcon,
     ClockIcon,
@@ -10,6 +11,14 @@ import {
 } from '@heroicons/react/24/outline';
 
 export default function AuditLogsPage() {
+    return (
+        <FeatureGuard feature="auditLogs">
+            <AuditLogsPageContent />
+        </FeatureGuard>
+    );
+}
+
+function AuditLogsPageContent() {
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [page, setPage] = useState(1);

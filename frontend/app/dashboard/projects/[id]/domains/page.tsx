@@ -3,8 +3,17 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { toast } from 'react-hot-toast';
+import FeatureGuard from '@/components/FeatureGuard';
 
 export default function DomainsPage() {
+    return (
+        <FeatureGuard feature="customDomains">
+            <DomainsPageContent />
+        </FeatureGuard>
+    );
+}
+
+function DomainsPageContent() {
     const params = useParams();
     const [project, setProject] = useState<any>(null);
     const [loading, setLoading] = useState(true);

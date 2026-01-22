@@ -15,9 +15,11 @@ interface Deployment {
 interface DeploymentListProps {
     deployments: Deployment[];
     onRollback: () => void;
+    /** When false, Rollback button is hidden. Default true for backward compatibility. */
+    canRollback?: boolean;
 }
 
-export default function DeploymentList({ deployments, onRollback }: DeploymentListProps) {
+export default function DeploymentList({ deployments, onRollback, canRollback = true }: DeploymentListProps) {
     const [rolling, setRolling] = useState<string | null>(null);
 
     const handleRollback = async (deploymentId: string) => {
@@ -83,7 +85,7 @@ export default function DeploymentList({ deployments, onRollback }: DeploymentLi
                         </div>
                     </div>
 
-                    {deployment.status === 'success' && deployment.trigger !== 'rollback' && (
+                    {canRollback && deployment.status === 'success' && deployment.trigger !== 'rollback' && (
                         <button
                             onClick={() => handleRollback(deployment._id)}
                             disabled={rolling === deployment._id}

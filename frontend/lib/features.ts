@@ -8,6 +8,38 @@
 import { useSelector } from 'react-redux';
 import { RootState } from '@/lib/store';
 
+/** System feature keys (must match admin plans SYSTEM_FEATURES) */
+export const SYSTEM_FEATURE_KEYS = [
+    'templates',
+    'rollback',
+    'teamCollaboration',
+    'analytics',
+    'customDomains',
+    'environments',
+    'ssl',
+    'ddos',
+    'prioritySupport',
+    'sso',
+    'auditLogs',
+    'sla',
+] as const;
+
+/** Human-readable labels for feature keys */
+export const FEATURE_LABELS: Record<string, string> = {
+    templates: 'Deployment Templates',
+    rollback: 'Rollbacks',
+    teamCollaboration: 'Team Collaboration',
+    analytics: 'Analytics',
+    customDomains: 'Custom Domains',
+    environments: 'Environments',
+    ssl: 'SSL Certificates',
+    ddos: 'DDoS Protection',
+    prioritySupport: 'Priority Support',
+    sso: 'SSO',
+    auditLogs: 'Audit Logs',
+    sla: 'SLA Guarantee',
+};
+
 /**
  * Check if a user has access to a specific feature
  * @param key - Feature key (e.g., 'templates', 'analytics')
@@ -16,14 +48,31 @@ import { RootState } from '@/lib/store';
 export const hasFeature = (key: string): boolean => {
     const { user } = useSelector((state: RootState) => state.auth);
     
-    if (!user?.plan?.features) return false;
+    if (!user?.plan?.features) {
+        console.warn(`⚠️ hasFeature('${key}') - No plan features found`, {
+            hasUser: !!user,
+            hasPlan: !!user?.plan,
+            planName: user?.plan?.name,
+        });
+        return false;
+    }
     
-    return user.plan.features.some((f: any) => {
+    const hasAccess = user.plan.features.some((f: any) => {
         // Handle both string and object formats
-        if (typeof f === 'string') return f === key;
+        if (typeof f === 'string') {
+            return f === key;
+        }
         // Feature is enabled by default if not specified
-        return f.name === key && f.enabled !== false;
+        const matches = f.name === key;
+        const enabled = f.enabled !== false; // Default to enabled if not specified
+        return matches && enabled;
     });
+    
+    if (hasAccess) {
+        console.log(`✅ hasFeature('${key}') = true`);
+    }
+    
+    return hasAccess;
 };
 
 /**
@@ -113,4 +162,18 @@ export const checkFeatureAccess = (user: any, key: string): boolean => {
         if (typeof f === 'string') return f === key;
         return f.name === key && f.enabled !== false;
     });
+};
+
+/**
+ * Hook: get status of all system features for current user
+ * @returns Array of { key, label, enabled }
+ */
+export const useFeaturesStatus = (): { key: string; label: string; enabled: boolean }[] => {
+    const { user } = useSelector((state: RootState) => state.auth);
+    
+    return SYSTEM_FEATURE_KEYS.map((key) => ({
+        key,
+        label: FEATURE_LABELS[key] || key,
+        enabled: checkFeatureAccess(user, key),
+    }));
 };

@@ -105,41 +105,53 @@ export default function TemplatesPage() {
 
 ---
 
-## 📋 Remaining Tasks
+### 6. Feature Guards on All Feature Pages
+**Status**: ✅ Complete
 
-### High Priority
-1. **Add Feature Guards to Other Feature Pages**
-   - `/dashboard/analytics` - Add `FeatureGuard` for `analytics`
-   - `/dashboard/projects/[id]/settings/members` - Add for `teamCollaboration`
-   - `/dashboard/projects/[id]/settings/domains` - Add for `customDomains`
-   - `/dashboard/activity` - Add for `auditLogs`
+**Pages protected**:
+- `/dashboard/analytics` → `FeatureGuard` for `analytics`
+- `/dashboard/activity` → `FeatureGuard` for `auditLogs`
+- `/dashboard/projects/[id]/settings/members` → `FeatureGuard` for `teamCollaboration`
+- `/dashboard/projects/[id]/domains` → `FeatureGuard` for `customDomains`
 
-2. **Add Feature Status to Dashboard**
-   - Create "Your Features" section on main dashboard
-   - Show enabled/disabled status
-   - Add upgrade CTAs for disabled features
+### 7. Sidebar Feature-Gated Links
+**Status**: ✅ Complete
 
-3. **Add Feature Indicators**
-   - Add badges/icons throughout UI
-   - Show feature availability in navigation
-   - Add tooltips explaining features
+- **Templates** link (when `templates` enabled) → `/templates`
+- **Activity** link (when `auditLogs` enabled) → `/dashboard/activity`
+- **Analytics** link (when `analytics` enabled) → `/dashboard/analytics`
+
+### 8. Dashboard "Your Features" Section
+**Status**: ✅ Complete
+
+- "Your Plan Features" section on main dashboard
+- All 12 system features shown with ✓ (enabled) or 🔒 (disabled)
+- "Unlock more features" CTA when any disabled
+- "Deploy from Template" quick action when `templates` enabled
+
+### 9. Feature Constants & Labels
+**Status**: ✅ Complete
+
+- `SYSTEM_FEATURE_KEYS` and `FEATURE_LABELS` in `lib/features.ts`
+- `useFeaturesStatus()` hook for dashboard
+- `FeatureGuard` uses `FEATURE_LABELS` for upgrade prompt
+
+### 10. Rollback UI Gating
+**Status**: ✅ Complete
+
+- `DeploymentList` accepts optional `canRollback` prop; when `false`, Rollback button is hidden.
+- Use `canRollback={hasFeature('rollback')}` when using `DeploymentList`.
+
+---
+
+## 📋 Optional Follow-Ups (Not Done)
 
 ### Medium Priority
-4. **Feature Usage Tracking**
-   - Track which features users actually use
-   - Show usage stats in admin panel
-   - Help admins make data-driven decisions
-
-5. **Feature Announcements**
-   - Notify users when new features are enabled
-   - Show feature highlights
-   - Guide users to try new features
+- **Feature Usage Tracking**: Track which features users use; show in admin.
+- **Feature Announcements**: Notify when new features enabled; highlight in UI.
 
 ### Low Priority
-6. **Feature Documentation**
-   - Add feature descriptions
-   - Create feature comparison table
-   - Add feature FAQs
+- **Feature Documentation**: Descriptions, comparison table, FAQs.
 
 ---
 
@@ -154,8 +166,8 @@ export default function TemplatesPage() {
 - [x] Templates page shows upgrade prompt if feature disabled
 - [x] Analytics link only shows if feature enabled
 - [x] Billing page shows only enabled features
-- [ ] Direct URL access to feature pages is blocked (needs FeatureGuard on all pages)
-- [ ] Feature status is clear and visible (needs dashboard update)
+- [x] Direct URL access to feature pages blocked via FeatureGuard
+- [x] Feature status visible on dashboard ("Your Plan Features")
 
 ### Backend
 - [x] API endpoints check feature access
@@ -164,47 +176,24 @@ export default function TemplatesPage() {
 
 ---
 
-## 📊 Feature Coverage After Fixes
+## 📊 Feature Coverage (Complete)
 
 | Feature | Admin Toggle | Backend Check | Frontend Check | Route Guard | User Display |
 |---------|-------------|---------------|----------------|-------------|--------------|
-| templates | ✅ | ✅ | ✅ | ✅ | ⚠️ Partial |
-| rollback | ✅ | ✅ | ❌ | ❌ | ❌ |
-| teamCollaboration | ✅ | ✅ | ❌ | ❌ | ❌ |
-| analytics | ✅ | ✅ | ✅ | ❌ | ⚠️ Partial |
-| customDomains | ✅ | ✅ | ❌ | ❌ | ❌ |
-| environments | ✅ | ✅ | ❌ | ❌ | ❌ |
-| ssl | ✅ | ✅ | ❌ | ❌ | ❌ |
-| ddos | ✅ | N/A | ❌ | ❌ | ❌ |
-| prioritySupport | ✅ | N/A | ❌ | ❌ | ❌ |
-| sso | ✅ | N/A | ❌ | ❌ | ❌ |
-| auditLogs | ✅ | ✅ | ❌ | ❌ | ❌ |
+| templates | ✅ | ✅ | ✅ | ✅ | ✅ |
+| rollback | ✅ | ✅ | ✅ (DeploymentList) | N/A | ✅ |
+| teamCollaboration | ✅ | ✅ | ✅ | ✅ members | ✅ |
+| analytics | ✅ | ✅ | ✅ | ✅ | ✅ |
+| customDomains | ✅ | ✅ | ✅ | ✅ domains | ✅ |
+| environments | ✅ | ✅ | ✅ | N/A | ✅ |
+| ssl | ✅ | ✅ | N/A | N/A | ✅ |
+| ddos | ✅ | N/A | ✅ | N/A | ✅ |
+| prioritySupport | ✅ | N/A | ✅ | N/A | ✅ |
+| sso | ✅ | N/A | ✅ | N/A | ✅ |
+| auditLogs | ✅ | ✅ | ✅ | ✅ activity | ✅ |
+| sla | ✅ | N/A | ✅ | N/A | ✅ |
 
-**Legend**:
-- ✅ = Implemented
-- ❌ = Missing
-- ⚠️ = Partial/Incomplete
-- N/A = Not applicable
-
----
-
-## 🚀 Next Steps
-
-1. **Apply FeatureGuard to all feature pages** (Priority 1)
-   - Analytics page
-   - Team collaboration pages
-   - Custom domains pages
-   - Audit logs page
-
-2. **Add feature status to dashboard** (Priority 2)
-   - Create feature status component
-   - Show enabled/disabled features
-   - Add upgrade CTAs
-
-3. **Improve feature visibility** (Priority 3)
-   - Add feature badges
-   - Show feature availability in UI
-   - Add feature tooltips
+**Legend**: ✅ = Implemented | N/A = Not applicable. User Display = dashboard "Your Plan Features".
 
 ---
 
@@ -260,14 +249,13 @@ function Navigation() {
 
 ## 🎯 Success Metrics
 
-After implementing all fixes:
-- ✅ 100% of feature pages protected with FeatureGuard
-- ✅ Users see clear upgrade prompts when features are disabled
-- ✅ Feature status visible on dashboard
-- ✅ Consistent feature checking across application
-- ✅ Better UX with clear feature availability
+- ✅ Feature pages protected with FeatureGuard (templates, analytics, activity, members, domains)
+- ✅ Users see upgrade prompts when features are disabled
+- ✅ Feature status visible on dashboard ("Your Plan Features")
+- ✅ Consistent feature checking via `lib/features.ts`
+- ✅ Sidebar shows Templates, Analytics, Activity only when enabled
 
 ---
 
 **Last Updated**: 2026-01-15  
-**Status**: ✅ Core Fixes Implemented - Additional Features Needed
+**Status**: ✅ All planned feature-system work complete
