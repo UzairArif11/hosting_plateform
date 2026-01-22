@@ -31,22 +31,29 @@ This document provides a deep review of the implementation status for all 12 sys
 4.  Find Version 1 and click **"Rollback"** (or Redeploy).
 5.  **Verify:** The live URL should now show Version 1 content.
 
+### 3. Analytics
+*   **Backend Status:** ✅ **Fully Implemented** (`routes/analytics.js` collects data correctly).
+*   **Frontend Status:** ❌ **Stub/Placeholder** (`analytics/page.tsx` shows static/empty data).
+*   **Verdict:** The system collects data but you cannot see it on the dashboard yet. You need to implement the frontend chart fetching.
+*   **How to Test Backend:** You can manually call `POST /api/analytics/collect` and check the MongoDB `analytics_events` collection.
+
+### 4. Custom Domains (✅ Implemented)
+**How it works:** `nginxRouter.js` updates the Nginx server block to listen on the custom domain.
+**How to Test:**
+1.  Point a domain (e.g., `test.yourdomain.com`) to your server IP via A Record.
+2.  Go to **Project Settings > Domains**.
+3.  Add `test.yourdomain.com`.
+4.  **Verify:** Visiting `http://test.yourdomain.com` loads your project.
+
 ### 2. Team Collaboration (✅ Implemented)
+**Location:** Go to **Project Dashboard -> Settings -> Team Members** (Not on the main sidebar).
 **How it works:** Project owners can invite users via email to join a specific project.
 **How to Test:**
 1.  Log in as User A (Owner).
-2.  Go to **Project Settings > Team**.
+2.  Go to **Project Settings > Team Members**.
 3.  Invite User B (email must exist in system).
 4.  Log in as User B.
 5.  **Verify:** User B should see User A's project in their dashboard and be able to deploy/manage it.
-
-### 3. Analytics (✅ Implemented)
-**How it works:** `routes/analytics.js` receives events. The dashboard queries these events.
-**How to Test:**
-1.  Open your deployed project URL.
-2.  Refresh the page a few times.
-3.  Go to **Project Dashboard > Analytics**.
-4.  **Verify:** The "Total Views" count should increase (might have a slight delay).
 
 ### 4. Custom Domains (✅ Implemented)
 **How it works:** `nginxRouter.js` updates the Nginx server block to listen on the custom domain.

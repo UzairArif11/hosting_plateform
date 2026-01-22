@@ -181,4 +181,107 @@ router.get('/projects/:id/analytics/summary', requireProjectAccess('viewer'), as
     }
 });
 
+// GET /api/analytics/global - Get aggregated stats across all user projects
+router.get('/global', requireAuth, async (req, res) => {
+    try {
+        const { timeframe = '24h' } = req.query;
+        const userId = req.user.id;
+
+        // Get all projects owned by user
+        const projects = await Project.find({ owner: userId }).select('_id');
+        const projectIds = projects.map(p => p._id);
+
+        if (projectIds.length === 0) {
+            return res.json({
+                success: true,
+                data: {
+                    totalDeployments: 0,
+                    totalPageViews: 0,
+                    totalVisitors: 0,
+                    chart: []
+                }
+            });
+        }
+
+        // Calculate date range
+        const now = new Date();
+        let startDate = new Date();
+        if (timeframe === '7d') startDate.setDate(now.getDate() - 7);
+        else if (timeframe === '30d') startDate.setDate(now.getDate() - 30);
+        else startDate.setHours(now.getHours() - 24);
+
+        const matchStage = {
+            projectId: { $in: projectIds },
+            timestamp: { $gte: startDate }
+        };
+
+        // Get aggregated stats
+        const [chartData, totalStats] = await Promise.all([
+            AnalyticsEvent.aggregate([
+                { $match: matchStage },
+                {
+                    $group: {
+                        _id: {
+                            $dateToString: {
+                                format: timeframe === '24h' ? "%Y-%m-%d %H:00" : "%Y-%m-%d",
+                                date: "$timestamp"
+                            }
+                        },
+                        visitors: { $addToSet: "$visitorId" },
+                        pageViews: { $sum: 1 }
+                    }
+                },
+                {
+                    $project: {
+                        date: "$_id",
+                        visitors: { $size: "$visitors" },
+                        pageViews: 1,
+                        _id: 0
+                    }
+                },
+                { $sort: { date: 1 } }
+            ]),
+            AnalyticsEvent.aggregate([
+                { $match: matchStage },
+                {
+                    $group: {
+                        _id: null,
+                        totalPageViews: { $sum: 1 },
+                        uniqueVisitors: { $addToSet: "$visitorId" }
+                    }
+                },
+                {
+                    $project: {
+                        totalPageViews: 1,
+                        totalVisitors: { $size: "$uniqueVisitors" }
+                    }
+                }
+            ])
+        ]);
+
+        // Get deployment count from Deployment model
+        const Deployment = require('../models/Deployment');
+        const deploymentCount = await Deployment.countDocuments({
+            userId: userId,
+            createdAt: { $gte: startDate }
+        });
+
+        const stats = totalStats[0] || { totalPageViews: 0, totalVisitors: 0 };
+
+        res.json({
+            success: true,
+            data: {
+                totalDeployments: deploymentCount,
+                totalPageViews: stats.totalPageViews,
+                totalVisitors: stats.totalVisitors,
+                chart: chartData
+            }
+        });
+
+    } catch (error) {
+        logger.error('Global analytics error:', error);
+        res.status(500).json({ error: 'Failed to fetch analytics' });
+    }
+});
+
 module.exports = router;

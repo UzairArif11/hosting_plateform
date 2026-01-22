@@ -144,6 +144,10 @@ app.use('/api/templates', templateRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/invitations', invitationsRoutes);
 
+// Audit logs routes
+const auditRoutes = require('./routes/audit');
+app.use('/api/audit', auditRoutes);
+
 // User self-service routes
 const userRoutes = require('./routes/user');
 app.use('/api/user', userRoutes);

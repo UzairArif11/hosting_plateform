@@ -95,9 +95,7 @@ router.post('/:id/deploy', requireAuth, requireResourceCapacity('projects', 1), 
             return res.status(404).json({ success: false, error: 'Template not found' });
         }
 
-        if (template.isPremium) {
-            // Legacy check, handled by minPlan now but kept for safety
-        }
+        // Legacy isPremium field is deprecated - use minPlan instead
 
         const PLAN_LEVELS = { 'free': 0, 'pro': 1, 'enterprise': 2 };
 
@@ -123,10 +121,9 @@ router.post('/:id/deploy', requireAuth, requireResourceCapacity('projects', 1), 
         }
 
         const planFeatures = fullUser.plan?.features || [];
-        const templatesFeature = planFeatures.find(f => f.name === 'templates') || planFeatures.find(f => f === 'templates');
-        const isEnabled = templatesFeature && (typeof templatesFeature === 'string' || templatesFeature.enabled !== false);
+        const templatesFeature = planFeatures.find(f => f.name === 'templates');
 
-        if (!isEnabled) {
+        if (!templatesFeature || templatesFeature.enabled === false) {
             return res.status(403).json({
                 success: false,
                 error: 'Template deployment is not available in your current plan',

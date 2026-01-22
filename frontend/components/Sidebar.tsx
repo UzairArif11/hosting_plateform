@@ -23,11 +23,22 @@ export default function Sidebar() {
     const router = useRouter();
     const { user } = useSelector((state: RootState) => state.auth);
 
+    // Helper to check if a feature is enabled
+    const hasFeature = (key: string) => {
+        if (!user?.plan?.features) return false;
+        // Handle both array of strings and array of objects
+        return user.plan.features.some((f: any) => {
+            if (typeof f === 'string') return f === key;
+            return f.name === key && f.enabled;
+        });
+    };
+
     const navigation = [
         { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
         { name: 'Projects', href: '/dashboard/projects', icon: FolderIcon },
         { name: 'Deployments', href: '/dashboard/deployments', icon: RocketLaunchIcon },
-        { name: 'Analytics', href: '/dashboard/analytics', icon: ChartBarIcon },
+        // Conditionally show Analytics
+        ...(hasFeature('analytics') ? [{ name: 'Analytics', href: '/dashboard/analytics', icon: ChartBarIcon }] : []),
         { name: 'Billing', href: '/dashboard/billing', icon: CreditCardIcon },
         { name: 'Settings', href: '/dashboard/settings', icon: Cog6ToothIcon },
     ];

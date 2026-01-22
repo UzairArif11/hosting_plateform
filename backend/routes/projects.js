@@ -656,6 +656,17 @@ router.post('/:id/domains/:domainId/verify', requireProjectAccess('admin'), asyn
       domainEntry.verifiedAt = new Date();
       await project.save();
 
+      // Auto-provision SSL certificate for custom domain
+      const sslManager = require('../services/sslManager');
+      const sslResult = await sslManager.provisionCertificate(domainEntry.domain);
+
+      if (sslResult.success) {
+        logger.info(`SSL certificate provisioned for ${domainEntry.domain}`);
+      } else {
+        logger.warn(`SSL provisioning failed for ${domainEntry.domain}: ${sslResult.message}`);
+        // Don't fail verification - SSL can be retried later
+      }
+
       // Configure Nginx for valid domain
       // If we are dealing with external IP pointing, we might also check A record
       // But for now, if TXT matches, we enable routing.
@@ -694,6 +705,7 @@ router.post('/:id/domains/:domainId/verify', requireProjectAccess('admin'), asyn
       return res.json({
         success: true,
         verified: true,
+        sslProvisioned: sslResult.success,
         message: 'Domain verified successfully'
       });
     } else {
