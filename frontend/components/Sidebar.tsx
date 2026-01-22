@@ -20,7 +20,7 @@ import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { hasFeature } from '@/lib/features';
 import { getCurrentUser } from '@/lib/slices/authSlice';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { ArrowPathIcon } from '@heroicons/react/24/outline';
 
 export default function Sidebar() {
@@ -43,37 +43,35 @@ export default function Sidebar() {
         }
     };
 
-    // Auto-refresh user data on mount to get latest plan features
-    useEffect(() => {
-        if (user) {
-            dispatch(getCurrentUser());
-        }
-    }, [dispatch]); // Only on mount
+    // Note: Don't auto-refresh here - DashboardLayout already calls getCurrentUser on mount
+    // This prevents infinite loading loops
 
-    // Debug: Log user features
-    useEffect(() => {
-        if (user?.plan?.features) {
-            console.log('🔍 Sidebar - User Plan Features:', {
-                planName: user.plan.name,
-                planDisplayName: user.plan.displayName,
-                features: user.plan.features,
-                featuresCount: user.plan.features.length,
-                featuresDetail: user.plan.features.map((f: any) => ({
-                    name: typeof f === 'string' ? f : f.name,
-                    enabled: typeof f === 'string' ? true : f.enabled,
-                    type: typeof f,
-                })),
-            });
-        } else {
-            console.warn('⚠️ Sidebar - No plan features found for user:', {
-                hasUser: !!user,
-                hasPlan: !!user?.plan,
-                planName: user?.plan?.name,
-            });
-        }
-    }, [user]);
+    // Check features - memoize results to prevent recalculation
+    const hasTemplates = useMemo(() => {
+        if (!user?.plan?.features) return false;
+        return user.plan.features.some((f: any) => {
+            if (typeof f === 'string') return f === 'templates';
+            return f.name === 'templates' && f.enabled !== false;
+        });
+    }, [user?.plan?.features]);
 
-    // Check features - use direct user check to avoid hook issues
+    const hasAnalytics = useMemo(() => {
+        if (!user?.plan?.features) return false;
+        return user.plan.features.some((f: any) => {
+            if (typeof f === 'string') return f === 'analytics';
+            return f.name === 'analytics' && f.enabled !== false;
+        });
+    }, [user?.plan?.features]);
+
+    const hasAuditLogs = useMemo(() => {
+        if (!user?.plan?.features) return false;
+        return user.plan.features.some((f: any) => {
+            if (typeof f === 'string') return f === 'auditLogs';
+            return f.name === 'auditLogs' && f.enabled !== false;
+        });
+    }, [user?.plan?.features]);
+
+    // Helper function for navigation items
     const checkFeature = (key: string): boolean => {
         if (!user?.plan?.features) return false;
         return user.plan.features.some((f: any) => {
@@ -81,26 +79,6 @@ export default function Sidebar() {
             return f.name === key && f.enabled !== false;
         });
     };
-
-    const hasTemplates = checkFeature('templates');
-    const hasAnalytics = checkFeature('analytics');
-    const hasAuditLogs = checkFeature('auditLogs');
-
-    // Debug: Log feature checks
-    useEffect(() => {
-        if (user?.plan) {
-            console.log('🔍 Sidebar - Feature Checks:', {
-                planName: user.plan.name,
-                templates: hasTemplates,
-                analytics: hasAnalytics,
-                auditLogs: hasAuditLogs,
-                allFeatures: user.plan.features?.map((f: any) => ({
-                    name: typeof f === 'string' ? f : f.name,
-                    enabled: typeof f === 'string' ? true : f.enabled,
-                })),
-            });
-        }
-    }, [user, hasTemplates, hasAnalytics, hasAuditLogs]);
 
     const navigation = [
         { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },

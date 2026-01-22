@@ -39,13 +39,20 @@ router.post('/projects/:id/invitations', requireAuth, async (req, res) => {
             return res.status(403).json({ error: 'Plan information unavailable' });
         }
 
-        const collaborationFeature = owner.plan.features?.find(f => f.name === 'teamCollaboration');
-        if (!collaborationFeature || !collaborationFeature.enabled) {
+        // Check teamCollaboration feature using centralized utility
+        const { hasFeature } = require('../utils/featureCheck');
+        if (!hasFeature(owner.plan, 'teamCollaboration')) {
             return res.status(403).json({
                 error: 'Team collaboration not available in your plan',
-                upgrade: true
+                upgradeRequired: true
             });
         }
+        
+        // Get feature config for collaborator limits
+        const collaborationFeature = owner.plan.features?.find(f => 
+            (typeof f === 'string' && f === 'teamCollaboration') || 
+            (f.name === 'teamCollaboration')
+        );
 
         // Check collaborator limit
         const maxCollaborators = collaborationFeature.config?.maxCollaborators || 5;

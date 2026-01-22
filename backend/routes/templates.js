@@ -120,10 +120,9 @@ router.post('/:id/deploy', requireAuth, requireResourceCapacity('projects', 1), 
             });
         }
 
-        const planFeatures = fullUser.plan?.features || [];
-        const templatesFeature = planFeatures.find(f => f.name === 'templates');
-
-        if (!templatesFeature || templatesFeature.enabled === false) {
+        // Check templates feature using centralized utility
+        const { hasFeature } = require('../utils/featureCheck');
+        if (!hasFeature(fullUser.plan, 'templates')) {
             return res.status(403).json({
                 success: false,
                 error: 'Template deployment is not available in your current plan',

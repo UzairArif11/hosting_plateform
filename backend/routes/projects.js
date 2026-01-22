@@ -572,14 +572,21 @@ router.post('/:id/domains', requireProjectAccess('admin'), async (req, res) => {
       });
     }
 
-    const domainsFeature = owner.plan.features?.find(f => f.name === 'customDomains');
-    if (!domainsFeature || !domainsFeature.enabled) {
+    // Check customDomains feature using centralized utility
+    const { hasFeature } = require('../utils/featureCheck');
+    if (!hasFeature(owner.plan, 'customDomains')) {
       return res.status(403).json({
         success: false,
         error: 'Custom domains not available in your plan',
-        upgrade: true
+        upgradeRequired: true
       });
     }
+    
+    // Get feature config for limits
+    const domainsFeature = owner.plan.features?.find(f => 
+        (typeof f === 'string' && f === 'customDomains') || 
+        (f.name === 'customDomains')
+    );
 
     // Check domain limit if configured
     const maxDomains = domainsFeature.config?.maxCustomDomains || 10;

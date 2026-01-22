@@ -874,14 +874,21 @@ router.post('/:id/rollback', async (req, res) => {
       return res.status(403).json({ success: false, error: 'Plan information unavailable' });
     }
 
-    const rollbackFeature = owner.plan.features?.find(f => f.name === 'rollback');
-    if (!rollbackFeature || !rollbackFeature.enabled) {
+    // Check rollback feature using centralized utility
+    const { hasFeature } = require('../utils/featureCheck');
+    if (!hasFeature(owner.plan, 'rollback')) {
       return res.status(403).json({
         success: false,
         error: 'Rollback not available in your plan',
-        upgrade: true
+        upgradeRequired: true
       });
     }
+    
+    // Get feature config for retention limits
+    const rollbackFeature = owner.plan.features?.find(f => 
+        (typeof f === 'string' && f === 'rollback') || 
+        (f.name === 'rollback')
+    );
 
     // Check rollback retention (how far back can we go?)
     const retentionDays = rollbackFeature.config?.retentionDays || 30;

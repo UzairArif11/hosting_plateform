@@ -1,11 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { AppDispatch, RootState } from '@/lib/store';
 import { fetchProjects } from '@/lib/slices/projectsSlice';
 import Link from 'next/link';
-import { io, Socket } from 'socket.io-client';
 import {
     FolderIcon,
     RocketLaunchIcon,
@@ -20,115 +19,68 @@ import {
 } from '@heroicons/react/24/outline';
 import { useFeaturesStatus } from '@/lib/features';
 
-// TEST: Module-level logging
-console.log('═══════════════════════════════════════════════════════');
-console.log('🏠 DASHBOARD PAGE LOADED - VERSION 2.0-SOCKET-TEST');
-console.log('📁 File: /dashboard/page.tsx');
-console.log('⏰ Loaded at:', new Date().toISOString());
-console.log('═══════════════════════════════════════════════════════');
-
 export default function DashboardPage() {
-    console.log('🎯 DashboardPage component mounting...');
-
     const dispatch = useDispatch<AppDispatch>();
     const { projects, loading } = useSelector((state: RootState) => state.projects);
     const { user } = useSelector((state: RootState) => state.auth);
     const featuresStatus = useFeaturesStatus();
 
-    // Socket state for testing
-    const [socketStatus, setSocketStatus] = useState<string>('Initializing');
-    const [socketUrl, setSocketUrl] = useState<string>('');
-    const [socket, setSocket] = useState<Socket | null>(null);
+    // Memoize stats to prevent recreation on every render
+    const stats = useMemo(() => {
+        const baseStats = [
+            {
+                name: 'Total Projects',
+                value: projects.length,
+                icon: FolderIcon,
+                color: 'text-blue-500',
+                bg: 'bg-blue-500/10',
+            },
+            {
+                name: 'Active Deployments',
+                value: '0',
+                icon: RocketLaunchIcon,
+                color: 'text-green-500',
+                bg: 'bg-green-500/10',
+            }
+        ];
+
+        // Only show resource usage if data is provided by backend (admin controlled)
+        if ((user as any)?.currentResourceUsage) {
+            baseStats.push({
+                name: 'CPU Usage',
+                value: `${(user as any)?.currentResourceUsage?.cpuPercent || 0}%`,
+                icon: ClockIcon,
+                color: 'text-purple-500',
+                bg: 'bg-purple-500/10',
+            });
+            baseStats.push({
+                name: 'RAM Usage',
+                value: `${(user as any)?.currentResourceUsage?.ramPercent || 0}%`,
+                icon: CheckCircleIcon,
+                color: 'text-yellow-500',
+                bg: 'bg-yellow-500/10',
+            });
+        }
+
+        return baseStats;
+    }, [projects.length, (user as any)?.currentResourceUsage]);
 
     useEffect(() => {
         dispatch(fetchProjects({ page: 1, limit: 5 }));
     }, [dispatch]);
 
-    // TEST: Socket.IO Connection
-    useEffect(() => {
-        const envUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
-        const fallbackUrl = typeof window !== 'undefined' ? window.location.origin : '';
-        const SOCKET_URL = envUrl || fallbackUrl;
+    // Memoize templates enabled check
+    const templatesEnabled = useMemo(() => {
+        return featuresStatus.find((f) => f.key === 'templates')?.enabled || false;
+    }, [featuresStatus]);
 
-        setSocketUrl(SOCKET_URL);
-        console.log(`🔌 TESTING: Connecting to Socket.IO at: ${SOCKET_URL}`);
-
-        const newSocket = io(SOCKET_URL, {
-            withCredentials: true,
-            transports: ['websocket', 'polling'],
-            path: '/api/socket.io/',
-        });
-
-        setSocketStatus('Connecting...');
-
-        newSocket.on('connect', () => {
-            console.log('✅ Socket connected!', newSocket.id);
-            setSocketStatus('Connected');
-        });
-
-        newSocket.on('connect_error', (err) => {
-            console.error('❌ Socket error:', err);
-            setSocketStatus(`Error: ${err.message}`);
-        });
-
-        newSocket.on('disconnect', (reason) => {
-            console.log('❌ Socket disconnected:', reason);
-            setSocketStatus('Disconnected');
-        });
-
-        setSocket(newSocket);
-
-        return () => {
-            console.log('🔌 Cleaning up socket');
-            newSocket.close();
-        };
-    }, []);
-
-    const stats = [
-        {
-            name: 'Total Projects',
-            value: projects.length,
-            icon: FolderIcon,
-            color: 'text-blue-500',
-            bg: 'bg-blue-500/10',
-        },
-        {
-            name: 'Active Deployments',
-            value: '0',
-            icon: RocketLaunchIcon,
-            color: 'text-green-500',
-            bg: 'bg-green-500/10',
-        }
-    ];
-
-    // Only show resource usage if data is provided by backend (admin controlled)
-    if ((user as any)?.currentResourceUsage) {
-        stats.push({
-            name: 'CPU Usage',
-            value: `${(user as any)?.currentResourceUsage?.cpuPercent || 0}%`,
-            icon: ClockIcon,
-            color: 'text-purple-500',
-            bg: 'bg-purple-500/10',
-        });
-        stats.push({
-            name: 'RAM Usage',
-            value: `${(user as any)?.currentResourceUsage?.ramPercent || 0}%`,
-            icon: CheckCircleIcon,
-            color: 'text-yellow-500',
-            bg: 'bg-yellow-500/10',
-        });
-    }
+    // Memoize hasDisabledFeatures check
+    const hasDisabledFeatures = useMemo(() => {
+        return featuresStatus.some((f) => !f.enabled);
+    }, [featuresStatus]);
 
     return (
         <div className="space-y-6">
-            {/* Socket Test Status Bar */}
-            <div className="bg-gray-800 text-gray-300 text-xs p-3 rounded-lg border border-gray-700 font-mono flex justify-between items-center">
-                <span className="font-bold text-purple-400">🧪 Socket Test v2.0</span>
-                <span>Status: <span className={socketStatus === 'Connected' ? 'text-green-400 font-bold' : 'text-yellow-400'}>{socketStatus}</span></span>
-                <span>URL: {socketUrl || 'Loading...'}</span>
-                {socket && <span>ID: {socket.id || 'None'}</span>}
-            </div>
-
             {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {stats.map((stat) => (
@@ -186,7 +138,7 @@ export default function DashboardPage() {
                     ))}
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
-                    {featuresStatus.some((f) => !f.enabled) && (
+                    {hasDisabledFeatures && (
                         <Link
                             href="/dashboard/billing"
                             className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-colors"
@@ -268,7 +220,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Quick Actions */}
-            <div className={`grid grid-cols-1 gap-6 ${featuresStatus.find((f) => f.key === 'templates')?.enabled ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
+            <div className={`grid grid-cols-1 gap-6 ${templatesEnabled ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
                 <Link
                     href="/dashboard/projects"
                     className="bg-gradient-to-br from-purple-600 to-purple-700 rounded-xl p-6 hover:from-purple-700 hover:to-purple-800 transition-all transform hover:scale-105"
@@ -278,7 +230,7 @@ export default function DashboardPage() {
                     <p className="text-purple-100 text-sm">Deploy a new project from GitHub</p>
                 </Link>
 
-                {featuresStatus.find((f) => f.key === 'templates')?.enabled && (
+                {templatesEnabled && (
                     <Link
                         href="/templates"
                         className="bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-xl p-6 hover:from-indigo-700 hover:to-indigo-800 transition-all transform hover:scale-105"

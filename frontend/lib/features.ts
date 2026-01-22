@@ -6,6 +6,7 @@
  */
 
 import { useSelector } from 'react-redux';
+import { useMemo } from 'react';
 import { RootState } from '@/lib/store';
 
 /** System feature keys (must match admin plans SYSTEM_FEATURES) */
@@ -41,48 +42,37 @@ export const FEATURE_LABELS: Record<string, string> = {
 };
 
 /**
- * Check if a user has access to a specific feature
+ * React hook to check if current user has access to a specific feature
  * @param key - Feature key (e.g., 'templates', 'analytics')
  * @returns true if feature is enabled, false otherwise
+ * 
+ * @example
+ * const hasTemplates = useHasFeature('templates');
+ */
+export const useHasFeature = (key: string): boolean => {
+    const { user } = useSelector((state: RootState) => state.auth);
+    return checkFeatureAccess(user, key);
+};
+
+/**
+ * @deprecated Use useHasFeature() hook instead. This function violates React hooks rules.
+ * Kept for backward compatibility but will be removed in future versions.
  */
 export const hasFeature = (key: string): boolean => {
+    // This is a legacy function that shouldn't be used in components
+    // Use useHasFeature() hook or checkFeatureAccess() pure function instead
+    console.warn('⚠️ hasFeature() is deprecated. Use useHasFeature() hook or checkFeatureAccess() instead.');
     const { user } = useSelector((state: RootState) => state.auth);
-    
-    if (!user?.plan?.features) {
-        console.warn(`⚠️ hasFeature('${key}') - No plan features found`, {
-            hasUser: !!user,
-            hasPlan: !!user?.plan,
-            planName: user?.plan?.name,
-        });
-        return false;
-    }
-    
-    const hasAccess = user.plan.features.some((f: any) => {
-        // Handle both string and object formats
-        if (typeof f === 'string') {
-            return f === key;
-        }
-        // Feature is enabled by default if not specified
-        const matches = f.name === key;
-        const enabled = f.enabled !== false; // Default to enabled if not specified
-        return matches && enabled;
-    });
-    
-    if (hasAccess) {
-        console.log(`✅ hasFeature('${key}') = true`);
-    }
-    
-    return hasAccess;
+    return checkFeatureAccess(user, key);
 };
 
 /**
  * Get configuration for a specific feature
+ * @param user - User object (from Redux state)
  * @param key - Feature key
  * @returns Feature configuration object or empty object
  */
-export const getFeatureConfig = (key: string): Record<string, any> => {
-    const { user } = useSelector((state: RootState) => state.auth);
-    
+export const getFeatureConfigForUser = (user: any, key: string): Record<string, any> => {
     if (!user?.plan?.features) return {};
     
     const feature = user.plan.features.find((f: any) => {
@@ -91,6 +81,16 @@ export const getFeatureConfig = (key: string): Record<string, any> => {
     });
     
     return feature?.config || {};
+};
+
+/**
+ * React hook to get configuration for a specific feature
+ * @param key - Feature key
+ * @returns Feature configuration object or empty object
+ */
+export const getFeatureConfig = (key: string): Record<string, any> => {
+    const { user } = useSelector((state: RootState) => state.auth);
+    return getFeatureConfigForUser(user, key);
 };
 
 /**
@@ -114,13 +114,12 @@ export const getEnabledFeatures = (): string[] => {
 };
 
 /**
- * Get feature display name
+ * Get feature display name for a user
+ * @param user - User object (from Redux state)
  * @param key - Feature key
  * @returns Display name or key if not found
  */
-export const getFeatureDisplayName = (key: string): string => {
-    const { user } = useSelector((state: RootState) => state.auth);
-    
+export const getFeatureDisplayNameForUser = (user: any, key: string): string => {
     if (!user?.plan?.features) return key;
     
     const feature = user.plan.features.find((f: any) => {
@@ -133,14 +132,25 @@ export const getFeatureDisplayName = (key: string): string => {
 };
 
 /**
+ * React hook to get feature display name
+ * @param key - Feature key
+ * @returns Display name or key if not found
+ */
+export const getFeatureDisplayName = (key: string): string => {
+    const { user } = useSelector((state: RootState) => state.auth);
+    return getFeatureDisplayNameForUser(user, key);
+};
+
+/**
  * React hook for feature access
  * @param key - Feature key
  * @returns Object with enabled status and config
  */
 export const useFeature = (key: string) => {
-    const enabled = hasFeature(key);
-    const config = getFeatureConfig(key);
-    const displayName = getFeatureDisplayName(key);
+    const { user } = useSelector((state: RootState) => state.auth);
+    const enabled = checkFeatureAccess(user, key);
+    const config = getFeatureConfigForUser(user, key);
+    const displayName = getFeatureDisplayNameForUser(user, key);
     
     return {
         enabled,
@@ -171,9 +181,12 @@ export const checkFeatureAccess = (user: any, key: string): boolean => {
 export const useFeaturesStatus = (): { key: string; label: string; enabled: boolean }[] => {
     const { user } = useSelector((state: RootState) => state.auth);
     
-    return SYSTEM_FEATURE_KEYS.map((key) => ({
-        key,
-        label: FEATURE_LABELS[key] || key,
-        enabled: checkFeatureAccess(user, key),
-    }));
+    // Use useMemo to prevent creating new array on every render
+    return useMemo(() => {
+        return SYSTEM_FEATURE_KEYS.map((key) => ({
+            key,
+            label: FEATURE_LABELS[key] || key,
+            enabled: user ? checkFeatureAccess(user, key) : false,
+        }));
+    }, [user]);
 };

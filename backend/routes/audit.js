@@ -4,11 +4,25 @@ const AuditLog = require('../models/AuditLog');
 const auditService = require('../services/auditService');
 const { requireAuth } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/admin');
+const { checkFeatureAccess } = require('../utils/featureCheck');
 const logger = require('../utils/logger');
 
 // Get current user's audit logs
 router.get('/', requireAuth, async (req, res) => {
     try {
+        // Check if user has auditLogs feature
+        const User = require('../models/User');
+        const fullUser = await User.findById(req.user._id).populate('plan');
+        
+        const featureCheck = checkFeatureAccess(fullUser, 'auditLogs');
+        if (!featureCheck.hasAccess) {
+            return res.status(403).json({
+                success: false,
+                error: featureCheck.error || 'Audit logs not available in your current plan',
+                upgradeRequired: true
+            });
+        }
+        
         const { page = 1, limit = 50, action } = req.query;
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
@@ -73,6 +87,19 @@ router.get('/all', requireAuth, requireAdmin, async (req, res) => {
 // Get logs for a specific resource
 router.get('/resource/:type/:id', requireAuth, async (req, res) => {
     try {
+        // Check if user has auditLogs feature
+        const User = require('../models/User');
+        const fullUser = await User.findById(req.user._id).populate('plan');
+        
+        const featureCheck = checkFeatureAccess(fullUser, 'auditLogs');
+        if (!featureCheck.hasAccess) {
+            return res.status(403).json({
+                success: false,
+                error: featureCheck.error || 'Audit logs not available in your current plan',
+                upgradeRequired: true
+            });
+        }
+        
         const { type, id } = req.params;
         const { limit = 50 } = req.query;
 

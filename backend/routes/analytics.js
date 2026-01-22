@@ -49,10 +49,11 @@ router.post('/collect', async (req, res) => {
             return res.status(403).json({ error: 'Plan status unknown' });
         }
 
-        const analyticsFeature = owner?.plan?.features?.find(f => f.name === 'analytics');
-
+        // Check analytics feature using centralized utility
+        const { hasFeature } = require('../utils/featureCheck');
+        
         // If analytics is strictly disabled for this plan
-        if (!analyticsFeature || !analyticsFeature.enabled) {
+        if (!hasFeature(owner?.plan, 'analytics')) {
             // We return 200 to not break the client script with errors, but we DO NOT save the event.
             // This effectively "removes" the feature load from the DB layer.
             return res.status(200).json({ success: true, ignored: true });
@@ -99,12 +100,13 @@ router.get('/projects/:id/analytics/summary', requireProjectAccess('viewer'), as
         // 1. Check if user has access to VIEW analytics (could be plan restricted too)
         // If the PROJECT OWNER's plan doesn't have analytics, we shouldn't show data
         const owner = await User.findById(project.owner).populate('plan');
-        const analyticsFeature = owner.plan?.features?.find(f => f.name === 'analytics');
-
-        if (!analyticsFeature?.enabled) {
+        const { hasFeature } = require('../utils/featureCheck');
+        
+        if (!hasFeature(owner.plan, 'analytics')) {
             return res.status(403).json({
                 error: 'Analytics not enabled for this project plan',
-                plan: owner.plan.name
+                plan: owner.plan?.name || 'Unknown',
+                upgradeRequired: true
             });
         }
 

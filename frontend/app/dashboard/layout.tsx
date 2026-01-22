@@ -19,13 +19,40 @@ export default function DashboardLayout({
     const { isAuthenticated, loading, user } = useSelector((state: RootState) => state.auth);
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [authChecked, setAuthChecked] = useState(false);
+    const [loadTimeout, setLoadTimeout] = useState(false);
 
     useEffect(() => {
-        // Fetch current user on mount
-        dispatch(getCurrentUser()).finally(() => {
-            setAuthChecked(true);
-        });
-    }, [dispatch]);
+        // Fetch current user on mount - only once
+        let timeoutId: NodeJS.Timeout;
+        let isMounted = true;
+        
+        const fetchUser = async () => {
+            try {
+                await dispatch(getCurrentUser()).unwrap();
+            } catch (error) {
+                console.error('Failed to fetch user:', error);
+            } finally {
+                if (isMounted) {
+                    setAuthChecked(true);
+                }
+            }
+        };
+
+        fetchUser();
+
+        // Timeout after 10 seconds to prevent infinite loading
+        timeoutId = setTimeout(() => {
+            if (isMounted) {
+                setLoadTimeout(true);
+                setAuthChecked(true);
+            }
+        }, 10000);
+
+        return () => {
+            isMounted = false;
+            clearTimeout(timeoutId);
+        };
+    }, [dispatch]); // Only run once on mount
 
     useEffect(() => {
         // Only redirect if auth check is complete and user is not authenticated
@@ -34,19 +61,40 @@ export default function DashboardLayout({
         }
     }, [authChecked, isAuthenticated, loading, router]);
 
-    if (loading) {
+    // Show loading only if we're actually loading and haven't timed out
+    if (loading && !authChecked && !loadTimeout) {
         return (
             <div className="min-h-screen bg-gray-950 flex items-center justify-center">
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500 mx-auto mb-4"></div>
                     <p className="text-gray-400">Loading...</p>
+                    <p className="text-xs text-gray-500 mt-2">This should only take a moment</p>
                 </div>
             </div>
         );
     }
 
-    if (!isAuthenticated) {
-        return null;
+    // If timeout, show error but still try to render
+    if (loadTimeout && !user) {
+        return (
+            <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+                <div className="text-center max-w-md">
+                    <div className="text-red-500 text-4xl mb-4">⚠️</div>
+                    <h2 className="text-xl font-bold text-white mb-2">Loading Timeout</h2>
+                    <p className="text-gray-400 mb-4">Unable to load user data. Please try refreshing.</p>
+                    <button
+                        onClick={() => window.location.reload()}
+                        className="px-6 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg"
+                    >
+                        Refresh Page
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    if (!isAuthenticated && authChecked) {
+        return null; // Will redirect to login
     }
 
     return (
