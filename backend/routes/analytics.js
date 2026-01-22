@@ -45,7 +45,7 @@ router.post('/collect', async (req, res) => {
             return res.status(403).json({ error: 'Plan status unknown' });
         }
 
-        const analyticsFeature = owner.plan.features?.find(f => f.name === 'analytics');
+        const analyticsFeature = owner?.plan?.features?.find(f => f.name === 'analytics');
 
         // If analytics is strictly disabled for this plan
         if (!analyticsFeature || !analyticsFeature.enabled) {
