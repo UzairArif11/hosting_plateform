@@ -15,7 +15,7 @@
     "pm2:logs": "pm2 logs"
   },
   "dependencies": {
-    "@octokit/rest": "^22.0.1",
+    "@octokit/rest": "^20.1.1",
     "acme-client": "^5.4.0",
     "axios": "^1.6.2",
     "bcryptjs": "^2.4.3",
