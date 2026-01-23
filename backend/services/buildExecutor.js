@@ -341,6 +341,31 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
 
         await onLog('info', `Using package manager: ${packageManager}`);
 
+        // Check build cache
+        const buildCache = require('./buildCache');
+        const cacheKey = await buildCache.generateCacheKey(buildPath);
+
+        if (cacheKey && await buildCache.hasCache(cacheKey)) {
+            await onLog('info', `⚡ Cache hit! Restoring dependencies...`);
+            const restored = await buildCache.restoreCache(cacheKey, buildPath);
+
+            if (restored) {
+                const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+                await onLog('success', `✓ Dependencies restored from cache in ${duration}s`);
+
+                deployment.installTime = Date.now() - startTime;
+                deployment.metadata = {
+                    ...deployment.metadata,
+                    cacheHit: true,
+                    cacheKey: cacheKey.substring(0, 8)
+                };
+                await deployment.save();
+                return;
+            }
+        }
+
+        await onLog('info', `📥 Installing fresh dependencies...`);
+
         // Install command with fallback
         let installCmd = packageManager === 'yarn' ? 'yarn install --frozen-lockfile' :
             packageManager === 'pnpm' ? 'pnpm install --frozen-lockfile' :
@@ -381,6 +406,19 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
 
         const installTime = Date.now() - startTime;
         await onLog('info', `✓ Dependencies installed in ${(installTime / 1000).toFixed(2)}s`);
+
+        // Save to cache for future builds (only if feature enabled)
+        if (cacheEnabled && cacheKey) {
+            await onLog('info', '💾 Saving dependencies to cache...');
+            await buildCache.saveCache(cacheKey, buildPath);
+        }
+
+        deployment.installTime = installTime;
+        deployment.metadata = {
+            ...deployment.metadata,
+            cacheHit: false
+        };
+        await deployment.save();
 
     } catch (error) {
         error.phase = 'install';

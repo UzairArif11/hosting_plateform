@@ -33,7 +33,6 @@ export default function DeployTemplatePage() {
 
     // Form state
     const [projectName, setProjectName] = useState('');
-    const [projectName, setProjectName] = useState('');
     const [envVars, setEnvVars] = useState<Record<string, string>>({});
     const [mode, setMode] = useState<'lite' | 'pro'>('lite');
 

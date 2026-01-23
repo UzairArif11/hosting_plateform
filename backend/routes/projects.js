@@ -590,11 +590,11 @@ router.post('/:id/domains', requireProjectAccess('admin'), async (req, res) => {
         upgradeRequired: true
       });
     }
-    
+
     // Get feature config for limits
-    const domainsFeature = owner.plan.features?.find(f => 
-        (typeof f === 'string' && f === 'customDomains') || 
-        (f.name === 'customDomains')
+    const domainsFeature = owner.plan.features?.find(f =>
+      (typeof f === 'string' && f === 'customDomains') ||
+      (f.name === 'customDomains')
     );
 
     // Check domain limit if configured
@@ -843,5 +843,10 @@ router.get('/:id/analytics', requireProjectAccess('viewer'), async (req, res) =>
     res.status(500).json({ success: false, error: 'Failed to fetch analytics' });
   }
 });
+
+// Mount subroutes
+router.use('/:id/branches', require('./projects/branches'));
+router.use('/:id/domains', require('./projects/domains'));
+router.use('/:id/features', require('./projects/features'));
 
 module.exports = router;

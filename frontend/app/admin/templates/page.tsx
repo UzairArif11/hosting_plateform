@@ -447,50 +447,49 @@ export default function TemplateManagement() {
                                     </div>
 
                                     {/* Modes */}
-                                    <div className="bg-gray-800/30 p-4 rounded-xl border border-gray-700/50 space-y-4 mt-6">
-                                        <h4 className="text-sm font-semibold text-white">Supported Modes</h4>
-                                        <div className="flex gap-6">
-                                            <label className="flex items-center space-x-2 cursor-pointer">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={editingTemplate.supportedModes?.includes('lite')}
-                                                    onChange={(e) => {
-                                                        const current = editingTemplate.supportedModes || [];
-                                                        const updated = e.target.checked
-                                                            ? [...current, 'lite']
-                                                            : current.filter(m => m !== 'lite');
-                                                        setEditingTemplate({ ...editingTemplate, supportedModes: updated });
-                                                    }}
-                                                    className="w-5 h-5 text-green-500 bg-gray-800 border-gray-700 rounded focus:ring-2 focus:ring-green-500"
-                                                />
-                                                <div>
-                                                    <span className="text-white font-medium">Lite Mode</span>
-                                                    <p className="text-xs text-gray-500">Zero-config, embedded DB (SQLite)</p>
-                                                </div>
-                                            </label>
+                                <div className="bg-gray-800/30 p-4 rounded-xl border border-gray-700/50 space-y-4 mt-6">
+                                    <h4 className="text-sm font-semibold text-white">Supported Modes</h4>
+                                    <div className="flex gap-6">
+                                        <label className="flex items-center space-x-2 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={editingTemplate.supportedModes?.includes('lite')}
+                                                onChange={(e) => {
+                                                    const current = editingTemplate.supportedModes || [];
+                                                    const updated = e.target.checked
+                                                        ? [...current, 'lite']
+                                                        : current.filter(m => m !== 'lite');
+                                                    setEditingTemplate({ ...editingTemplate, supportedModes: updated });
+                                                }}
+                                                className="w-5 h-5 text-green-500 bg-gray-800 border-gray-700 rounded focus:ring-2 focus:ring-green-500"
+                                            />
+                                            <div>
+                                                <span className="text-white font-medium">Lite Mode</span>
+                                                <p className="text-xs text-gray-500">Zero-config, embedded DB (SQLite)</p>
+                                            </div>
+                                        </label>
 
-                                            <label className="flex items-center space-x-2 cursor-pointer">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={editingTemplate.supportedModes?.includes('pro')}
-                                                    onChange={(e) => {
-                                                        const current = editingTemplate.supportedModes || [];
-                                                        const updated = e.target.checked
-                                                            ? [...current, 'pro']
-                                                            : current.filter(m => m !== 'pro');
-                                                        setEditingTemplate({ ...editingTemplate, supportedModes: updated });
-                                                    }}
-                                                    className="w-5 h-5 text-blue-500 bg-gray-800 border-gray-700 rounded focus:ring-2 focus:ring-blue-500"
-                                                />
-                                                <div>
-                                                    <span className="text-white font-medium">Pro Mode</span>
-                                                    <p className="text-xs text-gray-500">External DB (Postgres/MySQL)</p>
-                                                </div>
-                                            </label>
-                                        </div>
+                                        <label className="flex items-center space-x-2 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={editingTemplate.supportedModes?.includes('pro')}
+                                                onChange={(e) => {
+                                                    const current = editingTemplate.supportedModes || [];
+                                                    const updated = e.target.checked
+                                                        ? [...current, 'pro']
+                                                        : current.filter(m => m !== 'pro');
+                                                    setEditingTemplate({ ...editingTemplate, supportedModes: updated });
+                                                }}
+                                                className="w-5 h-5 text-blue-500 bg-gray-800 border-gray-700 rounded focus:ring-2 focus:ring-blue-500"
+                                            />
+                                            <div>
+                                                <span className="text-white font-medium">Pro Mode</span>
+                                                <p className="text-xs text-gray-500">External DB (Postgres/MySQL)</p>
+                                            </div>
+                                        </label>
                                     </div>
+                                </div>
 
-                                    </div>
                                 )}
 
                                 {/* Build Config */}
@@ -647,9 +646,9 @@ export default function TemplateManagement() {
                                                         placeholder="https://example.com/preview.png"
                                                     />
                                                     <div className="h-12 w-20 bg-gray-800 rounded border border-gray-700 overflow-hidden flex-shrink-0">
-                                                        <img 
-                                                            src={editingTemplate.previewImage || 'https://placehold.co/200x150/1e293b/ffffff?text=Preview'} 
-                                                            className="w-full h-full object-cover" 
+                                                        <img
+                                                            src={editingTemplate.previewImage || 'https://placehold.co/200x150/1e293b/ffffff?text=Preview'}
+                                                            className="w-full h-full object-cover"
                                                             alt="Preview"
                                                             onError={(e) => {
                                                                 (e.target as HTMLImageElement).src = 'https://placehold.co/200x150/1e293b/ffffff?text=Invalid+URL';
@@ -731,9 +730,9 @@ export default function TemplateManagement() {
                                         {/* Important Notice */}
                                         <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-3">
                                             <p className="text-xs text-blue-300">
-                                                <strong className="text-blue-200">💡 Database Configuration:</strong> Templates don't require a database. 
-                                                If your template needs a database, add <code className="bg-blue-900/50 px-1 rounded">DATABASE_URL</code> as an environment variable. 
-                                                Users will connect their own database (PostgreSQL, MongoDB, MySQL, etc.) via this variable. 
+                                                <strong className="text-blue-200">💡 Database Configuration:</strong> Templates don't require a database.
+                                                If your template needs a database, add <code className="bg-blue-900/50 px-1 rounded">DATABASE_URL</code> as an environment variable.
+                                                Users will connect their own database (PostgreSQL, MongoDB, MySQL, etc.) via this variable.
                                                 All platform data is stored in our MongoDB - no database needed for templates.
                                             </p>
                                         </div>
@@ -1014,7 +1013,7 @@ export default function TemplateManagement() {
                     </div>
                 </div >
             )
-}
+            }
         </div >
     );
 }

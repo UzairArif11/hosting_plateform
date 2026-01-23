@@ -1,25 +1,27 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useParams } from 'next/navigation';
-import { toast } from 'react-hot-toast';
-import FeatureGuard from '@/components/FeatureGuard';
+import { useEffect, useState } from 'react';
+import toast from 'react-hot-toast';
 
-export default function DomainsPage() {
-    return (
-        <FeatureGuard feature="customDomains">
-            <DomainsPageContent />
-        </FeatureGuard>
-    );
+interface Domain {
+    _id: string;
+    domain: string;
+    isCustom: boolean;
+    isPrimary: boolean;
+    verified: boolean;
+    sslEnabled: boolean;
+    sslStatus?: string;
+    verificationToken?: string;
+    verifiedAt?: string;
 }
 
-function DomainsPageContent() {
-    const params = useParams();
+export default function DomainsPage({ params }: { params: { id: string } }) {
     const [project, setProject] = useState<any>(null);
+    const [domains, setDomains] = useState<Domain[]>([]);
     const [loading, setLoading] = useState(true);
+    const [showAddModal, setShowAddModal] = useState(false);
     const [newDomain, setNewDomain] = useState('');
-    const [isAdding, setIsAdding] = useState(false);
-    const [verifyingId, setVerifyingId] = useState<string | null>(null);
+    const [adding, setAdding] = useState(false);
 
     useEffect(() => {
         fetchProject();
@@ -27,223 +29,362 @@ function DomainsPageContent() {
 
     const fetchProject = async () => {
         try {
-            const res = await fetch(`/api/projects/${params.id}`);
+            const token = localStorage.getItem('token');
+            const res = await fetch(`/api/projects/${params.id}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            if (!res.ok) throw new Error('Failed to fetch project');
             const data = await res.json();
-            if (data.success) {
-                setProject(data.project);
-            }
+
+            setProject(data);
+            setDomains(data.domains || []);
         } catch (error) {
+            console.error('Error fetching project:', error);
             toast.error('Failed to load project');
         } finally {
             setLoading(false);
         }
     };
 
-    const handleAddDomain = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!newDomain) return;
+    const handleAddDomain = async () => {
+        if (!newDomain || !newDomain.includes('.')) {
+            toast.error('Please enter a valid domain name');
+            return;
+        }
 
-        setIsAdding(true);
+        setAdding(true);
         try {
+            const token = localStorage.getItem('token');
+
             const res = await fetch(`/api/projects/${params.id}/domains`, {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
                 },
                 body: JSON.stringify({ domain: newDomain })
             });
+
             const data = await res.json();
 
-            if (data.success) {
-                toast.success('Domain added! Please verify ownership.');
-                setNewDomain('');
-                fetchProject();
-            } else {
+            if (!res.ok) {
                 toast.error(data.error || 'Failed to add domain');
+                return;
             }
+
+            toast.success(data.message || 'Domain added! Configure DNS to verify.');
+            setShowAddModal(false);
+            setNewDomain('');
+            fetchProject();
         } catch (error) {
-            toast.error('Error adding domain');
+            console.error('Add domain error:', error);
+            toast.error('Failed to add domain');
         } finally {
-            setIsAdding(false);
+            setAdding(false);
         }
     };
 
-    const handleVerify = async (domainId: string) => {
-        setVerifyingId(domainId);
+    const handleVerifyDomain = async (domainId: string) => {
         try {
+            const token = localStorage.getItem('token');
+
             const res = await fetch(`/api/projects/${params.id}/domains/${domainId}/verify`, {
-                method: 'POST'
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
             });
+
             const data = await res.json();
 
-            if (data.success) {
-                toast.success('Domain verified successfully!');
-                fetchProject();
-            } else {
-                toast.error(data.error || 'Verification failed. Check TXT record.');
+            if (!res.ok) {
+                toast.error(data.error || 'Verification failed');
+                return;
             }
+
+            toast.success(data.message || 'Domain verified successfully!');
+            fetchProject();
         } catch (error) {
-            toast.error('Verification error');
-        } finally {
-            setVerifyingId(null);
+            toast.error('Failed to verify domain');
         }
     };
 
-    const handleRemove = async (domainId: string) => {
-        if (!confirm('Are you sure you want to remove this domain?')) return;
-
-        try {
-            const res = await fetch(`/api/projects/${params.id}/domains/${domainId}`, {
-                method: 'DELETE'
-            });
-            const data = await res.json();
-
-            if (data.success) {
-                toast.success('Domain removed');
-                fetchProject();
-            } else {
-                toast.error(data.error);
-            }
-        } catch (error) {
-            toast.error('Error removing domain');
-        }
+    const handleEnableSSL = async (domainId: string) => {
+        toast.success('🔒 For HTTPS, use Cloudflare proxy (free & automatic SSL!)');
+        // Future: Let's Encrypt automation
     };
 
-    if (loading) return <div className="p-8 text-center text-gray-400">Loading domains...</div>;
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center min-h-screen">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
+            </div>
+        );
+    }
 
     return (
-        <div className="max-w-4xl mx-auto p-8">
-            <div className="flex justify-between items-center mb-8">
+        <div className="p-8 max-w-5xl mx-auto">
+            <div className="mb-8 flex items-center justify-between">
                 <div>
-                    <h1 className="text-2xl font-bold text-white mb-2">Custom Domains</h1>
-                    <p className="text-gray-400">Manage domains for your project</p>
+                    <h1 className="text-3xl font-bold text-white mb-2">Custom Domains</h1>
+                    <p className="text-gray-400">Connect your own domain to this project</p>
+                </div>
+                <button
+                    onClick={() => setShowAddModal(true)}
+                    className="flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-xl transition"
+                >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    Add Domain
+                </button>
+            </div>
+
+            {/* Default Domain */}
+            <div className="mb-6">
+                <h2 className="text-lg font-semibold text-white mb-3">Platform Domain</h2>
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-white font-medium mb-1">
+                                {project?.slug}.platform.com
+                            </p>
+                            <p className="text-sm text-gray-400">Default deployment URL</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="px-3 py-1.5 bg-green-900/20 border border-green-500/30 text-green-300 text-sm rounded-lg">
+                                Active
+                            </span>
+                            <a
+                                href={`https://${project?.slug}.platform.com`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-2 text-gray-400 hover:text-white transition"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                </svg>
+                            </a>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            {/* Add Domain Form */}
-            <div className="bg-gray-800 rounded-lg p-6 mb-8 border border-gray-700">
-                <h3 className="text-lg font-semibold text-white mb-4">Add New Domain</h3>
-                <form onSubmit={handleAddDomain} className="flex gap-4">
-                    <input
-                        type="text"
-                        placeholder="example.com"
-                        value={newDomain}
-                        onChange={(e) => setNewDomain(e.target.value)}
-                        className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 outline-none"
-                    />
-                    <button
-                        type="submit"
-                        disabled={isAdding}
-                        className="px-6 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
-                    >
-                        {isAdding ? 'Adding...' : 'Add Domain'}
-                    </button>
-                </form>
-            </div>
-
-            {/* Domain List */}
-            <div className="space-y-4">
-                {project?.domains?.map((domain: any) => (
-                    <div key={domain._id} className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
-                        <div className="p-6 flex items-center justify-between">
-                            <div>
-                                <div className="flex items-center gap-3 mb-1">
-                                    <h3 className="text-xl font-medium text-white">{domain.domain}</h3>
-                                    {domain.verified ? (
-                                        <span className="px-2 py-0.5 rounded text-xs font-bold bg-green-500/20 text-green-400 border border-green-500/30">
-                                            VERIFIED
-                                        </span>
-                                    ) : (
-                                        <span className="px-2 py-0.5 rounded text-xs font-bold bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
-                                            UNVERIFIED
-                                        </span>
-                                    )}
-                                    {domain.isPrimary && (
-                                        <span className="px-2 py-0.5 rounded text-xs font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30">
-                                            PRIMARY
-                                        </span>
-                                    )}
-                                </div>
-                                {!domain.verified && (
-                                    <p className="text-sm text-yellow-400/80 mb-2">
-                                        Verification required to enable traffic routing.
-                                    </p>
-                                )}
-                            </div>
-
-                            <div className="flex gap-2">
-                                {!domain.verified && (
-                                    <button
-                                        onClick={() => handleVerify(domain._id)}
-                                        disabled={verifyingId === domain._id}
-                                        className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm transition-colors"
-                                    >
-                                        {verifyingId === domain._id ? 'Verifying...' : 'Verify DNS'}
-                                    </button>
-                                )}
-                                <button
-                                    onClick={() => handleRemove(domain._id)}
-                                    className="px-4 py-2 bg-gray-900 hover:bg-red-900/40 text-red-400 border border-gray-700 hover:border-red-800 rounded-lg text-sm transition-colors"
-                                >
-                                    Remove
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Verification Instructions (if unverified) */}
-                        {!domain.verified && (
-                            <div className="bg-gray-900/50 border-t border-gray-700 p-6">
-                                <h4 className="text-sm font-semibold text-gray-300 mb-3">Verification Instructions</h4>
-                                <p className="text-sm text-gray-400 mb-4">
-                                    Add the following TXT record to your DNS provider (Cloudflare, GoDaddy, Namecheap, etc.) to verify ownership.
-                                </p>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div className="bg-black/40 rounded p-3 border border-gray-700">
-                                        <div className="text-xs text-gray-500 uppercase font-bold mb-1">Type</div>
-                                        <code className="text-purple-400">TXT</code>
-                                    </div>
-                                    <div className="bg-black/40 rounded p-3 border border-gray-700">
-                                        <div className="text-xs text-gray-500 uppercase font-bold mb-1">Name / Host</div>
-                                        <code className="text-purple-400">_vcp-challenge</code>
-                                        <span className="text-gray-500 text-xs ml-2">(or @)</span>
-                                    </div>
-                                    <div className="bg-black/40 rounded p-3 border border-gray-700 md:col-span-2">
-                                        <div className="text-xs text-gray-500 uppercase font-bold mb-1">Value</div>
-                                        <div className="flex justify-between items-center">
-                                            <code className="text-green-400 break-all">{domain.verificationToken}</code>
-                                            <button
-                                                onClick={() => {
-                                                    navigator.clipboard.writeText(domain.verificationToken);
-                                                    toast.success('Copied to clipboard');
-                                                }}
-                                                className="ml-2 text-gray-500 hover:text-white"
-                                            >
-                                                Copy
-                                            </button>
+            {/* Custom Domains */}
+            {domains.filter(d => d.isCustom).length > 0 ? (
+                <div className="mb-6">
+                    <h2 className="text-lg font-semibold text-white mb-3">Custom Domains</h2>
+                    <div className="space-y-3">
+                        {domains.filter(d => d.isCustom).map((domain) => (
+                            <div
+                                key={domain._id}
+                                className="bg-gray-900 border border-gray-800 rounded-xl p-5"
+                            >
+                                <div className="flex items-start justify-between mb-4">
+                                    <div className="flex-1">
+                                        <div className="flex items-center gap-3 mb-2">
+                                            <p className="text-white font-medium text-lg">
+                                                {domain.domain}
+                                            </p>
+                                            {domain.isPrimary && (
+                                                <span className="px-2 py-1 bg-purple-900/20 border border-purple-500/30 text-purple-300 text-xs rounded">
+                                                    Primary
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <span className={`px-3 py-1.5 border rounded-lg text-sm font-medium ${domain.verified
+                                                ? 'bg-green-900/20 border-green-500/30 text-green-300'
+                                                : 'bg-yellow-900/20 border-yellow-500/30 text-yellow-300'
+                                                }`}>
+                                                {domain.verified ? '✓ Verified' : 'Pending Verification'}
+                                            </span>
+                                            <span className={`px-3 py-1.5 border rounded-lg text-sm font-medium ${domain.sslEnabled
+                                                ? 'bg-green-900/20 border-green-500/30 text-green-300'
+                                                : 'bg-gray-800 border-gray-600 text-gray-300'
+                                                }`}>
+                                                {domain.sslEnabled ? '🔒 SSL Active' : 'SSL Inactive'}
+                                            </span>
                                         </div>
                                     </div>
                                 </div>
 
-                                <div className="mt-4 flex gap-2 items-start">
-                                    <span className="text-blue-400 text-lg">💡</span>
-                                    <div className="text-xs text-gray-500 mt-1">
-                                        <p>DNS propagation usually takes a few minutes but can take up to 24 hours.</p>
-                                        <p>Once verified, you may need to add an <strong>A Record</strong> pointing to <code>{window.location.hostname}</code> (Server IP) to route traffic.</p>
+                                {!domain.verified && domain.verificationToken && (
+                                    <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-4 mb-4">
+                                        <h4 className="text-white font-medium mb-2">DNS Configuration Required</h4>
+                                        <div className="space-y-2 text-sm">
+                                            <p className="text-gray-300">Add this TXT record to your DNS:</p>
+                                            <div className="bg-gray-900 rounded p-3 font-mono text-xs">
+                                                <div className="grid grid-cols-3 gap-4">
+                                                    <div>
+                                                        <span className="text-gray-500">Type:</span> TXT
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-gray-500">Name:</span> _platform-verify
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-gray-500">Value:</span> {domain.verificationToken}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <p className="text-gray-400 text-xs mt-2">
+                                                Then add an A record pointing to: 123.456.789.0
+                                            </p>
+                                        </div>
                                     </div>
+                                )}
+
+                                {domain.verified && (
+                                    <div className="bg-gradient-to-r from-green-900/20 to-blue-900/20 border border-green-500/30 rounded-lg p-4 mb-4">
+                                        <div className="flex items-start gap-3">
+                                            <svg className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            <div className="flex-1">
+                                                <h4 className="text-green-300 font-medium mb-2">✅ Domain Verified!</h4>
+                                                <p className="text-sm text-gray-300 mb-3">
+                                                    Your domain is verified. For HTTPS, use Cloudflare (free & automatic):
+                                                </p>
+                                                <ol className="text-xs text-gray-300 space-y-1 ml-4 list-decimal mb-3">
+                                                    <li>Add domain to Cloudflare (free plan)</li>
+                                                    <li>Point DNS to Cloudflare nameservers</li>
+                                                    <li>Enable "Proxied" mode (orange cloud icon)</li>
+                                                    <li>SSL works automatically! 🔒</li>
+                                                </ol>
+                                                <a
+                                                    href="https://dash.cloudflare.com"
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded transition"
+                                                >
+                                                    Setup Cloudflare Now
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                                    </svg>
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="flex gap-2">
+                                    {!domain.verified && (
+                                        <button
+                                            onClick={() => handleVerifyDomain(domain._id)}
+                                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm transition"
+                                        >
+                                            Verify DNS
+                                        </button>
+                                    )}
+                                    {domain.verified && (
+                                        <a
+                                            href={`http://${domain.domain}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg text-sm transition flex items-center gap-2"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                            </svg>
+                                            Visit Site (HTTP)
+                                        </a>
+                                    )}
                                 </div>
                             </div>
-                        )}
-
+                        ))}
                     </div>
-                ))}
+                </div>
+            ) : (
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-12 text-center mb-6">
+                    <svg className="w-16 h-16 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+                    </svg>
+                    <h3 className="text-xl font-semibold text-white mb-2">No Custom Domains</h3>
+                    <p className="text-gray-400 mb-4">Add your first custom domain to get started</p>
+                    <button
+                        onClick={() => setShowAddModal(true)}
+                        className="px-6 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition"
+                    >
+                        Add Domain
+                    </button>
+                </div>
+            )}
 
-                {(!project?.domains || project.domains.length === 0) && (
-                    <div className="text-center py-12 bg-gray-800/50 rounded-lg border border-gray-700 border-dashed">
-                        <p className="text-gray-400">No custom domains added yet.</p>
+            {/* SSL Recommendation */}
+            <div className="bg-blue-900/20 border border-blue-500/30 rounded-xl p-6">
+                <div className="flex gap-3">
+                    <svg className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div>
+                        <h4 className="text-blue-300 font-medium mb-2">💡 Recommended: Cloudflare for SSL</h4>
+                        <p className="text-sm text-gray-300 mb-3">
+                            Get free automatic SSL certificates by using Cloudflare:
+                        </p>
+                        <ol className="text-sm text-gray-300 space-y-2 ml-4 list-decimal">
+                            <li>Add your domain to Cloudflare (free plan works)</li>
+                            <li>Point DNS to Cloudflare nameservers</li>
+                            <li>Enable "Proxied" mode (orange cloud)</li>
+                            <li>Cloudflare handles SSL automatically!</li>
+                        </ol>
+                        <a
+                            href="https://www.cloudflare.com"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition"
+                        >
+                            Setup Cloudflare
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                        </a>
                     </div>
-                )}
+                </div>
             </div>
+
+            {/* Add Domain Modal */}
+            {showAddModal && (
+                <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-50 p-4">
+                    <div className="bg-gray-900 border border-gray-800 rounded-2xl max-w-md w-full p-6">
+                        <h3 className="text-2xl font-bold text-white mb-6">Add Custom Domain</h3>
+
+                        <div className="mb-6">
+                            <label className="block text-sm font-medium text-gray-300 mb-2">
+                                Domain Name
+                            </label>
+                            <input
+                                type="text"
+                                value={newDomain}
+                                onChange={(e) => setNewDomain(e.target.value.toLowerCase())}
+                                placeholder="example.com"
+                                className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-purple-500"
+                            />
+                            <p className="text-xs text-gray-500 mt-2">
+                                Enter your domain without http:// or https://
+                            </p>
+                        </div>
+
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => {
+                                    setShowAddModal(false);
+                                    setNewDomain('');
+                                }}
+                                disabled={adding}
+                                className="px-6 py-2.5 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleAddDomain}
+                                disabled={adding || !newDomain}
+                                className="px-6 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition disabled:opacity-50"
+                            >
+                                {adding ? 'Adding...' : 'Add Domain'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

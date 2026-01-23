@@ -51,7 +51,7 @@ router.post('/collect', async (req, res) => {
 
         // Check analytics feature using centralized utility
         const { hasFeature } = require('../utils/featureCheck');
-        
+
         // If analytics is strictly disabled for this plan
         if (!hasFeature(owner?.plan, 'analytics')) {
             // We return 200 to not break the client script with errors, but we DO NOT save the event.
@@ -64,9 +64,19 @@ router.post('/collect', async (req, res) => {
         // ... check current month count ...
 
         // 4. Determine Country (from IP)
-        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-        // const geo = geoip.lookup(ip);
-        const country = 'Unknown'; // Placeholder for actual GeoIP impl
+        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+
+        // Real GeoIP lookup
+        let country = 'Unknown';
+        try {
+            const geoip = require('geoip-lite');
+            const geo = geoip.lookup(ip);
+            if (geo && geo.country) {
+                country = geo.country;
+            }
+        } catch (error) {
+            logger.warn('GeoIP lookup failed:', error.message);
+        }
 
         // 5. Save Event
         await AnalyticsEvent.create({
@@ -101,7 +111,7 @@ router.get('/projects/:id/analytics/summary', requireProjectAccess('viewer'), as
         // If the PROJECT OWNER's plan doesn't have analytics, we shouldn't show data
         const owner = await User.findById(project.owner).populate('plan');
         const { hasFeature } = require('../utils/featureCheck');
-        
+
         if (!hasFeature(owner.plan, 'analytics')) {
             return res.status(403).json({
                 error: 'Analytics not enabled for this project plan',
