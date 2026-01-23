@@ -341,32 +341,45 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
 
         await onLog('info', `Using package manager: ${packageManager}`);
 
-        // Check build cache
-        const buildCache = require('./buildCache');
-        const cacheKey = await buildCache.generateCacheKey(buildPath);
+        // Check if node_modules already exists (from previous build)
+        const nodeModulesPath = path.join(buildPath, 'node_modules');
+        let nodeModulesExists = false;
 
-        if (cacheKey && await buildCache.hasCache(cacheKey)) {
-            await onLog('info', `⚡ Cache hit! Restoring dependencies...`);
-            const restored = await buildCache.restoreCache(cacheKey, buildPath);
+        try {
+            await fs.access(nodeModulesPath);
+            nodeModulesExists = true;
 
-            if (restored) {
+            // Check if package.json changed
+            const packageJsonPath = path.join(buildPath, 'package.json');
+            const packageJson = await fs.readFile(packageJsonPath, 'utf8');
+            const packageHash = require('crypto').createHash('md5').update(packageJson).digest('hex');
+
+            const hashFile = path.join(buildPath, '.package-hash');
+            let previousHash = '';
+            try {
+                previousHash = await fs.readFile(hashFile, 'utf8');
+            } catch { }
+
+            if (packageHash === previousHash) {
+                await onLog('info', '⚡ Using existing node_modules (package.json unchanged)');
                 const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-                await onLog('success', `✓ Dependencies restored from cache in ${duration}s`);
+                await onLog('success', `✓ Dependencies ready in ${duration}s (cached)`);
 
                 deployment.installTime = Date.now() - startTime;
                 deployment.metadata = {
                     ...deployment.metadata,
-                    cacheHit: true,
-                    cacheKey: cacheKey.substring(0, 8)
+                    dependenciesCached: true
                 };
                 await deployment.save();
                 return;
+            } else {
+                await onLog('info', '📦 Package.json changed, reinstalling dependencies...');
             }
+        } catch {
+            nodeModulesExists = false;
         }
 
-        await onLog('info', `📥 Installing fresh dependencies...`);
-
-        // Install command with fallback
+        // Install command
         let installCmd = packageManager === 'yarn' ? 'yarn install --frozen-lockfile' :
             packageManager === 'pnpm' ? 'pnpm install --frozen-lockfile' :
                 'npm ci';
@@ -407,16 +420,17 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
         const installTime = Date.now() - startTime;
         await onLog('info', `✓ Dependencies installed in ${(installTime / 1000).toFixed(2)}s`);
 
-        // Save to cache for future builds (only if feature enabled)
-        if (cacheEnabled && cacheKey) {
-            await onLog('info', '💾 Saving dependencies to cache...');
-            await buildCache.saveCache(cacheKey, buildPath);
-        }
+        // Save package.json hash for next build
+        const packageJsonPath = path.join(buildPath, 'package.json');
+        const packageJson = await fs.readFile(packageJsonPath, 'utf8');
+        const packageHash = require('crypto').createHash('md5').update(packageJson).digest('hex');
+        const hashFile = path.join(buildPath, '.package-hash');
+        await fs.writeFile(hashFile, packageHash);
 
         deployment.installTime = installTime;
         deployment.metadata = {
             ...deployment.metadata,
-            cacheHit: false
+            dependenciesCached: false
         };
         await deployment.save();
 
@@ -893,12 +907,31 @@ CMD ["nginx", "-g", "daemon off;"]
 }
 
 /**
- * Cleanup build directory
+ * Cleanup old build directories (keep recent ones for fast rebuilds)
  */
 async function cleanup(buildPath) {
     try {
-        await fs.rm(buildPath, { recursive: true, force: true });
-        logger.info(`Cleaned up build directory: ${buildPath}`);
+        // Check if build directory exists
+        try {
+            await fs.access(buildPath);
+        } catch {
+            // Build directory doesn't exist, nothing to cleanup
+            return;
+        }
+
+        // Check age of build directory
+        const stats = await fs.stat(buildPath);
+        const ageMs = Date.now() - stats.mtimeMs;
+        const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+        if (ageMs > maxAge) {
+            // Old build, remove it
+            await fs.rm(buildPath, { recursive: true, force: true });
+            logger.info(`Cleaned up old build directory (${Math.floor(ageMs / (24 * 60 * 60 * 1000))} days old): ${buildPath}`);
+        } else {
+            // Recent build, keep it for faster rebuilds
+            logger.info(`Keeping build directory for reuse (node_modules cached): ${buildPath}`);
+        }
     } catch (error) {
         logger.warn(`Failed to cleanup build directory: ${error.message}`);
     }
