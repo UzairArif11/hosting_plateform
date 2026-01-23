@@ -68,6 +68,12 @@ const templateSchema = new mongoose.Schema({
             'custom'
         ]
     },
+    // Feature Modes (Lite = JSON, Pro = SQL)
+    supportedModes: {
+        type: [String],
+        enum: ['lite', 'pro'],
+        default: ['lite', 'pro']
+    },
     buildConfig: {
         buildCommand: {
             type: String,
@@ -130,6 +136,36 @@ const templateSchema = new mongoose.Schema({
     requiresApproval: {
         type: Boolean,
         default: false
+    },
+
+    // Resource Limits (Admin Configurable)
+    resourceLimits: {
+        maxListings: {
+            type: Number,
+            default: null // null = unlimited (user uses their own DB)
+        },
+        maxImageSize: {
+            type: Number, // in MB
+            default: 5 // 5MB default
+        },
+        maxImageResolution: {
+            width: {
+                type: Number,
+                default: 1920 // pixels
+            },
+            height: {
+                type: Number,
+                default: 1080 // pixels
+            }
+        },
+        maxStoragePerProject: {
+            type: Number, // in MB
+            default: 100 // 100MB default
+        },
+        maxFilesPerProject: {
+            type: Number,
+            default: 1000
+        }
     },
 
     // Stats

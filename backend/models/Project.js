@@ -200,6 +200,10 @@ const projectSchema = new mongoose.Schema({
     deployments: {
       type: Number,
       default: 0 // this month
+    },
+    files: {
+      type: Number,
+      default: 0 // Total files count
     }
   },
 
@@ -316,6 +320,8 @@ projectSchema.index({ 'stats.lastActivity': -1 });
 // Compound indexes
 projectSchema.index({ owner: 1, status: 1 });
 projectSchema.index({ owner: 1, createdAt: -1 });
+// Unique index: prevent duplicate project names per user
+projectSchema.index({ name: 1, owner: 1 }, { unique: true });
 
 // Virtual for default domain
 projectSchema.virtual('defaultDomain').get(function () {

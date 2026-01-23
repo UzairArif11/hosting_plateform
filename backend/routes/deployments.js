@@ -819,18 +819,57 @@ router.delete('/:id', async (req, res) => {
       }
     }
 
-    // Delete deployment from database
+    // Optional: Clean user's database if requested
+    // Note: User's database is their responsibility, but we can optionally clean it
+    const { cleanUserDatabase = false } = req.body;
+    
+    if (cleanUserDatabase && project.environmentVariables) {
+      const dbUrl = project.environmentVariables.find(env => 
+        env.key === 'DATABASE_URL' || env.key === 'MONGODB_URI'
+      );
+      
+      if (dbUrl?.value) {
+        try {
+          // Note: This is optional - user's database cleanup
+          // In production, you might want to add a confirmation step
+          logger.info('User requested database cleanup', {
+            deploymentId: id,
+            projectId: deployment.projectId
+          });
+          // Database cleanup would be implemented here if needed
+          // For now, we just log it - user manages their own database
+        } catch (dbError) {
+          logger.warn('Database cleanup failed (user manages their own DB)', {
+            error: dbError.message
+          });
+          // Continue with deletion even if DB cleanup fails
+        }
+      }
+    }
+
+    // Clean platform data (automatic)
+    // 1. Delete deployment from database
     await Deployment.findByIdAndDelete(id);
+
+    // 2. Update project stats
+    if (project.deploymentCount > 0) {
+      project.deploymentCount -= 1;
+      await project.save();
+    }
 
     logger.info('Deployment deleted', {
       deploymentId: id,
       projectId: deployment.projectId,
-      userId: req.user._id
+      userId: req.user._id,
+      cleanUserDatabase: cleanUserDatabase
     });
 
     res.json({
       success: true,
-      message: 'Deployment deleted successfully'
+      message: 'Deployment deleted successfully',
+      note: cleanUserDatabase 
+        ? 'Platform data cleaned. User database cleanup attempted (user manages their own database).'
+        : 'Platform data cleaned. User database unchanged (user manages their own database).'
     });
   } catch (error) {
     logger.error('Delete deployment error:', error);

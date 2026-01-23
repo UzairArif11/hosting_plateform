@@ -30,6 +30,7 @@ interface Template {
     minPlan: 'free' | 'pro' | 'enterprise';
     isPublished: boolean;
     tags: string[];
+    supportedModes: ('lite' | 'pro')[];
     buildConfig: {
         installCommand: string;
         buildCommand: string;
@@ -44,6 +45,16 @@ interface Template {
         isRequired: boolean;
         isSecret: boolean;
     }[];
+    resourceLimits?: {
+        maxListings?: number | null;
+        maxImageSize?: number;
+        maxImageResolution?: {
+            width: number;
+            height: number;
+        };
+        maxStoragePerProject?: number;
+        maxFilesPerProject?: number;
+    };
 }
 
 const CATEGORIES = [
@@ -99,6 +110,7 @@ export default function TemplateManagement() {
             minPlan: 'free',
             isPublished: false,
             tags: [],
+            supportedModes: ['lite', 'pro'],
             buildConfig: {
                 installCommand: 'npm install',
                 buildCommand: 'npm run build',
@@ -106,7 +118,17 @@ export default function TemplateManagement() {
                 devCommand: 'npm run dev',
                 nodeVersion: '18'
             },
-            environmentVariables: []
+            environmentVariables: [],
+            resourceLimits: {
+                maxListings: null,
+                maxImageSize: 5,
+                maxImageResolution: {
+                    width: 1920,
+                    height: 1080
+                },
+                maxStoragePerProject: 100,
+                maxFilesPerProject: 1000
+            }
         });
         setShowModal(true);
         setActiveTab('basic');
@@ -130,22 +152,52 @@ export default function TemplateManagement() {
         e.preventDefault();
         if (!editingTemplate) return;
 
+        // Validation
+        if (!editingTemplate.displayName?.trim()) {
+            toast.error('Display name is required');
+            return;
+        }
+        if (!editingTemplate.name?.trim()) {
+            toast.error('Template slug/name is required');
+            return;
+        }
+        if (!editingTemplate.githubRepo?.trim()) {
+            toast.error('GitHub repository is required');
+            return;
+        }
+        if (!editingTemplate.previewImage?.trim()) {
+            toast.error('Preview image URL is required');
+            return;
+        }
+
+        // Validate environment variables
+        const invalidEnvVars = editingTemplate.environmentVariables.filter(env => !env.key?.trim());
+        if (invalidEnvVars.length > 0) {
+            toast.error('All environment variables must have a key');
+            return;
+        }
+
         try {
             const payload: any = { ...editingTemplate };
             if (!payload._id) delete payload._id;
 
+            // Clean up payload
+            payload.slug = payload.name; // Ensure slug matches name
+            payload.environmentVariables = payload.environmentVariables || [];
+
             if (editingTemplate._id) {
                 await api.put(`/templates/${editingTemplate._id}`, payload);
-                toast.success('Template updated');
+                toast.success('✅ Template updated successfully');
             } else {
                 await api.post('/templates', payload);
-                toast.success('Template created');
+                toast.success('✅ Template created successfully');
             }
             setShowModal(false);
             fetchTemplates();
         } catch (error: any) {
-            console.error(error);
-            toast.error(error.response?.data?.error || 'Operation failed');
+            console.error('Template save error:', error);
+            const errorMessage = error.response?.data?.error || error.message || 'Operation failed';
+            toast.error(`Failed: ${errorMessage}`);
         }
     };
 
@@ -269,17 +321,17 @@ export default function TemplateManagement() {
                         </div>
 
                         {/* Tabs */}
-                        <div className="flex border-b border-gray-800 px-6">
-                            {(['basic', 'build', 'preview', 'env'] as const).map((tab) => (
+                        <div className="flex border-b border-gray-800 px-6 overflow-x-auto">
+                            {(['basic', 'build', 'preview', 'env', 'limits'] as const).map((tab) => (
                                 <button
                                     key={tab}
                                     onClick={() => setActiveTab(tab)}
-                                    className={`px-4 py-3 text-sm font-medium border-b-2 transition ${activeTab === tab
+                                    className={`px-4 py-3 text-sm font-medium border-b-2 transition whitespace-nowrap ${activeTab === tab
                                         ? 'border-purple-500 text-purple-400'
                                         : 'border-transparent text-gray-400 hover:text-white'
                                         }`}
                                 >
-                                    {tab.charAt(0).toUpperCase() + tab.slice(1)} Info
+                                    {tab === 'limits' ? 'Resource Limits' : tab.charAt(0).toUpperCase() + tab.slice(1) + ' Info'}
                                 </button>
                             ))}
                         </div>
@@ -292,75 +344,152 @@ export default function TemplateManagement() {
                                 {activeTab === 'basic' && (
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                         <div className="col-span-2">
-                                            <label className="block text-sm font-medium text-gray-300 mb-2">Display Name *</label>
+                                            <label className="block text-sm font-medium text-gray-300 mb-2">
+                                                Display Name *
+                                                <span className="text-xs text-gray-500 ml-2">(Shown to users in gallery)</span>
+                                            </label>
                                             <input
                                                 required
                                                 type="text"
                                                 value={editingTemplate.displayName}
                                                 onChange={(e) => setEditingTemplate({ ...editingTemplate, displayName: e.target.value })}
-                                                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white"
+                                                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                placeholder="Next.js Ecommerce Starter"
                                             />
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-300 mb-2">Template Slug (ID) *</label>
+                                            <label className="block text-sm font-medium text-gray-300 mb-2">
+                                                Template Slug (ID) *
+                                                <span className="text-xs text-gray-500 ml-2">(Unique identifier)</span>
+                                            </label>
                                             <input
                                                 required
                                                 type="text"
                                                 value={editingTemplate.name}
-                                                onChange={(e) => setEditingTemplate({ ...editingTemplate, name: e.target.value, slug: e.target.value })}
-                                                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white"
-                                                placeholder="e.g., nextjs-starter"
+                                                onChange={(e) => {
+                                                    const slug = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+                                                    setEditingTemplate({ ...editingTemplate, name: slug, slug: slug });
+                                                }}
+                                                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white font-mono text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                placeholder="nextjs-ecommerce-starter"
                                             />
+                                            <p className="text-xs text-gray-500 mt-1">Lowercase, hyphens only (auto-formatted)</p>
                                         </div>
                                         <div>
                                             <label className="block text-sm font-medium text-gray-300 mb-2">Category *</label>
                                             <select
                                                 value={editingTemplate.category}
                                                 onChange={(e) => setEditingTemplate({ ...editingTemplate, category: e.target.value })}
-                                                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white"
+                                                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
                                             >
-                                                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                                {CATEGORIES.map(c => (
+                                                    <option key={c} value={c}>
+                                                        {c.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                                                    </option>
+                                                ))}
                                             </select>
                                         </div>
                                         <div className="col-span-2">
-                                            <label className="block text-sm font-medium text-gray-300 mb-2">Description</label>
+                                            <label className="block text-sm font-medium text-gray-300 mb-2">
+                                                Description *
+                                                <span className="text-xs text-gray-500 ml-2">(Brief description shown in gallery)</span>
+                                            </label>
                                             <textarea
                                                 required
                                                 value={editingTemplate.description}
                                                 onChange={(e) => setEditingTemplate({ ...editingTemplate, description: e.target.value })}
-                                                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white"
+                                                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all resize-none"
                                                 rows={3}
+                                                placeholder="A modern ecommerce template built with Next.js, featuring product catalog, cart, and checkout..."
                                             />
+                                            <p className="text-xs text-gray-500 mt-1">{editingTemplate.description.length}/200 characters</p>
                                         </div>
 
-                                        <div className="flex gap-6 mt-4">
+                                        <div className="bg-gray-800/30 p-4 rounded-xl border border-gray-700/50 space-y-4 mt-6">
+                                            <h4 className="text-sm font-semibold text-white">Visibility & Access</h4>
+                                            <div className="flex flex-wrap gap-6">
+                                                <label className="flex items-center space-x-2 cursor-pointer group">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={editingTemplate.isPublished}
+                                                        onChange={(e) => setEditingTemplate({ ...editingTemplate, isPublished: e.target.checked })}
+                                                        className="w-5 h-5 text-purple-600 bg-gray-800 border-gray-700 rounded focus:ring-2 focus:ring-purple-500"
+                                                    />
+                                                    <div>
+                                                        <span className="text-white font-medium">Published</span>
+                                                        <p className="text-xs text-gray-500">Visible to users in template gallery</p>
+                                                    </div>
+                                                </label>
+
+                                                <div className="flex items-center gap-3">
+                                                    <label className="text-sm font-medium text-gray-300">Minimum Plan:</label>
+                                                    <select
+                                                        value={editingTemplate.minPlan || 'free'}
+                                                        onChange={(e) => setEditingTemplate({
+                                                            ...editingTemplate,
+                                                            minPlan: e.target.value as any,
+                                                            isPremium: e.target.value !== 'free' // Sync legacy flag
+                                                        })}
+                                                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                    >
+                                                        <option value="free">Free (All Users)</option>
+                                                        <option value="pro">Pro (Paid Plans)</option>
+                                                        <option value="enterprise">Enterprise</option>
+                                                    </select>
+                                                    <span className="text-xs text-gray-500">
+                                                        {editingTemplate.minPlan === 'free' && '✓ Available to everyone'}
+                                                        {editingTemplate.minPlan === 'pro' && '🔒 Requires Pro plan or higher'}
+                                                        {editingTemplate.minPlan === 'enterprise' && '🔒 Requires Enterprise plan'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Modes */}
+                                    <div className="bg-gray-800/30 p-4 rounded-xl border border-gray-700/50 space-y-4 mt-6">
+                                        <h4 className="text-sm font-semibold text-white">Supported Modes</h4>
+                                        <div className="flex gap-6">
                                             <label className="flex items-center space-x-2 cursor-pointer">
                                                 <input
                                                     type="checkbox"
-                                                    checked={editingTemplate.isPublished}
-                                                    onChange={(e) => setEditingTemplate({ ...editingTemplate, isPublished: e.target.checked })}
-                                                    className="w-5 h-5 text-purple-600 bg-gray-800 border-gray-700 rounded"
+                                                    checked={editingTemplate.supportedModes?.includes('lite')}
+                                                    onChange={(e) => {
+                                                        const current = editingTemplate.supportedModes || [];
+                                                        const updated = e.target.checked
+                                                            ? [...current, 'lite']
+                                                            : current.filter(m => m !== 'lite');
+                                                        setEditingTemplate({ ...editingTemplate, supportedModes: updated });
+                                                    }}
+                                                    className="w-5 h-5 text-green-500 bg-gray-800 border-gray-700 rounded focus:ring-2 focus:ring-green-500"
                                                 />
-                                                <span className="text-white">Published</span>
+                                                <div>
+                                                    <span className="text-white font-medium">Lite Mode</span>
+                                                    <p className="text-xs text-gray-500">Zero-config, embedded DB (SQLite)</p>
+                                                </div>
                                             </label>
 
-                                            <div className="flex items-center gap-2">
-                                                <label className="text-sm font-medium text-gray-300">Minimum Plan:</label>
-                                                <select
-                                                    value={editingTemplate.minPlan || 'free'}
-                                                    onChange={(e) => setEditingTemplate({
-                                                        ...editingTemplate,
-                                                        minPlan: e.target.value as any,
-                                                        isPremium: e.target.value !== 'free' // Sync legacy flag
-                                                    })}
-                                                    className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1 text-white text-sm"
-                                                >
-                                                    <option value="free">Free (All Users)</option>
-                                                    <option value="pro">Pro (Paid)</option>
-                                                    <option value="enterprise">Enterprise</option>
-                                                </select>
-                                            </div>
+                                            <label className="flex items-center space-x-2 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={editingTemplate.supportedModes?.includes('pro')}
+                                                    onChange={(e) => {
+                                                        const current = editingTemplate.supportedModes || [];
+                                                        const updated = e.target.checked
+                                                            ? [...current, 'pro']
+                                                            : current.filter(m => m !== 'pro');
+                                                        setEditingTemplate({ ...editingTemplate, supportedModes: updated });
+                                                    }}
+                                                    className="w-5 h-5 text-blue-500 bg-gray-800 border-gray-700 rounded focus:ring-2 focus:ring-blue-500"
+                                                />
+                                                <div>
+                                                    <span className="text-white font-medium">Pro Mode</span>
+                                                    <p className="text-xs text-gray-500">External DB (Postgres/MySQL)</p>
+                                                </div>
+                                            </label>
                                         </div>
+                                    </div>
+
                                     </div>
                                 )}
 
@@ -399,18 +528,28 @@ export default function TemplateManagement() {
                                             <h3 className="flex items-center gap-2 text-white font-semibold">
                                                 <CodeBracketIcon className="h-5 w-5 text-purple-400" />
                                                 Source Repository
+                                                <span className="text-xs text-gray-500 font-normal ml-2">(Shared template - all users deploy from this repo)</span>
                                             </h3>
                                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                                 <div className="md:col-span-2">
-                                                    <label className="block text-xs text-gray-400 mb-1">GitHub Repo (user/repo)</label>
-                                                    <input
-                                                        required
-                                                        type="text"
-                                                        value={editingTemplate.githubRepo}
-                                                        onChange={(e) => setEditingTemplate({ ...editingTemplate, githubRepo: e.target.value })}
-                                                        className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white font-mono text-sm"
-                                                        placeholder="vercel/next.js"
-                                                    />
+                                                    <label className="block text-xs text-gray-400 mb-1">
+                                                        GitHub Repo (owner/repo) *
+                                                        <span className="text-gray-600 ml-1">Template is shared by all users</span>
+                                                    </label>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-gray-600 font-mono text-sm">github.com/</span>
+                                                        <input
+                                                            required
+                                                            type="text"
+                                                            value={editingTemplate.githubRepo}
+                                                            onChange={(e) => setEditingTemplate({ ...editingTemplate, githubRepo: e.target.value })}
+                                                            className="flex-1 bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white font-mono text-sm focus:ring-1 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                            placeholder="vercel/commerce"
+                                                        />
+                                                    </div>
+                                                    <p className="text-xs text-gray-500 mt-1">
+                                                        ⚠️ This template repo is shared. Users customize via environment variables, not code changes.
+                                                    </p>
                                                 </div>
                                                 <div>
                                                     <label className="block text-xs text-gray-400 mb-1">Branch</label>
@@ -418,7 +557,7 @@ export default function TemplateManagement() {
                                                         type="text"
                                                         value={editingTemplate.githubBranch}
                                                         onChange={(e) => setEditingTemplate({ ...editingTemplate, githubBranch: e.target.value })}
-                                                        className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white font-mono text-sm"
+                                                        className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white font-mono text-sm focus:ring-1 focus:ring-purple-500 focus:border-purple-500 transition-all"
                                                         placeholder="main"
                                                     />
                                                 </div>
@@ -429,6 +568,7 @@ export default function TemplateManagement() {
                                             <h3 className="flex items-center gap-2 text-white font-semibold">
                                                 <CommandLineIcon className="h-5 w-5 text-purple-400" />
                                                 Build Settings
+                                                <span className="text-xs text-gray-500 font-normal ml-2">(Users can customize these after deployment)</span>
                                             </h3>
                                             <div className="grid grid-cols-2 gap-4">
                                                 <div>
@@ -440,7 +580,8 @@ export default function TemplateManagement() {
                                                             ...editingTemplate,
                                                             buildConfig: { ...editingTemplate.buildConfig, installCommand: e.target.value }
                                                         })}
-                                                        className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-green-400 font-mono text-sm"
+                                                        className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-green-400 font-mono text-sm focus:ring-1 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                        placeholder="npm install"
                                                     />
                                                 </div>
                                                 <div>
@@ -452,7 +593,8 @@ export default function TemplateManagement() {
                                                             ...editingTemplate,
                                                             buildConfig: { ...editingTemplate.buildConfig, buildCommand: e.target.value }
                                                         })}
-                                                        className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-green-400 font-mono text-sm"
+                                                        className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-green-400 font-mono text-sm focus:ring-1 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                        placeholder="npm run build"
                                                     />
                                                 </div>
                                                 <div>
@@ -464,7 +606,8 @@ export default function TemplateManagement() {
                                                             ...editingTemplate,
                                                             buildConfig: { ...editingTemplate.buildConfig, outputDirectory: e.target.value }
                                                         })}
-                                                        className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white font-mono text-sm"
+                                                        className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white font-mono text-sm focus:ring-1 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                        placeholder=".next or dist"
                                                     />
                                                 </div>
                                                 <div>
@@ -476,7 +619,8 @@ export default function TemplateManagement() {
                                                             ...editingTemplate,
                                                             buildConfig: { ...editingTemplate.buildConfig, devCommand: e.target.value }
                                                         })}
-                                                        className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-green-400 font-mono text-sm"
+                                                        className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-green-400 font-mono text-sm focus:ring-1 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                        placeholder="npm run dev"
                                                     />
                                                 </div>
                                             </div>
@@ -488,19 +632,34 @@ export default function TemplateManagement() {
                                 {activeTab === 'preview' && (
                                     <div className="space-y-6">
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-300 mb-2">Preview Image URL *</label>
-                                            <div className="flex gap-4">
-                                                <input
-                                                    type="url"
-                                                    required
-                                                    value={editingTemplate.previewImage}
-                                                    onChange={(e) => setEditingTemplate({ ...editingTemplate, previewImage: e.target.value })}
-                                                    className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white"
-                                                    placeholder="https://..."
-                                                />
-                                                <div className="h-10 w-16 bg-gray-800 rounded border border-gray-700 overflow-hidden flex-shrink-0">
-                                                    <img src={editingTemplate.previewImage} className="w-full h-full object-cover" alt="" />
+                                            <label className="block text-sm font-medium text-gray-300 mb-2">
+                                                <PhotoIcon className="inline h-4 w-4 mr-1 text-purple-400" />
+                                                Preview Image URL *
+                                            </label>
+                                            <div className="space-y-3">
+                                                <div className="flex gap-4">
+                                                    <input
+                                                        type="url"
+                                                        required
+                                                        value={editingTemplate.previewImage}
+                                                        onChange={(e) => setEditingTemplate({ ...editingTemplate, previewImage: e.target.value })}
+                                                        className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                        placeholder="https://example.com/preview.png"
+                                                    />
+                                                    <div className="h-12 w-20 bg-gray-800 rounded border border-gray-700 overflow-hidden flex-shrink-0">
+                                                        <img 
+                                                            src={editingTemplate.previewImage || 'https://placehold.co/200x150/1e293b/ffffff?text=Preview'} 
+                                                            className="w-full h-full object-cover" 
+                                                            alt="Preview"
+                                                            onError={(e) => {
+                                                                (e.target as HTMLImageElement).src = 'https://placehold.co/200x150/1e293b/ffffff?text=Invalid+URL';
+                                                            }}
+                                                        />
+                                                    </div>
                                                 </div>
+                                                <p className="text-xs text-gray-500">
+                                                    This image will be displayed in the template gallery. Recommended size: 1200x800px
+                                                </p>
                                             </div>
                                         </div>
 
@@ -509,14 +668,29 @@ export default function TemplateManagement() {
                                                 <GlobeAltIcon className="inline h-4 w-4 mr-1 text-purple-400" />
                                                 Live Website Preview URL (optional)
                                             </label>
-                                            <input
-                                                type="url"
-                                                value={editingTemplate.previewUrl || ''}
-                                                onChange={(e) => setEditingTemplate({ ...editingTemplate, previewUrl: e.target.value })}
-                                                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white"
-                                                placeholder="https://my-template-demo.vercel.app"
-                                            />
-                                            <p className="text-xs text-gray-500 mt-1">If provided, users can view a live demo before deploying.</p>
+                                            <div className="space-y-2">
+                                                <input
+                                                    type="url"
+                                                    value={editingTemplate.previewUrl || ''}
+                                                    onChange={(e) => setEditingTemplate({ ...editingTemplate, previewUrl: e.target.value })}
+                                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                    placeholder="https://my-template-demo.vercel.app"
+                                                />
+                                                {editingTemplate.previewUrl && (
+                                                    <a
+                                                        href={editingTemplate.previewUrl}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="inline-flex items-center gap-2 text-xs text-purple-400 hover:text-purple-300 transition-colors"
+                                                    >
+                                                        <GlobeAltIcon className="w-3 h-3" />
+                                                        Test Preview Link
+                                                    </a>
+                                                )}
+                                            </div>
+                                            <p className="text-xs text-gray-500 mt-1">
+                                                If provided, users can view a live demo before deploying. This helps users see what the template looks like.
+                                            </p>
                                         </div>
 
                                         <div>
@@ -539,7 +713,12 @@ export default function TemplateManagement() {
                                 {activeTab === 'env' && (
                                     <div className="space-y-4">
                                         <div className="flex justify-between items-center">
-                                            <h3 className="text-white font-medium">Environment Variables</h3>
+                                            <div>
+                                                <h3 className="text-white font-medium">Environment Variables</h3>
+                                                <p className="text-xs text-gray-500 mt-1">
+                                                    Define variables users will configure. Database is optional - users can connect their own.
+                                                </p>
+                                            </div>
                                             <button
                                                 type="button"
                                                 onClick={addEnvVar}
@@ -549,17 +728,31 @@ export default function TemplateManagement() {
                                             </button>
                                         </div>
 
-                                        {editingTemplate.environmentVariables.length === 0 && (
-                                            <p className="text-sm text-gray-500 italic text-center py-4 bg-gray-800/30 rounded border border-dashed border-gray-700">
-                                                No environment variables needed for this template.
+                                        {/* Important Notice */}
+                                        <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-3">
+                                            <p className="text-xs text-blue-300">
+                                                <strong className="text-blue-200">💡 Database Configuration:</strong> Templates don't require a database. 
+                                                If your template needs a database, add <code className="bg-blue-900/50 px-1 rounded">DATABASE_URL</code> as an environment variable. 
+                                                Users will connect their own database (PostgreSQL, MongoDB, MySQL, etc.) via this variable. 
+                                                All platform data is stored in our MongoDB - no database needed for templates.
                                             </p>
+                                        </div>
+
+                                        {editingTemplate.environmentVariables.length === 0 && (
+                                            <div className="text-center py-8 bg-gray-800/30 rounded border border-dashed border-gray-700">
+                                                <p className="text-sm text-gray-500 mb-2">No environment variables defined</p>
+                                                <p className="text-xs text-gray-600">
+                                                    Add variables like <code className="bg-gray-900 px-1 rounded">DATABASE_URL</code>, <code className="bg-gray-900 px-1 rounded">API_KEY</code>, etc.
+                                                    Users will configure these when deploying.
+                                                </p>
+                                            </div>
                                         )}
 
                                         {editingTemplate.environmentVariables.map((env, idx) => (
-                                            <div key={idx} className="bg-gray-800/50 p-4 rounded-xl border border-gray-700/50 flex gap-4 items-start relative group">
+                                            <div key={idx} className="bg-gray-800/50 p-4 rounded-xl border border-gray-700/50 flex gap-4 items-start relative group hover:border-purple-500/50 transition-colors">
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 flex-1">
                                                     <div>
-                                                        <label className="text-xs text-gray-500">Key</label>
+                                                        <label className="text-xs text-gray-400 mb-1 block">Variable Key *</label>
                                                         <input
                                                             type="text"
                                                             value={env.key}
@@ -568,47 +761,235 @@ export default function TemplateManagement() {
                                                                 newEnv[idx].key = e.target.value;
                                                                 setEditingTemplate({ ...editingTemplate, environmentVariables: newEnv });
                                                             }}
-                                                            className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-white font-mono"
-                                                            placeholder="API_KEY"
+                                                            className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-white font-mono focus:ring-1 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                            placeholder="DATABASE_URL or API_KEY"
+                                                            required
                                                         />
                                                     </div>
                                                     <div>
-                                                        <label className="text-xs text-gray-500">Default Value</label>
+                                                        <label className="text-xs text-gray-400 mb-1 block">Default Value</label>
                                                         <input
                                                             type="text"
-                                                            value={env.defaultValue}
+                                                            value={env.defaultValue || ''}
                                                             onChange={(e) => {
                                                                 const newEnv = [...editingTemplate.environmentVariables];
                                                                 newEnv[idx].defaultValue = e.target.value;
                                                                 setEditingTemplate({ ...editingTemplate, environmentVariables: newEnv });
                                                             }}
-                                                            className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-white"
+                                                            className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-white focus:ring-1 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                            placeholder="optional default value"
                                                         />
                                                     </div>
                                                     <div className="md:col-span-2">
-                                                        <label className="text-xs text-gray-500">Description</label>
+                                                        <label className="text-xs text-gray-400 mb-1 block">Description</label>
                                                         <input
                                                             type="text"
-                                                            value={env.description}
+                                                            value={env.description || ''}
                                                             onChange={(e) => {
                                                                 const newEnv = [...editingTemplate.environmentVariables];
                                                                 newEnv[idx].description = e.target.value;
                                                                 setEditingTemplate({ ...editingTemplate, environmentVariables: newEnv });
                                                             }}
-                                                            className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-300"
-                                                            placeholder="What is this for?"
+                                                            className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300 focus:ring-1 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                            placeholder="What is this for? (e.g., Database connection URL, API key, etc.)"
                                                         />
+                                                    </div>
+                                                    <div className="md:col-span-2 flex gap-4">
+                                                        <label className="flex items-center gap-2 cursor-pointer">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={env.isRequired || false}
+                                                                onChange={(e) => {
+                                                                    const newEnv = [...editingTemplate.environmentVariables];
+                                                                    newEnv[idx].isRequired = e.target.checked;
+                                                                    setEditingTemplate({ ...editingTemplate, environmentVariables: newEnv });
+                                                                }}
+                                                                className="w-4 h-4 text-purple-600 bg-gray-800 border-gray-700 rounded"
+                                                            />
+                                                            <span className="text-xs text-gray-400">Required</span>
+                                                        </label>
+                                                        <label className="flex items-center gap-2 cursor-pointer">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={env.isSecret || false}
+                                                                onChange={(e) => {
+                                                                    const newEnv = [...editingTemplate.environmentVariables];
+                                                                    newEnv[idx].isSecret = e.target.checked;
+                                                                    setEditingTemplate({ ...editingTemplate, environmentVariables: newEnv });
+                                                                }}
+                                                                className="w-4 h-4 text-purple-600 bg-gray-800 border-gray-700 rounded"
+                                                            />
+                                                            <span className="text-xs text-gray-400">Secret (hidden input)</span>
+                                                        </label>
                                                     </div>
                                                 </div>
                                                 <button
                                                     type="button"
                                                     onClick={() => removeEnvVar(idx)}
-                                                    className="mt-6 text-red-500 hover:text-red-400 p-1"
+                                                    className="mt-6 text-red-500 hover:text-red-400 p-2 hover:bg-red-500/10 rounded transition-colors"
+                                                    title="Remove environment variable"
                                                 >
                                                     <TrashIcon className="h-4 w-4" />
                                                 </button>
                                             </div>
                                         ))}
+                                    </div>
+                                )}
+
+                                {/* Resource Limits */}
+                                {activeTab === 'limits' && (
+                                    <div className="space-y-6">
+                                        <div className="bg-blue-900/20 border border-blue-500/30 rounded-xl p-4">
+                                            <h3 className="text-sm font-semibold text-blue-300 mb-2">Resource Limits Strategy</h3>
+                                            <p className="text-xs text-blue-200/80">
+                                                Set limits to protect platform resources. Users can use their own database/storage for unlimited data.
+                                                Limits apply to platform resources only (build files, static assets, images).
+                                            </p>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-300 mb-2">
+                                                    Max Listings/Items
+                                                    <span className="text-xs text-gray-500 ml-2">(null = unlimited via user's DB)</span>
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    value={editingTemplate.resourceLimits?.maxListings || ''}
+                                                    onChange={(e) => setEditingTemplate({
+                                                        ...editingTemplate,
+                                                        resourceLimits: {
+                                                            ...editingTemplate.resourceLimits,
+                                                            maxListings: e.target.value ? parseInt(e.target.value) : null
+                                                        }
+                                                    })}
+                                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                    placeholder="Leave empty for unlimited"
+                                                />
+                                                <p className="text-xs text-gray-500 mt-1">
+                                                    Set limit if storing in platform. Leave empty if users use their own database (recommended).
+                                                </p>
+                                            </div>
+
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-300 mb-2">
+                                                    Max Image Size (MB)
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    value={editingTemplate.resourceLimits?.maxImageSize || 5}
+                                                    onChange={(e) => setEditingTemplate({
+                                                        ...editingTemplate,
+                                                        resourceLimits: {
+                                                            ...editingTemplate.resourceLimits,
+                                                            maxImageSize: parseInt(e.target.value) || 5
+                                                        }
+                                                    })}
+                                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                    min="1"
+                                                    max="50"
+                                                />
+                                                <p className="text-xs text-gray-500 mt-1">Maximum file size per image upload (1-50 MB)</p>
+                                            </div>
+
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-300 mb-2">
+                                                    Max Image Width (px)
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    value={editingTemplate.resourceLimits?.maxImageResolution?.width || 1920}
+                                                    onChange={(e) => setEditingTemplate({
+                                                        ...editingTemplate,
+                                                        resourceLimits: {
+                                                            ...editingTemplate.resourceLimits,
+                                                            maxImageResolution: {
+                                                                ...editingTemplate.resourceLimits?.maxImageResolution,
+                                                                width: parseInt(e.target.value) || 1920
+                                                            }
+                                                        }
+                                                    })}
+                                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                    min="800"
+                                                    max="4000"
+                                                />
+                                            </div>
+
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-300 mb-2">
+                                                    Max Image Height (px)
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    value={editingTemplate.resourceLimits?.maxImageResolution?.height || 1080}
+                                                    onChange={(e) => setEditingTemplate({
+                                                        ...editingTemplate,
+                                                        resourceLimits: {
+                                                            ...editingTemplate.resourceLimits,
+                                                            maxImageResolution: {
+                                                                ...editingTemplate.resourceLimits?.maxImageResolution,
+                                                                height: parseInt(e.target.value) || 1080
+                                                            }
+                                                        }
+                                                    })}
+                                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                    min="600"
+                                                    max="4000"
+                                                />
+                                            </div>
+
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-300 mb-2">
+                                                    Max Storage Per Project (MB)
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    value={editingTemplate.resourceLimits?.maxStoragePerProject || 100}
+                                                    onChange={(e) => setEditingTemplate({
+                                                        ...editingTemplate,
+                                                        resourceLimits: {
+                                                            ...editingTemplate.resourceLimits,
+                                                            maxStoragePerProject: parseInt(e.target.value) || 100
+                                                        }
+                                                    })}
+                                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                    min="10"
+                                                    max="1000"
+                                                />
+                                                <p className="text-xs text-gray-500 mt-1">Total storage limit for build files and static assets</p>
+                                            </div>
+
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-300 mb-2">
+                                                    Max Files Per Project
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    value={editingTemplate.resourceLimits?.maxFilesPerProject || 1000}
+                                                    onChange={(e) => setEditingTemplate({
+                                                        ...editingTemplate,
+                                                        resourceLimits: {
+                                                            ...editingTemplate.resourceLimits,
+                                                            maxFilesPerProject: parseInt(e.target.value) || 1000
+                                                        }
+                                                    })}
+                                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                    min="100"
+                                                    max="10000"
+                                                />
+                                                <p className="text-xs text-gray-500 mt-1">Maximum number of files per project</p>
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-green-900/20 border border-green-500/30 rounded-xl p-4">
+                                            <h4 className="text-sm font-semibold text-green-300 mb-2">💡 Best Practice</h4>
+                                            <ul className="text-xs text-green-200/80 space-y-1 list-disc list-inside">
+                                                <li>Set <code className="bg-green-900/50 px-1 rounded">maxListings: null</code> to allow unlimited listings via user's database</li>
+                                                <li>Set reasonable image limits (5MB, 1920x1080) to protect server resources</li>
+                                                <li>Users can use their own storage (S3, Cloudinary) for large files</li>
+                                                <li>Platform limits protect your server, user infrastructure handles scale</li>
+                                            </ul>
+                                        </div>
                                     </div>
                                 )}
                             </form>
@@ -631,8 +1012,9 @@ export default function TemplateManagement() {
                             </button>
                         </div>
                     </div>
-                </div>
-            )}
-        </div>
+                </div >
+            )
+}
+        </div >
     );
 }

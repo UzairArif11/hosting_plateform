@@ -57,6 +57,13 @@ const deploymentSchema = new mongoose.Schema({
     required: true
   },
 
+  // Smart Template Mode (Lite vs Pro)
+  deploymentMode: {
+    type: String,
+    enum: ['lite', 'pro'],
+    default: null // null for non-template deployments
+  },
+
   // Build Information
   buildLogs: [{
     timestamp: {

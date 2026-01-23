@@ -130,7 +130,7 @@ router.post('/:id/deploy', requireAuth, requireResourceCapacity('projects', 1), 
             });
         }
 
-        const { name, environmentVariables } = req.body;
+        const { name, environmentVariables, mode } = req.body;
 
         if (!name) {
             return res.status(400).json({ success: false, error: 'Project name is required' });
@@ -140,7 +140,8 @@ router.post('/:id/deploy', requireAuth, requireResourceCapacity('projects', 1), 
             template,
             user: fullUser,
             projectName: name,
-            environmentVariables
+            environmentVariables,
+            mode: mode || null // Smart Template mode (lite/pro)
         });
 
         if (result.success) {

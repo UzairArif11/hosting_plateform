@@ -52,7 +52,11 @@ function TemplatesPageContent() {
             const data = await res.json();
 
             if (data.success) {
-                setTemplates(data.templates);
+                // Ensure previewUrl is included in templates
+                setTemplates(data.templates.map((t: any) => ({
+                    ...t,
+                    previewUrl: t.previewUrl || undefined
+                })));
             }
         } catch (error) {
             console.error('Failed to fetch templates:', error);

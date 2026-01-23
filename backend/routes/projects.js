@@ -389,6 +389,15 @@ router.put('/:id',
           if (field.includes('.')) {
             const [parent, child] = field.split('.');
             project[parent][child] = updates[field];
+          } else if (field === 'environmentVariables') {
+            // Ensure environmentVariables is properly formatted
+            // Each env var should have: key, value, isSecret, environments
+            project[field] = (updates[field] || []).map((env: any) => ({
+              key: env.key || '',
+              value: env.value || '',
+              isSecret: env.isSecret || false,
+              environments: env.environments || ['production']
+            }));
           } else {
             project[field] = updates[field];
           }

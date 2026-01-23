@@ -7,8 +7,38 @@ const logger = require('../utils/logger');
 /**
  * Deploy a template for a user
  */
-async function deployTemplate({ template, user, projectName, environmentVariables }) {
+async function deployTemplate({ template, user, projectName, environmentVariables, mode }) {
     try {
+        // ===== SMART TEMPLATE VALIDATION =====
+        // 1. Validate mode is supported by template
+        if (mode && template.supportedModes) {
+            if (!template.supportedModes.includes(mode)) {
+                return {
+                    success: false,
+                    error: `This template does not support ${mode} mode. Supported modes: ${template.supportedModes.join(', ')}`
+                };
+            }
+        }
+
+        // 2. For Pro Mode: Ensure DATABASE_URL is provided
+        if (mode === 'pro') {
+            const hasDatabaseUrl = (environmentVariables || []).some(
+                v => v.key === 'DATABASE_URL' && v.value && v.value.trim()
+            );
+            if (!hasDatabaseUrl) {
+                return {
+                    success: false,
+                    error: 'Pro Mode requires a DATABASE_URL environment variable. Please provide your external database connection string.'
+                };
+            }
+        }
+
+        // 3. For Lite Mode: Strip DATABASE_URL if accidentally provided
+        if (mode === 'lite' && environmentVariables) {
+            environmentVariables = environmentVariables.filter(v => v.key !== 'DATABASE_URL');
+            logger.info('Lite Mode: DATABASE_URL stripped from environment variables');
+        }
+        // ===== END SMART TEMPLATE VALIDATION =====
         // Generate unique slug
         const slugBase = projectName.toLowerCase()
             .replace(/[^a-z0-9]+/g, '-')
@@ -24,49 +54,23 @@ async function deployTemplate({ template, user, projectName, environmentVariable
             attempts++;
         }
 
-        // Option 1: Fork template repo to user's GitHub (if user has GitHub connected)
-        let repoInfo;
+        // IMPORTANT: Use shared template repository (not forked)
+        // All users deploy from the same template repo
+        // Users customize via environment variables and project settings (dynamic customization)
+        // This allows template to be updated and all users benefit from updates
+        const repoInfo = {
+            url: `https://github.com/${template.githubRepo}`,
+            fullName: template.githubRepo,
+            branch: template.githubBranch || 'main',
+            provider: 'github',
+            isPrivate: false
+        };
 
-        // We prefer forking if possible so user owns the code
-        if (user.githubAccessToken) {
-            try {
-                const forkResult = await github.forkRepository(
-                    template.githubRepo,
-                    user.githubAccessToken
-                );
-
-                if (forkResult.success) {
-                    repoInfo = {
-                        url: forkResult.data.cloneUrl || forkResult.data.html_url,
-                        fullName: forkResult.data.full_name, // Note case difference in GitHub API vs our standard
-                        branch: template.githubBranch || 'main',
-                        provider: 'github',
-                        isPrivate: false
-                    };
-                }
-            } catch (err) {
-                logger.warn('Failed to fork repository, falling back to clone', { error: err.message });
-            }
-        }
-
-        // Option 2: Clone to platform storage (if no GitHub or fork failed)
-        // NOTE: For MVP, we still require a valid public repo URL even if we don't fork it.
-        // If not forked, improvements needed: create a repo in our own org? 
-        // For now, we point to the template repo directly but that means user changes won't be saved to a repo they own.
-        // Ideally, we should CREATE a repo for them.
-        // Since our system relies on 'push' events for updates, pointing to a read-only template repo isn't ideal for long term.
-        // But for "deploy template" initial demo, it works. 
-        // Real implementation should probably create a new repo on user's behalf if forking isn't option.
-
-        if (!repoInfo) {
-            repoInfo = {
-                url: `https://github.com/${template.githubRepo}`,
-                fullName: template.githubRepo,
-                branch: template.githubBranch || 'main',
-                provider: 'github',
-                isPrivate: false
-            };
-        }
+        logger.info('✅ Using shared template repository - users customize via env vars and settings', {
+            userId: user._id,
+            templateRepo: template.githubRepo,
+            note: 'Template is shared, users customize dynamically via environment variables'
+        });
 
         // Merge template env vars with user-provided ones
         const mergedEnvVars = (template.environmentVariables || []).map(templateVar => {
@@ -79,20 +83,26 @@ async function deployTemplate({ template, user, projectName, environmentVariable
             };
         });
 
-        // Create project
+        // Create project - Shared template repo, dynamic customization via env vars
+        // User has FULL CONTROL via:
+        // - Environment variables (add/update/delete) - for dynamic data customization
+        // - Build config (customize build process)
+        // - Project settings (all editable)
+        // Template repo is shared - users customize via environment variables (like API keys, database URLs, etc.)
         const project = await Project.create({
             name: projectName,
             slug: slug,
-            owner: user._id,
-            repository: repoInfo,
+            owner: user._id, // This is the correct field (not userId)
+            repository: repoInfo, // Shared template repo
             framework: template.framework,
-            buildConfig: template.buildConfig,
-            environmentVariables: mergedEnvVars,
-            autoDeployEnabled: true,
+            buildConfig: template.buildConfig || {}, // User can edit this later
+            environmentVariables: mergedEnvVars, // User can add/update/delete these - DYNAMIC CUSTOMIZATION
+            autoDeployEnabled: true, // User can toggle this
             metadata: {
                 deployedFromTemplate: template._id,
                 templateName: template.name,
-                deployedAt: new Date()
+                deployedAt: new Date(),
+                sharedTemplate: true // Template is shared, customization via env vars
             },
             status: 'active',
             domains: [{
@@ -100,7 +110,22 @@ async function deployTemplate({ template, user, projectName, environmentVariable
                 isCustom: false,
                 isPrimary: true,
                 verified: true
-            }]
+            }],
+            // User can edit all these settings via PUT /api/projects/:id
+            settings: {
+                notifications: {
+                    email: true
+                }
+            }
+        });
+
+        logger.info('✅ Project created from shared template - user customizes via env vars', {
+            projectId: project._id,
+            userId: user._id,
+            projectName: projectName,
+            templateRepo: template.githubRepo,
+            envVarsCount: mergedEnvVars.length,
+            note: 'Template is shared, user customizes dynamically via environment variables'
         });
 
         // Create initial deployment
@@ -113,7 +138,8 @@ async function deployTemplate({ template, user, projectName, environmentVariable
             trigger: 'template',
             metadata: {
                 templateId: template._id,
-                templateName: template.name
+                templateName: template.name,
+                deploymentMode: mode || null // Track Smart Template mode
             }
         });
 
