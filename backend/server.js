@@ -139,7 +139,6 @@ app.use('/api/billing', requireAuth, billingRoutes);
 app.use('/api/admin', requireAuth, requireAdmin, adminRoutes);
 app.use('/api/settings', settingsRoutes); // Settings (public domain lookup, admin for updates)
 app.use('/api/test', require('./routes/test')); // Test endpoints (no auth required)
-const webhookRoutes = require('./routes/webhooks');
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/analytics', analyticsRoutes);
