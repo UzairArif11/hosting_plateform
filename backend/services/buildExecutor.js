@@ -398,9 +398,10 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
             stdout = result.stdout;
             stderr = result.stderr;
         } catch (error) {
-            // If npm ci fails (no package-lock.json), fallback to npm install
-            if (packageManager === 'npm' && error.message.includes('package-lock.json')) {
-                await onLog('warn', 'npm ci failed, falling back to npm install...');
+            // Check for pnpm not found
+            if (packageManager === 'pnpm' && (error.message.includes('not found') || error.message.includes('pnpm: command not found'))) {
+                await onLog('warn', 'pnpm not found, falling back to npm install...');
+                // Fallback to npm
                 installCmd = 'npm install';
                 const result = await execAsync(installCmd, {
                     cwd: buildPath,
@@ -409,9 +410,21 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
                 });
                 stdout = result.stdout;
                 stderr = result.stderr;
-            } else {
-                throw error;
-            }
+            } else
+                // If npm ci fails (no package-lock.json), fallback to npm install
+                if (packageManager === 'npm' && error.message.includes('package-lock.json')) {
+                    await onLog('warn', 'npm ci failed, falling back to npm install...');
+                    installCmd = 'npm install';
+                    const result = await execAsync(installCmd, {
+                        cwd: buildPath,
+                        timeout: 10 * 60 * 1000,
+                        maxBuffer: 10 * 1024 * 1024
+                    });
+                    stdout = result.stdout;
+                    stderr = result.stderr;
+                } else {
+                    throw error;
+                }
         }
 
         if (stdout) await onLog('info', stdout.substring(0, 500));
