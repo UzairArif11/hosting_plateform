@@ -392,7 +392,7 @@ router.put('/:id',
           } else if (field === 'environmentVariables') {
             // Ensure environmentVariables is properly formatted
             // Each env var should have: key, value, isSecret, environments
-            project[field] = (updates[field] || []).map((env: any) => ({
+            project[field] = (updates[field] || []).map((env) => ({
               key: env.key || '',
               value: env.value || '',
               isSecret: env.isSecret || false,
