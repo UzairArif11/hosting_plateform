@@ -31,7 +31,7 @@ const deploymentSchema = new mongoose.Schema({
   },
   commitSha: {
     type: String,
-    required: true
+    required: false // Optional for template deployments until git init
   },
   commitMessage: {
     type: String,
@@ -52,7 +52,7 @@ const deploymentSchema = new mongoose.Schema({
   },
   trigger: {
     type: String,
-    enum: ['manual', 'webhook', 'retry', 'rollback'],
+    enum: ['manual', 'webhook', 'retry', 'rollback', 'template'],
     default: 'manual',
     required: true
   },
