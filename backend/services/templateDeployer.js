@@ -152,11 +152,12 @@ async function deployTemplate({ template, user, projectName, environmentVariable
             },
             status: 'queued',
             environment: 'production',
-            trigger: 'template',
+            trigger: 'manual', // Use 'manual' to satisfy strict DB validator (enum)
             metadata: {
                 templateId: template._id,
                 templateName: template.name,
-                deploymentMode: mode || null // Track Smart Template mode
+                deploymentMode: mode || null, // Track Smart Template mode
+                isTemplateDeployment: true // Flag for UI/Logic differentiation
             }
         });
 
