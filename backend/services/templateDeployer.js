@@ -83,6 +83,17 @@ async function deployTemplate({ template, user, projectName, environmentVariable
             };
         });
 
+        // Check for existing project with same name and append suffix if needed
+        let finalProjectName = projectName;
+        let nameExists = await Project.findOne({ name: finalProjectName, owner: user._id });
+        let nameAttempts = 0;
+
+        while (nameExists && nameAttempts < 10) {
+            finalProjectName = `${projectName}-${Math.floor(1000 + Math.random() * 9000)}`;
+            nameExists = await Project.findOne({ name: finalProjectName, owner: user._id });
+            nameAttempts++;
+        }
+
         // Create project - Shared template repo, dynamic customization via env vars
         // User has FULL CONTROL via:
         // - Environment variables (add/update/delete) - for dynamic data customization
@@ -90,7 +101,7 @@ async function deployTemplate({ template, user, projectName, environmentVariable
         // - Project settings (all editable)
         // Template repo is shared - users customize via environment variables (like API keys, database URLs, etc.)
         const project = await Project.create({
-            name: projectName,
+            name: finalProjectName,
             slug: slug,
             owner: user._id, // This is the correct field (not userId)
             repository: repoInfo, // Shared template repo
