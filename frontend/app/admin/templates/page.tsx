@@ -75,7 +75,7 @@ export default function TemplateManagement() {
     const [loading, setLoading] = useState(true);
     const [editingTemplate, setEditingTemplate] = useState<Template | null>(null);
     const [showModal, setShowModal] = useState(false);
-    const [activeTab, setActiveTab] = useState<'basic' | 'build' | 'preview' | 'env'>('basic');
+    const [activeTab, setActiveTab] = useState<'basic' | 'build' | 'preview' | 'env' | 'limits'>('basic');
 
     useEffect(() => {
         fetchTemplates();
@@ -146,6 +146,15 @@ export default function TemplateManagement() {
         });
         setShowModal(true);
         setActiveTab('basic');
+    };
+
+    const handleModeChange = (mode: 'lite' | 'pro', checked: boolean) => {
+        if (!editingTemplate) return;
+        const current = editingTemplate.supportedModes || [];
+        const updated = checked
+            ? [...current, mode]
+            : current.filter(m => m !== mode);
+        setEditingTemplate({ ...editingTemplate, supportedModes: updated });
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -231,11 +240,7 @@ export default function TemplateManagement() {
     };
 
     if (loading) {
-        return (
-            <div className="flex items-center justify-center min-h-screen">
-                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
-            </div>
-        );
+        return <div className="p-8 text-center text-gray-400">Loading templates...</div>;
     }
 
     return (
@@ -342,154 +347,153 @@ export default function TemplateManagement() {
 
                                 {/* Basic Info */}
                                 {activeTab === 'basic' && (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        <div className="col-span-2">
-                                            <label className="block text-sm font-medium text-gray-300 mb-2">
-                                                Display Name *
-                                                <span className="text-xs text-gray-500 ml-2">(Shown to users in gallery)</span>
-                                            </label>
-                                            <input
-                                                required
-                                                type="text"
-                                                value={editingTemplate.displayName}
-                                                onChange={(e) => setEditingTemplate({ ...editingTemplate, displayName: e.target.value })}
-                                                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
-                                                placeholder="Next.js Ecommerce Starter"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-300 mb-2">
-                                                Template Slug (ID) *
-                                                <span className="text-xs text-gray-500 ml-2">(Unique identifier)</span>
-                                            </label>
-                                            <input
-                                                required
-                                                type="text"
-                                                value={editingTemplate.name}
-                                                onChange={(e) => {
-                                                    const slug = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-                                                    setEditingTemplate({ ...editingTemplate, name: slug, slug: slug });
-                                                }}
-                                                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white font-mono text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
-                                                placeholder="nextjs-ecommerce-starter"
-                                            />
-                                            <p className="text-xs text-gray-500 mt-1">Lowercase, hyphens only (auto-formatted)</p>
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-300 mb-2">Category *</label>
-                                            <select
-                                                value={editingTemplate.category}
-                                                onChange={(e) => setEditingTemplate({ ...editingTemplate, category: e.target.value })}
-                                                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
-                                            >
-                                                {CATEGORIES.map(c => (
-                                                    <option key={c} value={c}>
-                                                        {c.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <div className="col-span-2">
-                                            <label className="block text-sm font-medium text-gray-300 mb-2">
-                                                Description *
-                                                <span className="text-xs text-gray-500 ml-2">(Brief description shown in gallery)</span>
-                                            </label>
-                                            <textarea
-                                                required
-                                                value={editingTemplate.description}
-                                                onChange={(e) => setEditingTemplate({ ...editingTemplate, description: e.target.value })}
-                                                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all resize-none"
-                                                rows={3}
-                                                placeholder="A modern ecommerce template built with Next.js, featuring product catalog, cart, and checkout..."
-                                            />
-                                            <p className="text-xs text-gray-500 mt-1">{editingTemplate.description.length}/200 characters</p>
-                                        </div>
-
-                                        <div className="bg-gray-800/30 p-4 rounded-xl border border-gray-700/50 space-y-4 mt-6">
-                                            <h4 className="text-sm font-semibold text-white">Visibility & Access</h4>
-                                            <div className="flex flex-wrap gap-6">
-                                                <label className="flex items-center space-x-2 cursor-pointer group">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={editingTemplate.isPublished}
-                                                        onChange={(e) => setEditingTemplate({ ...editingTemplate, isPublished: e.target.checked })}
-                                                        className="w-5 h-5 text-purple-600 bg-gray-800 border-gray-700 rounded focus:ring-2 focus:ring-purple-500"
-                                                    />
-                                                    <div>
-                                                        <span className="text-white font-medium">Published</span>
-                                                        <p className="text-xs text-gray-500">Visible to users in template gallery</p>
-                                                    </div>
+                                    <>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            <div className="col-span-2">
+                                                <label className="block text-sm font-medium text-gray-300 mb-2">
+                                                    Display Name *
+                                                    <span className="text-xs text-gray-500 ml-2">(Shown to users in gallery)</span>
                                                 </label>
+                                                <input
+                                                    required
+                                                    type="text"
+                                                    value={editingTemplate.displayName}
+                                                    onChange={(e) => setEditingTemplate({ ...editingTemplate, displayName: e.target.value })}
+                                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                    placeholder="Next.js Ecommerce Starter"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-300 mb-2">
+                                                    Template Slug (ID) *
+                                                    <span className="text-xs text-gray-500 ml-2">(Unique identifier)</span>
+                                                </label>
+                                                <input
+                                                    required
+                                                    type="text"
+                                                    value={editingTemplate.name}
+                                                    onChange={(e) => {
+                                                        const slug = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+                                                        setEditingTemplate({ ...editingTemplate, name: slug, slug: slug });
+                                                    }}
+                                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white font-mono text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                    placeholder="nextjs-ecommerce-starter"
+                                                />
+                                                <p className="text-xs text-gray-500 mt-1">Lowercase, hyphens only (auto-formatted)</p>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-300 mb-2">Category *</label>
+                                                <select
+                                                    value={editingTemplate.category}
+                                                    onChange={(e) => setEditingTemplate({ ...editingTemplate, category: e.target.value })}
+                                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                >
+                                                    {CATEGORIES.map(c => (
+                                                        <option key={c} value={c}>
+                                                            {c.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div className="col-span-2">
+                                                <label className="block text-sm font-medium text-gray-300 mb-2">
+                                                    Description *
+                                                    <span className="text-xs text-gray-500 ml-2">(Brief description shown in gallery)</span>
+                                                </label>
+                                                <textarea
+                                                    required
+                                                    value={editingTemplate.description}
+                                                    onChange={(e) => setEditingTemplate({ ...editingTemplate, description: e.target.value })}
+                                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all resize-none"
+                                                    rows={3}
+                                                    placeholder="A modern ecommerce template built with Next.js, featuring product catalog, cart, and checkout..."
+                                                />
+                                                <p className="text-xs text-gray-500 mt-1">{editingTemplate.description.length}/200 characters</p>
+                                            </div>
 
-                                                <div className="flex items-center gap-3">
-                                                    <label className="text-sm font-medium text-gray-300">Minimum Plan:</label>
-                                                    <select
-                                                        value={editingTemplate.minPlan || 'free'}
-                                                        onChange={(e) => setEditingTemplate({
-                                                            ...editingTemplate,
-                                                            minPlan: e.target.value as any,
-                                                            isPremium: e.target.value !== 'free' // Sync legacy flag
-                                                        })}
-                                                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
-                                                    >
-                                                        <option value="free">Free (All Users)</option>
-                                                        <option value="pro">Pro (Paid Plans)</option>
-                                                        <option value="enterprise">Enterprise</option>
-                                                    </select>
-                                                    <span className="text-xs text-gray-500">
-                                                        {editingTemplate.minPlan === 'free' && '✓ Available to everyone'}
-                                                        {editingTemplate.minPlan === 'pro' && '🔒 Requires Pro plan or higher'}
-                                                        {editingTemplate.minPlan === 'enterprise' && '🔒 Requires Enterprise plan'}
-                                                    </span>
+                                            <div className="bg-gray-800/30 p-4 rounded-xl border border-gray-700/50 space-y-4 mt-6">
+                                                <h4 className="text-sm font-semibold text-white">Visibility & Access</h4>
+                                                <div className="flex flex-wrap gap-6">
+                                                    <label className="flex items-center space-x-2 cursor-pointer group">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={editingTemplate.isPublished}
+                                                            onChange={(e) => setEditingTemplate({ ...editingTemplate, isPublished: e.target.checked })}
+                                                            className="w-5 h-5 text-purple-600 bg-gray-800 border-gray-700 rounded focus:ring-2 focus:ring-purple-500"
+                                                        />
+                                                        <div>
+                                                            <span className="text-white font-medium">Published</span>
+                                                            <p className="text-xs text-gray-500">Visible to users in template gallery</p>
+                                                        </div>
+                                                    </label>
+
+                                                    <label className="flex items-center space-x-2 cursor-pointer group">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={editingTemplate.isPremium}
+                                                            onChange={(e) => setEditingTemplate({ ...editingTemplate, isPremium: e.target.checked })}
+                                                            className="rounded border-gray-700 bg-gray-800 text-purple-600 focus:ring-purple-500"
+                                                        />
+                                                        <span className="text-gray-300 text-sm">Premium Template (Legacy)</span>
+                                                    </label>
+
+                                                    <div className="flex items-center gap-3">
+                                                        <label className="text-sm font-medium text-gray-300">Minimum Plan:</label>
+                                                        <select
+                                                            value={editingTemplate.minPlan || 'free'}
+                                                            onChange={(e) => setEditingTemplate({
+                                                                ...editingTemplate,
+                                                                minPlan: e.target.value as any,
+                                                                isPremium: e.target.value !== 'free' // Sync legacy flag
+                                                            })}
+                                                            className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                                                        >
+                                                            <option value="free">Free (All Users)</option>
+                                                            <option value="pro">Pro (Paid Plans)</option>
+                                                            <option value="enterprise">Enterprise</option>
+                                                        </select>
+                                                        <span className="text-xs text-gray-500">
+                                                            {editingTemplate.minPlan === 'free' && '✓ Available to everyone'}
+                                                            {editingTemplate.minPlan === 'pro' && '🔒 Requires Pro plan or higher'}
+                                                            {editingTemplate.minPlan === 'enterprise' && '🔒 Requires Enterprise plan'}
+                                                        </span>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
-                                    </div>
 
-                                    {/* Modes */}
-                                <div className="bg-gray-800/30 p-4 rounded-xl border border-gray-700/50 space-y-4 mt-6">
-                                    <h4 className="text-sm font-semibold text-white">Supported Modes</h4>
-                                    <div className="flex gap-6">
-                                        <label className="flex items-center space-x-2 cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                checked={editingTemplate.supportedModes?.includes('lite')}
-                                                onChange={(e) => {
-                                                    const current = editingTemplate.supportedModes || [];
-                                                    const updated = e.target.checked
-                                                        ? [...current, 'lite']
-                                                        : current.filter(m => m !== 'lite');
-                                                    setEditingTemplate({ ...editingTemplate, supportedModes: updated });
-                                                }}
-                                                className="w-5 h-5 text-green-500 bg-gray-800 border-gray-700 rounded focus:ring-2 focus:ring-green-500"
-                                            />
-                                            <div>
-                                                <span className="text-white font-medium">Lite Mode</span>
-                                                <p className="text-xs text-gray-500">Zero-config, embedded DB (SQLite)</p>
+                                        {/* Modes */}
+                                        <div className="bg-gray-800/30 p-4 rounded-xl border border-gray-700/50 space-y-4 mt-6">
+                                            <h4 className="text-sm font-semibold text-white">Supported Modes</h4>
+                                            <div className="flex gap-6">
+                                                <label className="flex items-center space-x-2 cursor-pointer">
+                                                    <input
+                                                        className="w-5 h-5 text-green-500 bg-gray-800 border border-gray-700 rounded focus:ring-2 focus:ring-green-500"
+                                                        type="checkbox"
+                                                        checked={editingTemplate.supportedModes?.includes('lite') ?? false}
+                                                        onChange={(e) => handleModeChange('lite', e.target.checked)}
+                                                    />
+                                                    <div>
+                                                        <span className="text-white font-medium">Lite Mode</span>
+                                                        <p className="text-xs text-gray-500">Zero-config, embedded DB (SQLite)</p>
+                                                    </div>
+                                                </label>
+
+                                                <label className="flex items-center space-x-2 cursor-pointer">
+                                                    <input
+                                                        className="w-5 h-5 text-blue-500 bg-gray-800 border border-gray-700 rounded focus:ring-2 focus:ring-blue-500"
+                                                        type="checkbox"
+                                                        checked={editingTemplate.supportedModes?.includes('pro') ?? false}
+                                                        onChange={(e) => handleModeChange('pro', e.target.checked)}
+                                                    />
+                                                    <div>
+                                                        <span className="text-white font-medium">Pro Mode</span>
+                                                        <p className="text-xs text-gray-500">External DB (Postgres/MySQL)</p>
+                                                    </div>
+                                                </label>
                                             </div>
-                                        </label>
-
-                                        <label className="flex items-center space-x-2 cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                checked={editingTemplate.supportedModes?.includes('pro')}
-                                                onChange={(e) => {
-                                                    const current = editingTemplate.supportedModes || [];
-                                                    const updated = e.target.checked
-                                                        ? [...current, 'pro']
-                                                        : current.filter(m => m !== 'pro');
-                                                    setEditingTemplate({ ...editingTemplate, supportedModes: updated });
-                                                }}
-                                                className="w-5 h-5 text-blue-500 bg-gray-800 border-gray-700 rounded focus:ring-2 focus:ring-blue-500"
-                                            />
-                                            <div>
-                                                <span className="text-white font-medium">Pro Mode</span>
-                                                <p className="text-xs text-gray-500">External DB (Postgres/MySQL)</p>
-                                            </div>
-                                        </label>
-                                    </div>
-                                </div>
-
+                                        </div>
+                                    </>
                                 )}
 
                                 {/* Build Config */}
@@ -756,6 +760,7 @@ export default function TemplateManagement() {
                                                             type="text"
                                                             value={env.key}
                                                             onChange={(e) => {
+                                                                if (!editingTemplate) return;
                                                                 const newEnv = [...editingTemplate.environmentVariables];
                                                                 newEnv[idx].key = e.target.value;
                                                                 setEditingTemplate({ ...editingTemplate, environmentVariables: newEnv });
@@ -771,6 +776,7 @@ export default function TemplateManagement() {
                                                             type="text"
                                                             value={env.defaultValue || ''}
                                                             onChange={(e) => {
+                                                                if (!editingTemplate) return;
                                                                 const newEnv = [...editingTemplate.environmentVariables];
                                                                 newEnv[idx].defaultValue = e.target.value;
                                                                 setEditingTemplate({ ...editingTemplate, environmentVariables: newEnv });
@@ -785,6 +791,7 @@ export default function TemplateManagement() {
                                                             type="text"
                                                             value={env.description || ''}
                                                             onChange={(e) => {
+                                                                if (!editingTemplate) return;
                                                                 const newEnv = [...editingTemplate.environmentVariables];
                                                                 newEnv[idx].description = e.target.value;
                                                                 setEditingTemplate({ ...editingTemplate, environmentVariables: newEnv });
@@ -799,6 +806,7 @@ export default function TemplateManagement() {
                                                                 type="checkbox"
                                                                 checked={env.isRequired || false}
                                                                 onChange={(e) => {
+                                                                    if (!editingTemplate) return;
                                                                     const newEnv = [...editingTemplate.environmentVariables];
                                                                     newEnv[idx].isRequired = e.target.checked;
                                                                     setEditingTemplate({ ...editingTemplate, environmentVariables: newEnv });
@@ -812,6 +820,7 @@ export default function TemplateManagement() {
                                                                 type="checkbox"
                                                                 checked={env.isSecret || false}
                                                                 onChange={(e) => {
+                                                                    if (!editingTemplate) return;
                                                                     const newEnv = [...editingTemplate.environmentVariables];
                                                                     newEnv[idx].isSecret = e.target.checked;
                                                                     setEditingTemplate({ ...editingTemplate, environmentVariables: newEnv });
@@ -855,13 +864,16 @@ export default function TemplateManagement() {
                                                 <input
                                                     type="number"
                                                     value={editingTemplate.resourceLimits?.maxListings || ''}
-                                                    onChange={(e) => setEditingTemplate({
-                                                        ...editingTemplate,
-                                                        resourceLimits: {
-                                                            ...editingTemplate.resourceLimits,
-                                                            maxListings: e.target.value ? parseInt(e.target.value) : null
-                                                        }
-                                                    })}
+                                                    onChange={(e) => {
+                                                        if (!editingTemplate) return;
+                                                        setEditingTemplate({
+                                                            ...editingTemplate,
+                                                            resourceLimits: {
+                                                                ...editingTemplate.resourceLimits,
+                                                                maxListings: e.target.value ? parseInt(e.target.value) : null
+                                                            }
+                                                        });
+                                                    }}
                                                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
                                                     placeholder="Leave empty for unlimited"
                                                 />
@@ -877,13 +889,16 @@ export default function TemplateManagement() {
                                                 <input
                                                     type="number"
                                                     value={editingTemplate.resourceLimits?.maxImageSize || 5}
-                                                    onChange={(e) => setEditingTemplate({
-                                                        ...editingTemplate,
-                                                        resourceLimits: {
-                                                            ...editingTemplate.resourceLimits,
-                                                            maxImageSize: parseInt(e.target.value) || 5
-                                                        }
-                                                    })}
+                                                    onChange={(e) => {
+                                                        if (!editingTemplate) return;
+                                                        setEditingTemplate({
+                                                            ...editingTemplate,
+                                                            resourceLimits: {
+                                                                ...editingTemplate.resourceLimits,
+                                                                maxImageSize: parseInt(e.target.value) || 5
+                                                            }
+                                                        });
+                                                    }}
                                                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
                                                     min="1"
                                                     max="50"
@@ -898,16 +913,19 @@ export default function TemplateManagement() {
                                                 <input
                                                     type="number"
                                                     value={editingTemplate.resourceLimits?.maxImageResolution?.width || 1920}
-                                                    onChange={(e) => setEditingTemplate({
-                                                        ...editingTemplate,
-                                                        resourceLimits: {
-                                                            ...editingTemplate.resourceLimits,
-                                                            maxImageResolution: {
-                                                                ...editingTemplate.resourceLimits?.maxImageResolution,
-                                                                width: parseInt(e.target.value) || 1920
+                                                    onChange={(e) => {
+                                                        if (!editingTemplate) return;
+                                                        setEditingTemplate({
+                                                            ...editingTemplate,
+                                                            resourceLimits: {
+                                                                ...editingTemplate.resourceLimits,
+                                                                maxImageResolution: {
+                                                                    width: parseInt(e.target.value) || 1920,
+                                                                    height: editingTemplate.resourceLimits?.maxImageResolution?.height || 1080
+                                                                }
                                                             }
-                                                        }
-                                                    })}
+                                                        });
+                                                    }}
                                                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
                                                     min="800"
                                                     max="4000"
@@ -921,16 +939,19 @@ export default function TemplateManagement() {
                                                 <input
                                                     type="number"
                                                     value={editingTemplate.resourceLimits?.maxImageResolution?.height || 1080}
-                                                    onChange={(e) => setEditingTemplate({
-                                                        ...editingTemplate,
-                                                        resourceLimits: {
-                                                            ...editingTemplate.resourceLimits,
-                                                            maxImageResolution: {
-                                                                ...editingTemplate.resourceLimits?.maxImageResolution,
-                                                                height: parseInt(e.target.value) || 1080
+                                                    onChange={(e) => {
+                                                        if (!editingTemplate) return;
+                                                        setEditingTemplate({
+                                                            ...editingTemplate,
+                                                            resourceLimits: {
+                                                                ...editingTemplate.resourceLimits,
+                                                                maxImageResolution: {
+                                                                    width: editingTemplate.resourceLimits?.maxImageResolution?.width || 1920,
+                                                                    height: parseInt(e.target.value) || 1080
+                                                                }
                                                             }
-                                                        }
-                                                    })}
+                                                        });
+                                                    }}
                                                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
                                                     min="600"
                                                     max="4000"
@@ -944,13 +965,16 @@ export default function TemplateManagement() {
                                                 <input
                                                     type="number"
                                                     value={editingTemplate.resourceLimits?.maxStoragePerProject || 100}
-                                                    onChange={(e) => setEditingTemplate({
-                                                        ...editingTemplate,
-                                                        resourceLimits: {
-                                                            ...editingTemplate.resourceLimits,
-                                                            maxStoragePerProject: parseInt(e.target.value) || 100
-                                                        }
-                                                    })}
+                                                    onChange={(e) => {
+                                                        if (!editingTemplate) return;
+                                                        setEditingTemplate({
+                                                            ...editingTemplate,
+                                                            resourceLimits: {
+                                                                ...editingTemplate.resourceLimits,
+                                                                maxStoragePerProject: parseInt(e.target.value) || 100
+                                                            }
+                                                        });
+                                                    }}
                                                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
                                                     min="10"
                                                     max="1000"
@@ -965,13 +989,16 @@ export default function TemplateManagement() {
                                                 <input
                                                     type="number"
                                                     value={editingTemplate.resourceLimits?.maxFilesPerProject || 1000}
-                                                    onChange={(e) => setEditingTemplate({
-                                                        ...editingTemplate,
-                                                        resourceLimits: {
-                                                            ...editingTemplate.resourceLimits,
-                                                            maxFilesPerProject: parseInt(e.target.value) || 1000
-                                                        }
-                                                    })}
+                                                    onChange={(e) => {
+                                                        if (!editingTemplate) return;
+                                                        setEditingTemplate({
+                                                            ...editingTemplate,
+                                                            resourceLimits: {
+                                                                ...editingTemplate.resourceLimits,
+                                                                maxFilesPerProject: parseInt(e.target.value) || 1000
+                                                            }
+                                                        });
+                                                    }}
                                                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
                                                     min="100"
                                                     max="10000"
@@ -1011,9 +1038,8 @@ export default function TemplateManagement() {
                             </button>
                         </div>
                     </div>
-                </div >
-            )
-            }
-        </div >
+                </div>
+            )}
+        </div>
     );
 }

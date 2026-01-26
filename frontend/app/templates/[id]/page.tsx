@@ -74,6 +74,7 @@ export default function DeployTemplatePage() {
 
     const handleDeploy = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!template) return;
 
         if (!projectName.trim()) {
             toast.error('Project name is required');
@@ -97,7 +98,7 @@ export default function DeployTemplatePage() {
                 body: JSON.stringify({
                     name: projectName,
                     environmentVariables: formattedEnvVars,
-                    mode: template.supportedModes && template.supportedModes.length > 1 ? mode : null // Only send mode for Smart Templates
+                    mode: template.supportedModes && template.supportedModes.length > 1 ? mode : undefined // Only send mode for Smart Templates
                 })
             });
 
