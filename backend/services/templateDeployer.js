@@ -144,6 +144,12 @@ async function deployTemplate({ template, user, projectName, environmentVariable
             projectId: project._id,
             userId: user._id,
             branch: template.githubBranch || 'main',
+            commitSha: 'TEMPLATE_INIT', // Placeholder for validation
+            commitMessage: 'Initial template deployment',
+            commitAuthor: {
+                name: 'System',
+                email: 'system@vcp.dev'
+            },
             status: 'queued',
             environment: 'production',
             trigger: 'template',
