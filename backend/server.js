@@ -110,7 +110,10 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Connect to MongoDB
-connectDB();
+connectDB().then(() => {
+  // Runmigrations
+  require('./migrations/fix-indexes')();
+});
 
 
 // Health check endpoint

@@ -44,7 +44,14 @@ const verifyToken = (token) => {
 
 const createUserFromGitHubProfile = async (profile) => {
   try {
-    const defaultPlan = await Plan.findTrialPlan();
+    let defaultPlan = await Plan.findTrialPlan();
+
+    // Fix: Create default plans if they don't exist (prevents plan: null)
+    if (!defaultPlan) {
+      logger.info('Trial plan not found, creating default plans...');
+      await Plan.createDefaultPlans();
+      defaultPlan = await Plan.findTrialPlan();
+    }
 
     const newUser = new User({
       githubId: profile.id,
@@ -271,7 +278,12 @@ const handleGoogleAuthentication = async (accessToken, refreshToken, profile, do
     }
 
     // Create new user
-    const defaultPlan = await Plan.findTrialPlan();
+    let defaultPlan = await Plan.findTrialPlan();
+
+    if (!defaultPlan) {
+      await Plan.createDefaultPlans();
+      defaultPlan = await Plan.findTrialPlan();
+    }
 
     user = new User({
       googleId: profile.id,
