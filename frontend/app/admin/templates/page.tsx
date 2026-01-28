@@ -89,6 +89,7 @@ export default function TemplateManagement() {
 
     // Socket.IO for real-time demo deployment updates
     const socketRef = useRef<Socket | null>(null);
+    const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
         fetchTemplates();
@@ -99,6 +100,14 @@ export default function TemplateManagement() {
 
         socketRef.current.on('connect', () => {
             console.log('Connected to Socket.IO for template demo updates');
+        });
+
+        socketRef.current.on('disconnect', () => {
+            console.log('Disconnected from Socket.IO');
+        });
+
+        socketRef.current.on('connect_error', (error) => {
+            console.error('Socket.IO connection error:', error);
         });
 
         socketRef.current.on('template-demo-status', (data: {
@@ -133,9 +142,24 @@ export default function TemplateManagement() {
             }
         });
 
+        // Fallback polling for templates stuck in "deploying" state
+        pollingIntervalRef.current = setInterval(() => {
+            setTemplates(prev => {
+                const hasDeploying = prev.some(t => t.demoStatus === 'deploying');
+                if (hasDeploying) {
+                    // Refetch templates to get latest status
+                    fetchTemplates();
+                }
+                return prev;
+            });
+        }, 10000); // Poll every 10 seconds
+
         return () => {
             if (socketRef.current) {
                 socketRef.current.disconnect();
+            }
+            if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
             }
         };
     }, []);

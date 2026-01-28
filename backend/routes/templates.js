@@ -259,6 +259,11 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
         // Create demo project name with "demo-" prefix
         const demoProjectName = `demo-${template.name}`;
 
+        // Store template ID for async operations
+        const templateId = template._id;
+        const templateName = template.name;
+        const userEmail = req.user.email;
+
         // Deploy template as admin user's project (same as regular deployments) - but don't await
         // Deploy in background and return immediately
         templateDeployer.deployTemplate({
@@ -268,25 +273,33 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
             environmentVariables: environmentVariables || [],
             mode: 'lite' // Use lite mode for demos
         }).then(async (result) => {
+            // Refetch template to ensure we have latest state
+            const updatedTemplate = await Template.findById(templateId);
+            if (!updatedTemplate) {
+                logger.error(`Template ${templateId} not found for update`);
+                return;
+            }
+
             if (result.success) {
                 // Demo URL will be generated automatically like regular deployments
                 // Format: https://foodpanda.site/demo-templatename-abc123/
                 const demoUrl = result.deployment.deploymentUrl;
 
                 // Update template with demo deployment info
-                template.demoDeploymentUrl = demoUrl;
-                template.demoProjectId = result.project._id;
-                template.demoDeploymentId = result.deployment._id;
-                template.demoStatus = 'success';
-                template.demoProgress = 100;
-                await template.save();
+                updatedTemplate.demoDeploymentUrl = demoUrl;
+                updatedTemplate.demoProjectId = result.project._id;
+                updatedTemplate.demoDeploymentId = result.deployment._id;
+                updatedTemplate.demoStatus = 'success';
+                updatedTemplate.demoProgress = 100;
+                updatedTemplate.demoError = null;
+                await updatedTemplate.save();
 
-                logger.info(`Admin ${req.user.email} deployed demo for template ${template.name} at ${demoUrl}`);
+                logger.info(`Admin ${userEmail} deployed demo for template ${templateName} at ${demoUrl}`);
 
                 // Emit success via Socket.IO
                 if (io) {
                     io.emit('template-demo-status', {
-                        templateId: template._id,
+                        templateId: templateId,
                         status: 'success',
                         progress: 100,
                         demoUrl,
@@ -295,16 +308,17 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
                 }
             } else {
                 // Update template with error
-                template.demoStatus = 'failed';
-                template.demoError = result.error || 'Deployment failed';
-                await template.save();
+                updatedTemplate.demoStatus = 'failed';
+                updatedTemplate.demoError = result.error || 'Deployment failed';
+                updatedTemplate.demoProgress = 0;
+                await updatedTemplate.save();
 
-                logger.error(`Failed to deploy demo for template ${template.name}: ${result.error}`);
+                logger.error(`Failed to deploy demo for template ${templateName}: ${result.error}`);
 
                 // Emit failure via Socket.IO
                 if (io) {
                     io.emit('template-demo-status', {
-                        templateId: template._id,
+                        templateId: templateId,
                         status: 'failed',
                         progress: 0,
                         error: result.error || 'Deployment failed',
@@ -313,17 +327,22 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
                 }
             }
         }).catch(async (error) => {
-            // Update template with error
-            template.demoStatus = 'failed';
-            template.demoError = error.message;
-            await template.save();
+            // Refetch template to ensure we have latest state
+            const updatedTemplate = await Template.findById(templateId);
+            if (updatedTemplate) {
+                // Update template with error
+                updatedTemplate.demoStatus = 'failed';
+                updatedTemplate.demoError = error.message;
+                updatedTemplate.demoProgress = 0;
+                await updatedTemplate.save();
+            }
 
-            logger.error('Failed to deploy template demo:', error);
+            logger.error(`Failed to deploy template demo ${templateName}:`, error);
 
             // Emit failure via Socket.IO
             if (io) {
                 io.emit('template-demo-status', {
-                    templateId: template._id,
+                    templateId: templateId,
                     status: 'failed',
                     progress: 0,
                     error: error.message,
