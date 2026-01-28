@@ -239,48 +239,110 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
 
         const { environmentVariables } = req.body;
 
+        // Mark as deploying immediately
+        template.demoStatus = 'deploying';
+        template.demoProgress = 0;
+        template.demoError = null;
+        await template.save();
+
+        // Emit initial status via Socket.IO
+        const io = req.app.get('io');
+        if (io) {
+            io.emit('template-demo-status', {
+                templateId: template._id,
+                status: 'deploying',
+                progress: 0,
+                message: 'Starting deployment...'
+            });
+        }
+
         // Create demo project name with "demo-" prefix
         const demoProjectName = `demo-${template.name}`;
 
-        // Deploy template as admin user's project (same as regular deployments)
-        const result = await templateDeployer.deployTemplate({
+        // Deploy template as admin user's project (same as regular deployments) - but don't await
+        // Deploy in background and return immediately
+        templateDeployer.deployTemplate({
             template,
             user: req.user,
             projectName: demoProjectName,
             environmentVariables: environmentVariables || [],
             mode: 'lite' // Use lite mode for demos
-        });
+        }).then(async (result) => {
+            if (result.success) {
+                // Demo URL will be generated automatically like regular deployments
+                // Format: https://foodpanda.site/demo-templatename-abc123/
+                const demoUrl = result.deployment.deploymentUrl;
 
-        if (result.success) {
-            // Demo URL will be generated automatically like regular deployments
-            // Format: https://foodpanda.site/demo-templatename-abc123/
-            const demoUrl = result.deployment.deploymentUrl;
+                // Update template with demo deployment info
+                template.demoDeploymentUrl = demoUrl;
+                template.demoProjectId = result.project._id;
+                template.demoDeploymentId = result.deployment._id;
+                template.demoStatus = 'success';
+                template.demoProgress = 100;
+                await template.save();
 
-            // Update template with demo deployment info
-            template.demoDeploymentUrl = demoUrl;
-            template.demoProjectId = result.project._id;
-            template.demoDeploymentId = result.deployment._id;
+                logger.info(`Admin ${req.user.email} deployed demo for template ${template.name} at ${demoUrl}`);
+
+                // Emit success via Socket.IO
+                if (io) {
+                    io.emit('template-demo-status', {
+                        templateId: template._id,
+                        status: 'success',
+                        progress: 100,
+                        demoUrl,
+                        message: 'Deployment successful!'
+                    });
+                }
+            } else {
+                // Update template with error
+                template.demoStatus = 'failed';
+                template.demoError = result.error || 'Deployment failed';
+                await template.save();
+
+                logger.error(`Failed to deploy demo for template ${template.name}: ${result.error}`);
+
+                // Emit failure via Socket.IO
+                if (io) {
+                    io.emit('template-demo-status', {
+                        templateId: template._id,
+                        status: 'failed',
+                        progress: 0,
+                        error: result.error || 'Deployment failed',
+                        message: 'Deployment failed'
+                    });
+                }
+            }
+        }).catch(async (error) => {
+            // Update template with error
+            template.demoStatus = 'failed';
+            template.demoError = error.message;
             await template.save();
 
-            logger.info(`Admin ${req.user.email} deployed demo for template ${template.name} at ${demoUrl}`);
+            logger.error('Failed to deploy template demo:', error);
 
-            res.status(201).json({
-                success: true,
-                message: 'Template demo deployed successfully',
-                demoUrl,
-                project: result.project,
-                deployment: result.deployment
-            });
-        } else {
-            res.status(400).json({
-                success: false,
-                error: result.error || 'Failed to deploy demo'
-            });
-        }
+            // Emit failure via Socket.IO
+            if (io) {
+                io.emit('template-demo-status', {
+                    templateId: template._id,
+                    status: 'failed',
+                    progress: 0,
+                    error: error.message,
+                    message: 'Deployment failed'
+                });
+            }
+        });
+
+        // Return immediately with deploying status
+        res.status(202).json({
+            success: true,
+            message: 'Template demo deployment started',
+            status: 'deploying',
+            templateId: template._id
+        });
 
     } catch (error) {
-        logger.error('Failed to deploy template demo:', error);
-        res.status(500).json({ success: false, error: 'Failed to deploy template demo' });
+        logger.error('Failed to start template demo deployment:', error);
+        res.status(500).json({ success: false, error: 'Failed to start template demo deployment' });
     }
 });
 
@@ -299,9 +361,13 @@ router.delete('/:id/demo', requireAuth, requireAdmin, async (req, res) => {
             await Project.findByIdAndDelete(template.demoProjectId);
         }
 
-        // Clear demo URL
+        // Clear demo URL and status
         template.demoDeploymentUrl = undefined;
         template.demoProjectId = undefined;
+        template.demoDeploymentId = undefined;
+        template.demoStatus = 'none';
+        template.demoProgress = 0;
+        template.demoError = null;
         await template.save();
 
         logger.info(`Admin ${req.user.email} removed demo for template ${template.name}`);

@@ -510,6 +510,13 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
             outputDir = project.buildConfig.outputDirectory;
         }
 
+        // Fix: Ensure build commands use npx or npm run to avoid "command not found" errors
+        // If command doesn't start with npm/npx/yarn/pnpm, wrap it with npx
+        if (!buildCommand.match(/^(npm|npx|yarn|pnpm|echo)/)) {
+            buildCommand = `npx ${buildCommand}`;
+            await onLog('info', `Wrapped build command with npx: ${buildCommand}`);
+        }
+
         deployment.buildCommand = buildCommand;
         deployment.outputDirectory = outputDir;
         await deployment.save();

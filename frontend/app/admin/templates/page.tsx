@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import api from '@/lib/api';
 import {
     PlusIcon,
@@ -13,6 +13,7 @@ import {
     CommandLineIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import { io, Socket } from 'socket.io-client';
 
 interface Template {
     _id: string;
@@ -26,6 +27,10 @@ interface Template {
     githubBranch: string;
     previewImage: string;
     previewUrl?: string; // Live website
+    demoDeploymentUrl?: string; // Admin-deployed demo URL
+    demoStatus?: 'none' | 'deploying' | 'success' | 'failed';
+    demoProgress?: number; // 0-100
+    demoError?: string;
     isPremium: boolean; // Kept for legacy
     minPlan: 'free' | 'pro' | 'enterprise';
     isPublished: boolean;
@@ -82,8 +87,57 @@ export default function TemplateManagement() {
     const [demoTemplate, setDemoTemplate] = useState<Template | null>(null);
     const [demoDeploying, setDemoDeploying] = useState(false);
 
+    // Socket.IO for real-time demo deployment updates
+    const socketRef = useRef<Socket | null>(null);
+
     useEffect(() => {
         fetchTemplates();
+
+        // Connect to Socket.IO for real-time updates
+        const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
+        socketRef.current = io(socketUrl);
+
+        socketRef.current.on('connect', () => {
+            console.log('Connected to Socket.IO for template demo updates');
+        });
+
+        socketRef.current.on('template-demo-status', (data: {
+            templateId: string;
+            status: 'deploying' | 'success' | 'failed';
+            progress: number;
+            demoUrl?: string;
+            error?: string;
+            message?: string;
+        }) => {
+            console.log('Template demo status update:', data);
+            
+            // Update templates array with new status
+            setTemplates(prev => prev.map(t => {
+                if (t._id === data.templateId) {
+                    return {
+                        ...t,
+                        demoStatus: data.status,
+                        demoProgress: data.progress,
+                        demoDeploymentUrl: data.demoUrl || t.demoDeploymentUrl,
+                        demoError: data.error
+                    };
+                }
+                return t;
+            }));
+
+            // Show toast notifications
+            if (data.status === 'success') {
+                toast.success(`Demo deployment successful!`, { duration: 5000 });
+            } else if (data.status === 'failed') {
+                toast.error(`Demo deployment failed: ${data.error || 'Unknown error'}`, { duration: 8000 });
+            }
+        });
+
+        return () => {
+            if (socketRef.current) {
+                socketRef.current.disconnect();
+            }
+        };
     }, []);
 
     const fetchTemplates = async () => {
@@ -242,13 +296,20 @@ export default function TemplateManagement() {
             });
 
             if (res.data.success) {
-                toast.success(`✅ Demo deployed successfully!`);
+                // Deployment started successfully - Socket.IO will provide updates
+                toast.success(`🚀 Demo deployment started! Watch the progress below.`, { duration: 5000 });
                 setShowDemoModal(false);
-                fetchTemplates();
+                
+                // Update local state to show deploying status immediately
+                setTemplates(prev => prev.map(t => 
+                    t._id === demoTemplate._id 
+                        ? { ...t, demoStatus: 'deploying' as const, demoProgress: 0 }
+                        : t
+                ));
             }
         } catch (error: any) {
             console.error('Demo deployment error:', error);
-            toast.error(error.response?.data?.error || 'Failed to deploy demo');
+            toast.error(error.response?.data?.error || 'Failed to start demo deployment');
         } finally {
             setDemoDeploying(false);
         }
@@ -333,21 +394,60 @@ export default function TemplateManagement() {
                             <p className="text-xs text-gray-500 font-mono mb-3">{template.framework} • {template.category}</p>
                             <p className="text-sm text-gray-400  line-clamp-2 mb-4 flex-1">{template.description}</p>
 
-                            {/* Demo URL Status */}
-                            {(template as any).demoDeploymentUrl && (
-                                <div className="mb-3 flex items-center gap-2 text-xs">
-                                    <GlobeAltIcon className="w-4 h-4 text-green-500" />
-                                    <a 
-                                        href={(template as any).demoDeploymentUrl} 
-                                        target="_blank" 
-                                        rel="noopener noreferrer"
-                                        className="text-green-500 hover:text-green-400 truncate"
-                                        onClick={(e) => e.stopPropagation()}
-                                    >
-                                        Live Demo Active
-                                    </a>
-                                </div>
-                            )}
+                            {/* Demo Deployment Status */}
+                            <div className="mb-3 space-y-2">
+                                {template.demoStatus === 'deploying' && (
+                                    <div className="flex items-center gap-2 text-xs bg-blue-500/10 border border-blue-500/30 rounded-lg p-2">
+                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                                        <div className="flex-1">
+                                            <div className="text-blue-400 font-medium">Deploying...</div>
+                                            <div className="w-full bg-gray-700 rounded-full h-1.5 mt-1">
+                                                <div 
+                                                    className="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
+                                                    style={{ width: `${template.demoProgress || 0}%` }}
+                                                ></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {template.demoStatus === 'success' && template.demoDeploymentUrl && (
+                                    <div className="flex items-center gap-2 text-xs bg-green-500/10 border border-green-500/30 rounded-lg p-2">
+                                        <GlobeAltIcon className="w-4 h-4 text-green-500 flex-shrink-0" />
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-green-400 font-medium">Live Demo Active</div>
+                                            <a 
+                                                href={template.demoDeploymentUrl} 
+                                                target="_blank" 
+                                                rel="noopener noreferrer"
+                                                className="text-green-500/80 hover:text-green-400 truncate block"
+                                                onClick={(e) => e.stopPropagation()}
+                                            >
+                                                {template.demoDeploymentUrl}
+                                            </a>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {template.demoStatus === 'failed' && (
+                                    <div className="flex items-center gap-2 text-xs bg-red-500/10 border border-red-500/30 rounded-lg p-2">
+                                        <XMarkIcon className="w-4 h-4 text-red-500 flex-shrink-0" />
+                                        <div className="flex-1">
+                                            <div className="text-red-400 font-medium">Deployment Failed</div>
+                                            {template.demoError && (
+                                                <div className="text-red-500/70 text-xs truncate">{template.demoError}</div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {(!template.demoStatus || template.demoStatus === 'none') && !template.demoDeploymentUrl && (
+                                    <div className="flex items-center gap-2 text-xs text-gray-500 p-2">
+                                        <PhotoIcon className="w-4 h-4" />
+                                        <span>No live demo deployed</span>
+                                    </div>
+                                )}
+                            </div>
 
                             <div className="flex justify-between gap-2 pt-4 border-t border-gray-800">
                                 <button
@@ -359,11 +459,25 @@ export default function TemplateManagement() {
                                 </button>
                                 <button
                                     onClick={() => handleDeployDemo(template)}
-                                    className="flex-1 flex items-center justify-center space-x-1 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 px-2 py-2 rounded-lg transition text-xs"
-                                    title="Deploy as live demo"
+                                    disabled={template.demoStatus === 'deploying'}
+                                    className={`flex-1 flex items-center justify-center space-x-1 px-2 py-2 rounded-lg transition text-xs ${
+                                        template.demoStatus === 'deploying'
+                                            ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                            : 'bg-blue-600/20 hover:bg-blue-600/40 text-blue-400'
+                                    }`}
+                                    title={template.demoStatus === 'deploying' ? 'Deployment in progress...' : 'Deploy as live demo'}
                                 >
-                                    <GlobeAltIcon className="h-4 w-4" />
-                                    <span>Demo</span>
+                                    {template.demoStatus === 'deploying' ? (
+                                        <>
+                                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-500"></div>
+                                            <span>Deploying...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <GlobeAltIcon className="h-4 w-4" />
+                                            <span>Deploy Demo</span>
+                                        </>
+                                    )}
                                 </button>
                                 <button
                                     onClick={() => handleDelete(template._id, template.displayName)}

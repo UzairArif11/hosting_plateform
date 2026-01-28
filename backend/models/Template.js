@@ -125,6 +125,21 @@ const templateSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Deployment' // Reference to demo deployment
     },
+    demoStatus: {
+        type: String,
+        enum: ['none', 'deploying', 'success', 'failed'],
+        default: 'none'
+    },
+    demoProgress: {
+        type: Number,
+        default: 0, // 0-100
+        min: 0,
+        max: 100
+    },
+    demoError: {
+        type: String,
+        default: null
+    },
     screenshots: [{
         url: String,
         caption: String
