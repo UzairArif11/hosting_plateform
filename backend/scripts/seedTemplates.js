@@ -4,123 +4,105 @@ const mongoose = require('mongoose');
 const Template = require('../models/Template');
 const connectDB = require('../utils/database');
 
+// ============================================
+// PRODUCTION TEMPLATES - REAL & VERIFIED
+// Only templates with working GitHub repos
+// ============================================
+
 const templates = [
     {
-        name: 'Next.js Commerce',
-        slug: 'nextjs-commerce',
-        displayName: 'Next.js Commerce',
-        description: 'An all-in-one starter kit for high-performance e-commerce sites.',
-        longDescription: 'The all-in-one starter kit for high-performance e-commerce sites. With a few clicks, Next.js Commerce users can clone, deploy and customize their own store.',
+        name: 'Smart Commerce',
+        slug: 'nextjs-commerce-smart',
+        displayName: 'Smart Commerce Pro',
+        description: 'Dynamic e-commerce template with Lite/Pro mode support',
+        longDescription: 'A complete Next.js 14 e-commerce starter that automatically adapts between Lite Mode (local SQLite) and Pro Mode (external database) based on environment variables. Perfect for free users who want to start small and scale to production.',
         category: 'ecommerce',
-        tags: ['nextjs', 'react', 'ecommerce', 'starter'],
-        githubRepo: 'vercel/commerce',
+        tags: ['nextjs', 'react', 'ecommerce', 'smart-template', 'typescript', 'prisma'],
+        githubRepo: 'UzairArif11/nextjs-commerce-smart',
         githubBranch: 'main',
         framework: 'nextjs',
-        buildConfig: {
-            buildCommand: 'pnpm build',
-            outputDirectory: '.next',
-            installCommand: 'pnpm install',
-            devCommand: 'pnpm dev',
-            nodeVersion: '20'
-        },
-        previewImage: 'https://assets.vercel.com/image/upload/v1662130559/nextjs/commerce/commerce-framework.png',
-        isPremium: false,
-        popularity: 100
-    },
-    {
-        name: 'Next.js App Router',
-        slug: 'nextjs-app-starter',
-        displayName: 'Next.js App Starter',
-        description: 'Modern Next.js 14 starter with App Router, TypeScript, and Tailwind CSS.',
-        longDescription: 'A clean, production-ready Next.js 14 starter template featuring the App Router, TypeScript, Tailwind CSS, and best practices for modern web development.',
-        category: 'starter',
-        tags: ['nextjs', 'react', 'typescript', 'tailwind'],
-        githubRepo: 'vercel/next.js',
-        githubBranch: 'canary',
-        githubPath: 'examples/blog-starter',
-        framework: 'nextjs',
+        supportedModes: ['lite', 'pro'],
         buildConfig: {
             buildCommand: 'npm run build',
             outputDirectory: '.next',
             installCommand: 'npm install',
             devCommand: 'npm run dev',
-            nodeVersion: '20'
-        },
-        previewImage: 'https://assets.vercel.com/image/upload/v1588805858/repositories/vercel/vercel.png',
-        isPremium: false
-    },
-    {
-        name: 'Vite + React',
-        slug: 'vite-react',
-        displayName: 'Vite + React',
-        description: 'Lightning-fast React app with Vite bundler.',
-        longDescription: 'A blazing fast React development experience powered by Vite. Includes hot module replacement, optimized builds, and modern tooling out of the box.',
-        category: 'starter',
-        tags: ['react', 'vite', 'typescript', 'starter'],
-        githubRepo: 'vitejs/vite',
-        githubBranch: 'main',
-        githubPath: 'packages/create-vite/template-react-ts',
-        framework: 'vite',
-        buildConfig: {
-            buildCommand: 'npm run build',
-            outputDirectory: 'dist',
-            installCommand: 'npm install',
-            devCommand: 'npm run dev',
-            nodeVersion: '20'
-        },
-        previewImage: 'https://vitejs.dev/logo.svg',
-        isPremium: false
-    },
-    {
-        name: 'React App',
-        slug: 'create-react-app',
-        displayName: 'React App',
-        description: 'Classic Create React App starter template.',
-        longDescription: 'The official React starter template with zero configuration. Perfect for learning React or building production-ready single-page applications.',
-        category: 'starter',
-        tags: ['react', 'javascript', 'spa'],
-        githubRepo: 'facebook/create-react-app',
-        githubBranch: 'main',
-        framework: 'react',
-        buildConfig: {
-            buildCommand: 'npm run build',
-            outputDirectory: 'build',
-            installCommand: 'npm install',
-            devCommand: 'npm start',
             nodeVersion: '18'
         },
-        previewImage: 'https://create-react-app.dev/img/logo.svg',
-        isPremium: false
+        environmentVariables: [
+            {
+                key: 'DATABASE_URL',
+                description: 'PostgreSQL/MySQL connection string for Pro Mode (leave empty for Lite Mode)',
+                defaultValue: '',
+                isRequired: false,
+                isSecret: true
+            }
+        ],
+        previewImage: 'https://images.unsplash.com/photo-1557821552-17105176677c?w=800',
+        isPremium: false,
+        minPlan: 'free',
+        popularity: 150
+    },
+    {
+        name: 'Smart Portfolio',
+        slug: 'nextjs-portfolio-smart',
+        displayName: 'Smart Portfolio Pro',
+        description: 'Stunning portfolio with Lite/Pro mode support, glassmorphism design, and smooth animations',
+        longDescription: 'A production-ready Next.js 14 portfolio template that automatically adapts between Lite Mode (local SQLite) and Pro Mode (external database). Features stunning glassmorphism design, Framer Motion animations, project showcase, blog system, and contact form. Perfect for developers and creatives who want a beautiful portfolio that scales.',
+        category: 'portfolio',
+        tags: ['nextjs', 'portfolio', 'smart-template', 'typescript', 'prisma', 'tailwind', 'framer-motion'],
+        githubRepo: 'UzairArif11/nextjs-portfolio-smart',
+        githubBranch: 'main',
+        framework: 'nextjs',
+        supportedModes: ['lite', 'pro'],
+        buildConfig: {
+            buildCommand: 'npm run build',
+            outputDirectory: '.next',
+            installCommand: 'npm install',
+            devCommand: 'npm run dev',
+            nodeVersion: '20'
+        },
+        environmentVariables: [
+            {
+                key: 'DATABASE_URL',
+                description: 'PostgreSQL/MySQL connection string for Pro Mode (leave empty for Lite Mode with SQLite)',
+                defaultValue: '',
+                isRequired: false,
+                isSecret: true
+            }
+        ],
+        previewImage: 'https://images.unsplash.com/photo-1467232004584-a241de8bcf5d?w=800',
+        isPremium: false,
+        minPlan: 'free',
+        popularity: 140
     }
 ];
 
 const seed = async () => {
     try {
         console.log('Connecting to database...');
-        // We'll rely on the utils/database if it exports a connect function, 
-        // essentially mimicking server.js connection logic.
-        // If connectDB is an async function:
         if (typeof connectDB === 'function') {
             await connectDB();
         } else {
-            // Fallback if it's just the mongoose connection object or similar
-            // Assuming standard connection string from env if utils/database fails or is different structure
-            await mongoose.connect(process.env.MONGODB_URI, {
-                useNewUrlParser: true,
-                useUnifiedTopology: true
-            });
+            await mongoose.connect(process.env.MONGODB_URI);
         }
 
         console.log('Connected. Clearing existing templates...');
         await Template.deleteMany({});
 
         console.log('Seeding templates...');
-        await Template.insertMany(templates);
+        for (const template of templates) {
+            console.log(`- Inserting: ${template.name}`);
+            await Template.create(template);
+        }
 
         console.log('✅ Templates seeded successfully!');
         process.exit(0);
     } catch (error) {
-        console.error('❌ Seeding failed:', error);
+        console.error('❌ Seeding failed:', error.message);
+        if (error.errors) {
+            console.error('Validation errors:', JSON.stringify(error.errors, null, 2));
+        }
         process.exit(1);
     }
 };
