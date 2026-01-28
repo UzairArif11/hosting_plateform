@@ -23,7 +23,7 @@ const templates = [
             devCommand: 'next dev'
         },
         previewImage: 'https://assets.vercel.com/image/upload/v1662130559/nextjs/commerce/commerce-framework.png',
-        previewUrl: 'https://demo.vercel.store',
+        // previewUrl: 'https://demo.vercel.store',
         isPremium: false,
         popularity: 100
     },

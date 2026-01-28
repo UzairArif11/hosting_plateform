@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { LockClosedIcon, GlobeAltIcon, SparklesIcon } from '@heroicons/react/24/solid';
+import { LockClosedIcon, GlobeAltIcon, SparklesIcon, PhotoIcon } from '@heroicons/react/24/solid';
 
 interface TemplateProps {
     template: {
@@ -10,6 +10,7 @@ interface TemplateProps {
         framework: string;
         previewImage: string;
         previewUrl?: string;
+        demoDeploymentUrl?: string; // Admin-deployed demo URL
         category: string;
         tags: string[];
         isPremium: boolean;
@@ -68,16 +69,23 @@ export default function TemplateCard({ template, userPlan = 'free' }: TemplatePr
                                 {getBadge()}
                             </div>
 
-                            {template.previewUrl && (
+                            {template.demoDeploymentUrl && (
                                 <a
-                                    href={template.previewUrl}
+                                    href={template.demoDeploymentUrl}
                                     target="_blank"
+                                    rel="noopener noreferrer"
                                     onClick={(e) => e.stopPropagation()}
                                     className="pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 bg-black/40 hover:bg-black/60 backdrop-blur-md border border-white/10 rounded-full text-xs font-medium text-white transition-all hover:scale-105"
                                 >
                                     <GlobeAltIcon className="w-3.5 h-3.5 text-blue-400" />
-                                    <span>Live Website</span>
+                                    <span>Live Demo</span>
                                 </a>
+                            )}
+                            {!template.demoDeploymentUrl && template.previewImage && (
+                                <span className="pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 bg-gray-800/60 backdrop-blur-md border border-gray-700/50 rounded-full text-xs font-medium text-gray-400">
+                                    <PhotoIcon className="w-3.5 h-3.5" />
+                                    <span>Preview Only</span>
+                                </span>
                             )}
                         </div>
 

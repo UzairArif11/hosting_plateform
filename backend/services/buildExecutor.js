@@ -400,9 +400,9 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
         } catch (error) {
             // Check for pnpm not found
             if (packageManager === 'pnpm' && (error.message.includes('not found') || error.message.includes('pnpm: command not found'))) {
-                await onLog('warn', 'pnpm not found, falling back to npm install...');
-                // Fallback to npm
-                installCmd = 'npm install';
+                await onLog('warn', 'pnpm not found, falling back to npm install --legacy-peer-deps...');
+                // Fallback to npm with legacy peer deps for robustness
+                installCmd = 'npm install --legacy-peer-deps';
                 const result = await execAsync(installCmd, {
                     cwd: buildPath,
                     timeout: 10 * 60 * 1000,
@@ -412,9 +412,9 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
                 stderr = result.stderr;
             } else
                 // If npm ci fails (no package-lock.json), fallback to npm install
-                if (packageManager === 'npm' && error.message.includes('package-lock.json')) {
-                    await onLog('warn', 'npm ci failed, falling back to npm install...');
-                    installCmd = 'npm install';
+                if (packageManager === 'npm' && (error.message.includes('package-lock.json') || error.message.includes('ERESOLVE'))) {
+                    await onLog('warn', 'npm ci failed/conflict, falling back to npm install --legacy-peer-deps...');
+                    installCmd = 'npm install --legacy-peer-deps';
                     const result = await execAsync(installCmd, {
                         cwd: buildPath,
                         timeout: 10 * 60 * 1000,

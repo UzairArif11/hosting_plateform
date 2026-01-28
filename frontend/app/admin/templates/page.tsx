@@ -76,6 +76,11 @@ export default function TemplateManagement() {
     const [editingTemplate, setEditingTemplate] = useState<Template | null>(null);
     const [showModal, setShowModal] = useState(false);
     const [activeTab, setActiveTab] = useState<'basic' | 'build' | 'preview' | 'env' | 'limits'>('basic');
+    
+    // Deploy Demo Modal
+    const [showDemoModal, setShowDemoModal] = useState(false);
+    const [demoTemplate, setDemoTemplate] = useState<Template | null>(null);
+    const [demoDeploying, setDemoDeploying] = useState(false);
 
     useEffect(() => {
         fetchTemplates();
@@ -221,6 +226,46 @@ export default function TemplateManagement() {
         }
     };
 
+    const handleDeployDemo = (template: Template) => {
+        setDemoTemplate(template);
+        setShowDemoModal(true);
+    };
+
+    const handleDemoSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!demoTemplate) return;
+
+        setDemoDeploying(true);
+        try {
+            const res = await api.post(`/templates/${demoTemplate._id}/deploy-demo`, {
+                environmentVariables: [],
+            });
+
+            if (res.data.success) {
+                toast.success(`✅ Demo deployed successfully!`);
+                setShowDemoModal(false);
+                fetchTemplates();
+            }
+        } catch (error: any) {
+            console.error('Demo deployment error:', error);
+            toast.error(error.response?.data?.error || 'Failed to deploy demo');
+        } finally {
+            setDemoDeploying(false);
+        }
+    };
+
+    const handleRemoveDemo = async (templateId: string, templateName: string) => {
+        if (!confirm(`Remove live demo for "${templateName}"?`)) return;
+        
+        try {
+            await api.delete(`/templates/${templateId}/demo`);
+            toast.success('Demo removed successfully');
+            fetchTemplates();
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'Failed to remove demo');
+        }
+    };
+
     const addEnvVar = () => {
         if (!editingTemplate) return;
         setEditingTemplate({
@@ -288,13 +333,37 @@ export default function TemplateManagement() {
                             <p className="text-xs text-gray-500 font-mono mb-3">{template.framework} • {template.category}</p>
                             <p className="text-sm text-gray-400  line-clamp-2 mb-4 flex-1">{template.description}</p>
 
-                            <div className="flex justify-between gap-3 pt-4 border-t border-gray-800">
+                            {/* Demo URL Status */}
+                            {(template as any).demoDeploymentUrl && (
+                                <div className="mb-3 flex items-center gap-2 text-xs">
+                                    <GlobeAltIcon className="w-4 h-4 text-green-500" />
+                                    <a 
+                                        href={(template as any).demoDeploymentUrl} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        className="text-green-500 hover:text-green-400 truncate"
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
+                                        Live Demo Active
+                                    </a>
+                                </div>
+                            )}
+
+                            <div className="flex justify-between gap-2 pt-4 border-t border-gray-800">
                                 <button
                                     onClick={() => handleEdit(template)}
-                                    className="flex-1 flex items-center justify-center space-x-2 bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg transition text-sm"
+                                    className="flex-1 flex items-center justify-center space-x-1 bg-gray-700 hover:bg-gray-600 text-white px-2 py-2 rounded-lg transition text-xs"
                                 >
                                     <PencilSquareIcon className="h-4 w-4" />
                                     <span>Edit</span>
+                                </button>
+                                <button
+                                    onClick={() => handleDeployDemo(template)}
+                                    className="flex-1 flex items-center justify-center space-x-1 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 px-2 py-2 rounded-lg transition text-xs"
+                                    title="Deploy as live demo"
+                                >
+                                    <GlobeAltIcon className="h-4 w-4" />
+                                    <span>Demo</span>
                                 </button>
                                 <button
                                     onClick={() => handleDelete(template._id, template.displayName)}
@@ -1037,6 +1106,106 @@ export default function TemplateManagement() {
                                 {editingTemplate._id ? 'Update Template' : 'Create Template'}
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Deploy Demo Modal */}
+            {showDemoModal && demoTemplate && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-gray-900 border border-gray-800 rounded-2xl max-w-lg w-full shadow-2xl">
+                        <div className="p-6 border-b border-gray-800">
+                            <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                                <GlobeAltIcon className="w-6 h-6 text-blue-400" />
+                                Deploy Live Demo
+                            </h2>
+                            <p className="text-gray-400 text-sm mt-2">
+                                Deploy {demoTemplate.displayName} as an internal live preview
+                            </p>
+                        </div>
+
+                        <form onSubmit={handleDemoSubmit} className="p-6 space-y-4">
+                            <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-4">
+                                <p className="text-sm text-blue-200 mb-2">
+                                    <strong>📍 Deployment URL</strong>
+                                </p>
+                                <p className="text-xs text-blue-300/80">
+                                    Demo will be deployed at a path-based URL like:
+                                </p>
+                                <p className="text-xs text-blue-400 font-mono mt-2">
+                                    https://foodpanda.site/demo-{demoTemplate.name}-abc123/
+                                </p>
+                                <p className="text-xs text-blue-300/60 mt-3">
+                                    This matches how regular user deployments work. The URL is automatically generated and will be visible on the template card for all users.
+                                </p>
+                            </div>
+
+                            <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
+                                <p className="text-xs text-gray-400">
+                                    <strong>ℹ️ Note:</strong> The demo will be deployed using the same Docker container approach as regular deployments. It will be accessible at the generated path on your main domain.
+                                </p>
+                            </div>
+
+                            {(demoTemplate as any).demoDeploymentUrl && (
+                                <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-4">
+                                    <p className="text-xs text-yellow-200 mb-2">
+                                        ⚠️ This template already has a live demo:
+                                    </p>
+                                    <a 
+                                        href={(demoTemplate as any).demoDeploymentUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-xs text-yellow-400 hover:text-yellow-300 break-all"
+                                    >
+                                        {(demoTemplate as any).demoDeploymentUrl}
+                                    </a>
+                                    <p className="text-xs text-yellow-300/60 mt-2">
+                                        Deploying again will replace the existing demo.
+                                    </p>
+                                </div>
+                            )}
+
+                            <div className="flex gap-3 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowDemoModal(false)}
+                                    disabled={demoDeploying}
+                                    className="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800 disabled:opacity-50 text-white rounded-lg transition"
+                                >
+                                    Cancel
+                                </button>
+                                {(demoTemplate as any).demoDeploymentUrl && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setShowDemoModal(false);
+                                            handleRemoveDemo(demoTemplate._id, demoTemplate.displayName);
+                                        }}
+                                        disabled={demoDeploying}
+                                        className="px-4 py-2 bg-red-600/20 hover:bg-red-600/40 disabled:opacity-50 text-red-400 rounded-lg transition text-sm"
+                                    >
+                                        Remove Demo
+                                    </button>
+                                )}
+                                <button
+                                    type="submit"
+                                    disabled={demoDeploying}
+                                    className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:opacity-50 text-white rounded-lg transition flex items-center justify-center gap-2"
+                                >
+                                    {demoDeploying ? (
+                                        <>
+                                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                            <span>Deploying...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <GlobeAltIcon className="w-4 h-4" />
+                                            <span>Deploy Demo</span>
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             )}

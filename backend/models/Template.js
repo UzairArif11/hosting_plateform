@@ -112,7 +112,18 @@ const templateSchema = new mongoose.Schema({
         required: true
     },
     previewUrl: {
-        type: String // Live demo URL
+        type: String // Live demo URL (external, for reference)
+    },
+    demoDeploymentUrl: {
+        type: String // Admin-deployed demo URL (path-based like /demo-template-abc123/)
+    },
+    demoProjectId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Project' // Reference to admin-created demo project
+    },
+    demoDeploymentId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Deployment' // Reference to demo deployment
     },
     screenshots: [{
         url: String,

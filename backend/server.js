@@ -48,6 +48,17 @@ const { requireAdmin } = require('./middleware/admin');
 require('./config/passport');
 
 
+// Validate critical environment variables
+const requiredEnvVars = ['JWT_SECRET', 'SESSION_SECRET', 'MONGODB_URI'];
+const missingEnvVars = requiredEnvVars.filter(key => !process.env[key]);
+
+if (missingEnvVars.length > 0) {
+  console.error('❌ CRITICAL ERROR: Missing required environment variables:');
+  missingEnvVars.forEach(key => console.error(`   - ${key}`));
+  console.error('Server cannot start securely. Please add them to your .env file.');
+  process.exit(1);
+}
+
 const app = express();
 const server = http.createServer(app);
 
@@ -79,7 +90,7 @@ app.use('/api/', limiter);
 // Session configuration
 // Note: Using MemoryStore for development. For production, uncomment MongoStore.
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'your-secret-key',
+  secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   // store: MongoStore.create({

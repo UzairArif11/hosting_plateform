@@ -117,7 +117,7 @@ async function deployTemplate({ template, user, projectName, environmentVariable
             },
             status: 'active',
             domains: [{
-                domain: `${slug}.${process.env.BASE_DOMAIN || 'vcp.dev'}`,
+                domain: `${slug}.${process.env.BASE_DOMAIN || 'foodpanda.site'}`,
                 isCustom: false,
                 isPrimary: true,
                 verified: true

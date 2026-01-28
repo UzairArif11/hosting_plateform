@@ -228,4 +228,92 @@ router.delete('/:id', requireAuth, requireAdmin, async (req, res) => {
     }
 });
 
+// Admin: Deploy template as demo (creates internal live preview)
+router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const template = await Template.findById(req.params.id);
+        
+        if (!template) {
+            return res.status(404).json({ success: false, error: 'Template not found' });
+        }
+
+        const { environmentVariables } = req.body;
+
+        // Create demo project name with "demo-" prefix
+        const demoProjectName = `demo-${template.name}`;
+
+        // Deploy template as admin user's project (same as regular deployments)
+        const result = await templateDeployer.deployTemplate({
+            template,
+            user: req.user,
+            projectName: demoProjectName,
+            environmentVariables: environmentVariables || [],
+            mode: 'lite' // Use lite mode for demos
+        });
+
+        if (result.success) {
+            // Demo URL will be generated automatically like regular deployments
+            // Format: https://foodpanda.site/demo-templatename-abc123/
+            const demoUrl = result.deployment.deploymentUrl;
+
+            // Update template with demo deployment info
+            template.demoDeploymentUrl = demoUrl;
+            template.demoProjectId = result.project._id;
+            template.demoDeploymentId = result.deployment._id;
+            await template.save();
+
+            logger.info(`Admin ${req.user.email} deployed demo for template ${template.name} at ${demoUrl}`);
+
+            res.status(201).json({
+                success: true,
+                message: 'Template demo deployed successfully',
+                demoUrl,
+                project: result.project,
+                deployment: result.deployment
+            });
+        } else {
+            res.status(400).json({
+                success: false,
+                error: result.error || 'Failed to deploy demo'
+            });
+        }
+
+    } catch (error) {
+        logger.error('Failed to deploy template demo:', error);
+        res.status(500).json({ success: false, error: 'Failed to deploy template demo' });
+    }
+});
+
+// Admin: Remove template demo
+router.delete('/:id/demo', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const template = await Template.findById(req.params.id);
+
+        if (!template) {
+            return res.status(404).json({ success: false, error: 'Template not found' });
+        }
+
+        // Remove demo project if exists
+        if (template.demoProjectId) {
+            const Project = require('../models/Project');
+            await Project.findByIdAndDelete(template.demoProjectId);
+        }
+
+        // Clear demo URL
+        template.demoDeploymentUrl = undefined;
+        template.demoProjectId = undefined;
+        await template.save();
+
+        logger.info(`Admin ${req.user.email} removed demo for template ${template.name}`);
+
+        res.json({
+            success: true,
+            message: 'Template demo removed successfully'
+        });
+    } catch (error) {
+        logger.error('Failed to remove template demo:', error);
+        res.status(500).json({ success: false, error: 'Failed to remove template demo' });
+    }
+});
+
 module.exports = router;

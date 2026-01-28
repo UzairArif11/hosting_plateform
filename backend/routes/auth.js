@@ -18,7 +18,7 @@ const generateToken = (user) => {
       email: user.email,
       role: user.role
     },
-    process.env.JWT_SECRET || 'your-secret-key',
+    process.env.JWT_SECRET,
     { expiresIn: '7d' }
   );
 };
@@ -36,7 +36,7 @@ const extractTokenFromRequest = (req) => {
 
 const verifyToken = (token) => {
   try {
-    return jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    return jwt.verify(token, process.env.JWT_SECRET);
   } catch (error) {
     throw error;
   }
