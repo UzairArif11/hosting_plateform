@@ -536,11 +536,29 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
         const nodeVersion = project.buildConfig?.nodeVersion || template?.buildConfig?.nodeVersion || '20';
         await onLog('info', `Using Node.js version: ${nodeVersion} (in Docker)`);
 
+        // Detect package manager from lock files
+        let dockerPackageManager = 'npm';
+        let dockerInstallCmd = 'npm install --legacy-peer-deps';
+        
+        try {
+            if (await fs.access(path.join(buildPath, 'pnpm-lock.yaml')).then(() => true).catch(() => false)) {
+                dockerPackageManager = 'pnpm';
+                dockerInstallCmd = 'corepack enable && pnpm install --frozen-lockfile';
+                await onLog('info', 'Detected pnpm-lock.yaml, will use pnpm in Docker');
+            } else if (await fs.access(path.join(buildPath, 'yarn.lock')).then(() => true).catch(() => false)) {
+                dockerPackageManager = 'yarn';
+                dockerInstallCmd = 'corepack enable && yarn install --frozen-lockfile';
+                await onLog('info', 'Detected yarn.lock, will use yarn in Docker');
+            }
+        } catch (err) {
+            // Ignore errors, default to npm
+        }
+
         // Execute build inside Docker container with specific Node.js version
         if (framework !== 'static' && framework !== 'nodejs') {
-            await onLog('info', `Building inside Docker container with Node.js ${nodeVersion}...`);
+            await onLog('info', `Building inside Docker container with Node.js ${nodeVersion} and ${dockerPackageManager}...`);
             
-            // Build command to run inside Docker
+            // Build command to run inside Docker with corepack for pnpm/yarn
             const dockerBuildCommand = `docker run --rm \
                 -v "${buildPath}:/app" \
                 -w /app \
@@ -548,7 +566,7 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
                 -e CI=false \
                 -e PUBLIC_URL=. \
                 node:${nodeVersion}-alpine \
-                sh -c "npm install --legacy-peer-deps && ${buildCommand}"`;
+                sh -c "${dockerInstallCmd} && ${buildCommand}"`;
 
             try {
                 const { stdout, stderr } = await execAsync(dockerBuildCommand, {

@@ -94,20 +94,39 @@ export default function TemplateManagement() {
     useEffect(() => {
         fetchTemplates();
 
-        // Connect to Socket.IO for real-time updates
+        // Connect to Socket.IO for real-time updates with reconnection
         const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
-        socketRef.current = io(socketUrl);
-
-        socketRef.current.on('connect', () => {
-            console.log('Connected to Socket.IO for template demo updates');
+        socketRef.current = io(socketUrl, {
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            reconnectionAttempts: Infinity,
+            transports: ['websocket', 'polling'],
+            timeout: 20000
         });
 
-        socketRef.current.on('disconnect', () => {
-            console.log('Disconnected from Socket.IO');
+        socketRef.current.on('connect', () => {
+            console.log('✅ Connected to Socket.IO for template demo updates');
+        });
+
+        socketRef.current.on('disconnect', (reason) => {
+            console.log('❌ Disconnected from Socket.IO:', reason);
+            // Auto-reconnect unless server disconnected intentionally
+            if (reason === 'io server disconnect') {
+                socketRef.current?.connect();
+            }
+        });
+
+        socketRef.current.on('reconnect', (attemptNumber) => {
+            console.log(`🔄 Reconnected to Socket.IO after ${attemptNumber} attempts`);
+        });
+
+        socketRef.current.on('reconnect_attempt', (attemptNumber) => {
+            console.log(`🔄 Attempting to reconnect... (${attemptNumber})`);
         });
 
         socketRef.current.on('connect_error', (error) => {
-            console.error('Socket.IO connection error:', error);
+            console.error('❌ Socket.IO connection error:', error.message);
         });
 
         socketRef.current.on('template-demo-status', (data: {
@@ -118,7 +137,7 @@ export default function TemplateManagement() {
             error?: string;
             message?: string;
         }) => {
-            console.log('Template demo status update:', data);
+            console.log('📡 Template demo status update:', data);
             
             // Update templates array with new status
             setTemplates(prev => prev.map(t => {
@@ -134,6 +153,11 @@ export default function TemplateManagement() {
                 return t;
             }));
 
+            // Update deploying state
+            if (data.status === 'success' || data.status === 'failed') {
+                setDemoDeploying(false);
+            }
+
             // Show toast notifications
             if (data.status === 'success') {
                 toast.success(`Demo deployment successful!`, { duration: 5000 });
@@ -147,6 +171,7 @@ export default function TemplateManagement() {
             setTemplates(prev => {
                 const hasDeploying = prev.some(t => t.demoStatus === 'deploying');
                 if (hasDeploying) {
+                    console.log('🔄 Polling for template updates (fallback)...');
                     // Refetch templates to get latest status
                     fetchTemplates();
                 }
@@ -155,9 +180,14 @@ export default function TemplateManagement() {
         }, 10000); // Poll every 10 seconds
 
         return () => {
+            if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+            }
             if (socketRef.current) {
                 socketRef.current.disconnect();
             }
+        };
+    }, []);
             if (pollingIntervalRef.current) {
                 clearInterval(pollingIntervalRef.current);
             }
