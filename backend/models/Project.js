@@ -103,7 +103,8 @@ const projectSchema = new mongoose.Schema({
     },
     value: {
       type: String,
-      required: true
+      required: false,  // Optional - allows empty values for Lite mode (e.g., DATABASE_URL)
+      default: ''
     },
     isSecret: {
       type: Boolean,
