@@ -183,13 +183,11 @@ export default function TemplateManagement() {
             if (pollingIntervalRef.current) {
                 clearInterval(pollingIntervalRef.current);
             }
-            if (socketRef.current) {
-                socketRef.current.disconnect();
-            }
-        };
-    }, []);
             if (pollingIntervalRef.current) {
                 clearInterval(pollingIntervalRef.current);
+            }
+            if (socketRef.current) {
+                socketRef.current.disconnect();
             }
         };
     }, []);
