@@ -350,17 +350,17 @@ export default function TemplateManagement() {
     }
 
     return (
-        <div className="p-8 max-w-7xl mx-auto space-y-8">
-            <div className="flex justify-between items-center">
+        <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6 sm:space-y-8">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
-                    <h1 className="text-4xl font-bold text-white">Template Manager</h1>
-                    <p className="text-gray-400 mt-2">Manage deployment templates and starter kits</p>
+                    <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white">Template Manager</h1>
+                    <p className="text-gray-400 mt-1 sm:mt-2 text-sm sm:text-base">Manage deployment templates and starter kits</p>
                 </div>
                 <button
                     onClick={handleCreateNew}
-                    className="flex items-center space-x-2 bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl transition shadow-lg"
+                    className="flex items-center justify-center space-x-2 bg-purple-600 hover:bg-purple-700 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl transition shadow-lg w-full sm:w-auto text-sm sm:text-base"
                 >
-                    <PlusIcon className="h-5 w-5" />
+                    <PlusIcon className="h-4 w-4 sm:h-5 sm:w-5" />
                     <span>Add Template</span>
                 </button>
             </div>
@@ -449,10 +449,10 @@ export default function TemplateManagement() {
                                 )}
                             </div>
 
-                            <div className="flex justify-between gap-2 pt-4 border-t border-gray-800">
+                            <div className="flex flex-col sm:flex-row justify-between gap-2 pt-4 border-t border-gray-800">
                                 <button
                                     onClick={() => handleEdit(template)}
-                                    className="flex-1 flex items-center justify-center space-x-1 bg-gray-700 hover:bg-gray-600 text-white px-2 py-2 rounded-lg transition text-xs"
+                                    className="flex-1 flex items-center justify-center space-x-1 bg-gray-700 hover:bg-gray-600 text-white px-3 py-2.5 sm:px-2 sm:py-2 rounded-lg transition text-sm sm:text-xs"
                                 >
                                     <PencilSquareIcon className="h-4 w-4" />
                                     <span>Edit</span>
@@ -460,7 +460,7 @@ export default function TemplateManagement() {
                                 <button
                                     onClick={() => handleDeployDemo(template)}
                                     disabled={template.demoStatus === 'deploying'}
-                                    className={`flex-1 flex items-center justify-center space-x-1 px-2 py-2 rounded-lg transition text-xs ${
+                                    className={`flex-1 flex items-center justify-center space-x-1 px-3 py-2.5 sm:px-2 sm:py-2 rounded-lg transition text-sm sm:text-xs ${
                                         template.demoStatus === 'deploying'
                                             ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                                             : 'bg-blue-600/20 hover:bg-blue-600/40 text-blue-400'
@@ -470,20 +470,23 @@ export default function TemplateManagement() {
                                     {template.demoStatus === 'deploying' ? (
                                         <>
                                             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-500"></div>
-                                            <span>Deploying...</span>
+                                            <span className="hidden xs:inline">Deploying...</span>
+                                            <span className="xs:hidden">...</span>
                                         </>
                                     ) : (
                                         <>
                                             <GlobeAltIcon className="h-4 w-4" />
-                                            <span>Deploy Demo</span>
+                                            <span className="hidden xs:inline">Deploy Demo</span>
+                                            <span className="xs:hidden">Demo</span>
                                         </>
                                     )}
                                 </button>
                                 <button
                                     onClick={() => handleDelete(template._id, template.displayName)}
-                                    className="p-2 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-lg transition"
+                                    className="sm:flex-none w-full sm:w-auto flex items-center justify-center sm:justify-start px-3 py-2.5 sm:p-2 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-lg transition"
                                 >
                                     <TrashIcon className="h-4 w-4" />
+                                    <span className="ml-1 sm:hidden">Delete</span>
                                 </button>
                             </div>
                         </div>
@@ -493,11 +496,11 @@ export default function TemplateManagement() {
 
             {/* Modal */}
             {showModal && editingTemplate && (
-                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-gray-900 border border-gray-800 rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl">
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4">
+                    <div className="bg-gray-900 border border-gray-800 rounded-xl sm:rounded-2xl max-w-4xl w-full max-h-[95vh] sm:max-h-[90vh] flex flex-col shadow-2xl">
                         {/* Header */}
-                        <div className="p-6 border-b border-gray-800 flex justify-between items-center bg-gray-900 sticky top-0 rounded-t-2xl">
-                            <h2 className="text-2xl font-bold text-white">
+                        <div className="p-4 sm:p-6 border-b border-gray-800 flex justify-between items-center bg-gray-900 sticky top-0 rounded-t-xl sm:rounded-t-2xl">
+                            <h2 className="text-xl sm:text-2xl font-bold text-white">
                                 {editingTemplate._id ? 'Edit Template' : 'New Template'}
                             </h2>
                             <button
@@ -509,24 +512,30 @@ export default function TemplateManagement() {
                         </div>
 
                         {/* Tabs */}
-                        <div className="flex border-b border-gray-800 px-6 overflow-x-auto">
+                        <div className="flex border-b border-gray-800 px-4 sm:px-6 overflow-x-auto scrollbar-hide">
                             {(['basic', 'build', 'preview', 'env', 'limits'] as const).map((tab) => (
                                 <button
                                     key={tab}
                                     onClick={() => setActiveTab(tab)}
-                                    className={`px-4 py-3 text-sm font-medium border-b-2 transition whitespace-nowrap ${activeTab === tab
-                                        ? 'border-purple-500 text-purple-400'
-                                        : 'border-transparent text-gray-400 hover:text-white'
-                                        }`}
+                                    className={`px-3 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm font-medium border-b-2 transition whitespace-nowrap ${
+                                        activeTab === tab
+                                            ? 'border-purple-500 text-purple-400'
+                                            : 'border-transparent text-gray-400 hover:text-white'
+                                    }`}
                                 >
-                                    {tab === 'limits' ? 'Resource Limits' : tab.charAt(0).toUpperCase() + tab.slice(1) + ' Info'}
+                                    {tab === 'limits' ? (
+                                        <span className="hidden sm:inline">Resource Limits</span>
+                                    ) : (
+                                        tab.charAt(0).toUpperCase() + tab.slice(1) + (window.innerWidth > 640 ? ' Info' : '')
+                                    )}
+                                    {tab === 'limits' && <span className="sm:hidden">Limits</span>}
                                 </button>
                             ))}
                         </div>
 
                         {/* Content */}
-                        <div className="p-8 overflow-y-auto flex-1">
-                            <form id="templateForm" onSubmit={handleSubmit} className="space-y-6">
+                        <div className="p-4 sm:p-6 lg:p-8 overflow-y-auto flex-1">
+                            <form id="templateForm" onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
 
                                 {/* Basic Info */}
                                 {activeTab === 'basic' && (
@@ -1226,27 +1235,27 @@ export default function TemplateManagement() {
 
             {/* Deploy Demo Modal */}
             {showDemoModal && demoTemplate && (
-                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-gray-900 border border-gray-800 rounded-2xl max-w-lg w-full shadow-2xl">
-                        <div className="p-6 border-b border-gray-800">
-                            <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                                <GlobeAltIcon className="w-6 h-6 text-blue-400" />
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4">
+                    <div className="bg-gray-900 border border-gray-800 rounded-xl sm:rounded-2xl max-w-lg w-full shadow-2xl max-h-[95vh] overflow-y-auto">
+                        <div className="p-4 sm:p-6 border-b border-gray-800 sticky top-0 bg-gray-900 rounded-t-xl sm:rounded-t-2xl">
+                            <h2 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2">
+                                <GlobeAltIcon className="w-5 h-5 sm:w-6 sm:h-6 text-blue-400" />
                                 Deploy Live Demo
                             </h2>
-                            <p className="text-gray-400 text-sm mt-2">
+                            <p className="text-gray-400 text-xs sm:text-sm mt-2">
                                 Deploy {demoTemplate.displayName} as an internal live preview
                             </p>
                         </div>
 
-                        <form onSubmit={handleDemoSubmit} className="p-6 space-y-4">
-                            <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-4">
-                                <p className="text-sm text-blue-200 mb-2">
+                        <form onSubmit={handleDemoSubmit} className="p-4 sm:p-6 space-y-3 sm:space-y-4">
+                            <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-3 sm:p-4">
+                                <p className="text-xs sm:text-sm text-blue-200 mb-2">
                                     <strong>📍 Deployment URL</strong>
                                 </p>
                                 <p className="text-xs text-blue-300/80">
                                     Demo will be deployed at a path-based URL like:
                                 </p>
-                                <p className="text-xs text-blue-400 font-mono mt-2">
+                                <p className="text-xs text-blue-400 font-mono mt-2 break-all">
                                     https://foodpanda.site/demo-{demoTemplate.name}-abc123/
                                 </p>
                                 <p className="text-xs text-blue-300/60 mt-3">
@@ -1254,14 +1263,14 @@ export default function TemplateManagement() {
                                 </p>
                             </div>
 
-                            <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
+                            <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-3 sm:p-4">
                                 <p className="text-xs text-gray-400">
                                     <strong>ℹ️ Note:</strong> The demo will be deployed using the same Docker container approach as regular deployments. It will be accessible at the generated path on your main domain.
                                 </p>
                             </div>
 
                             {(demoTemplate as any).demoDeploymentUrl && (
-                                <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-4">
+                                <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-3 sm:p-4">
                                     <p className="text-xs text-yellow-200 mb-2">
                                         ⚠️ This template already has a live demo:
                                     </p>
@@ -1279,12 +1288,12 @@ export default function TemplateManagement() {
                                 </div>
                             )}
 
-                            <div className="flex gap-3 pt-4">
+                            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 pt-4">
                                 <button
                                     type="button"
                                     onClick={() => setShowDemoModal(false)}
                                     disabled={demoDeploying}
-                                    className="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800 disabled:opacity-50 text-white rounded-lg transition"
+                                    className="w-full sm:flex-1 px-4 py-2.5 sm:py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800 disabled:opacity-50 text-white rounded-lg transition text-sm"
                                 >
                                     Cancel
                                 </button>
@@ -1296,7 +1305,7 @@ export default function TemplateManagement() {
                                             handleRemoveDemo(demoTemplate._id, demoTemplate.displayName);
                                         }}
                                         disabled={demoDeploying}
-                                        className="px-4 py-2 bg-red-600/20 hover:bg-red-600/40 disabled:opacity-50 text-red-400 rounded-lg transition text-sm"
+                                        className="w-full sm:w-auto px-4 py-2.5 sm:py-2 bg-red-600/20 hover:bg-red-600/40 disabled:opacity-50 text-red-400 rounded-lg transition text-sm"
                                     >
                                         Remove Demo
                                     </button>
@@ -1304,7 +1313,7 @@ export default function TemplateManagement() {
                                 <button
                                     type="submit"
                                     disabled={demoDeploying}
-                                    className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:opacity-50 text-white rounded-lg transition flex items-center justify-center gap-2"
+                                    className="w-full sm:flex-1 px-4 py-2.5 sm:py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:opacity-50 text-white rounded-lg transition flex items-center justify-center gap-2 text-sm"
                                 >
                                     {demoDeploying ? (
                                         <>
