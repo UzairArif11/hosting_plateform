@@ -298,13 +298,17 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
 
                 // Emit success via Socket.IO
                 if (io) {
-                    io.emit('template-demo-status', {
+                    const successPayload = {
                         templateId: templateId,
                         status: 'success',
                         progress: 100,
                         demoUrl,
                         message: 'Deployment successful!'
-                    });
+                    };
+                    logger.info(`📡 Emitting template-demo-status (success) for ${templateId}:`, successPayload);
+                    io.emit('template-demo-status', successPayload);
+                } else {
+                    logger.warn('⚠️ Socket.IO not available to emit success event');
                 }
             } else {
                 // Update template with error
@@ -317,13 +321,17 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
 
                 // Emit failure via Socket.IO
                 if (io) {
-                    io.emit('template-demo-status', {
+                    const failurePayload = {
                         templateId: templateId,
                         status: 'failed',
                         progress: 0,
                         error: result.error || 'Deployment failed',
                         message: 'Deployment failed'
-                    });
+                    };
+                    logger.info(`📡 Emitting template-demo-status (failed) for ${templateId}:`, failurePayload);
+                    io.emit('template-demo-status', failurePayload);
+                } else {
+                    logger.warn('⚠️ Socket.IO not available to emit failure event');
                 }
             }
         }).catch(async (error) => {
@@ -341,13 +349,17 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
 
             // Emit failure via Socket.IO
             if (io) {
-                io.emit('template-demo-status', {
+                const errorPayload = {
                     templateId: templateId,
                     status: 'failed',
                     progress: 0,
                     error: error.message,
                     message: 'Deployment failed'
-                });
+                };
+                logger.info(`📡 Emitting template-demo-status (error) for ${templateId}:`, errorPayload);
+                io.emit('template-demo-status', errorPayload);
+            } else {
+                logger.warn('⚠️ Socket.IO not available to emit error event');
             }
         });
 

@@ -558,6 +558,18 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
         if (framework !== 'static' && framework !== 'nodejs') {
             await onLog('info', `Building inside Docker container with Node.js ${nodeVersion} and ${dockerPackageManager}...`);
             
+            // Ensure build command uses the correct package manager
+            let dockerBuildCmd = buildCommand;
+            
+            // If using pnpm but build command starts with npm/npx, replace it
+            if (dockerPackageManager === 'pnpm' && dockerBuildCmd.startsWith('npx ')) {
+                dockerBuildCmd = dockerBuildCmd.replace(/^npx /, 'pnpm exec ');
+                await onLog('info', `Converted build command for pnpm: ${dockerBuildCmd}`);
+            } else if (dockerPackageManager === 'pnpm' && dockerBuildCmd.startsWith('npm run ')) {
+                dockerBuildCmd = dockerBuildCmd.replace(/^npm run /, 'pnpm ');
+                await onLog('info', `Converted build command for pnpm: ${dockerBuildCmd}`);
+            }
+            
             // Build command to run inside Docker with corepack for pnpm/yarn
             const dockerBuildCommand = `docker run --rm \
                 -v "${buildPath}:/app" \
@@ -566,7 +578,7 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
                 -e CI=false \
                 -e PUBLIC_URL=. \
                 node:${nodeVersion}-alpine \
-                sh -c "${dockerInstallCmd} && ${buildCommand}"`;
+                sh -c "${dockerInstallCmd} && ${dockerBuildCmd}"`;
 
             try {
                 const { stdout, stderr } = await execAsync(dockerBuildCommand, {
@@ -594,8 +606,8 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
 
         await onLog('info', `✓ Build completed in ${(buildTime / 1000).toFixed(2)}s`);
 
-        // Generate server.js for static sites (React, Vue, etc.)
-        if (['react', 'vue', 'angular', 'static', 'nextjs', 'vite', 'cra'].includes(framework)) {
+        // Generate server.js for static sites (React, Vue, etc.) - NOT for Next.js
+        if (['react', 'vue', 'angular', 'static', 'vite', 'cra'].includes(framework)) {
             await onLog('info', 'Generating zero-dependency server.js for static serving...');
 
             const serverScript = `
@@ -683,6 +695,45 @@ console.log('Server running at http://localhost:' + port);
             } catch (err) {
                 await onLog('warn', `Error generating server.js: ${err.message}`);
             }
+        }
+        
+        // Generate Next.js starter script that uses next start
+        if (framework === 'nextjs') {
+            await onLog('info', 'Generating Next.js starter script...');
+            
+            const nextServerScript = `
+const { spawn } = require('child_process');
+
+// Get port from args
+const args = process.argv.slice(2);
+const portIdx = args.indexOf('--port');
+const port = portIdx !== -1 ? args[portIdx + 1] : (process.env.PORT || '3000');
+
+console.log('Starting Next.js on port', port);
+
+// Start Next.js production server
+const child = spawn('npx', ['next', 'start', '-p', port], {
+    stdio: 'inherit',
+    env: { ...process.env, PORT: port }
+});
+
+child.on('error', (error) => {
+    console.error('Failed to start Next.js:', error);
+    process.exit(1);
+});
+
+child.on('exit', (code) => {
+    console.log('Next.js exited with code', code);
+    process.exit(code || 0);
+});
+
+// Handle shutdown gracefully
+process.on('SIGTERM', () => child.kill('SIGTERM'));
+process.on('SIGINT', () => child.kill('SIGINT'));
+`;
+            
+            await fs.writeFile(path.join(buildPath, 'server.js'), nextServerScript);
+            await onLog('info', '✓ Next.js starter script generated (uses next start)');
         }
 
         // Get build size

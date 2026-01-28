@@ -7,39 +7,37 @@ const connectDB = require('../utils/database');
 const templates = [
     {
         name: 'Next.js Commerce',
-        slug: 'nextjs-commerce', // Matches the folder/ID usually
+        slug: 'nextjs-commerce',
         displayName: 'Next.js Commerce',
         description: 'An all-in-one starter kit for high-performance e-commerce sites.',
         longDescription: 'The all-in-one starter kit for high-performance e-commerce sites. With a few clicks, Next.js Commerce users can clone, deploy and customize their own store.',
         category: 'ecommerce',
         tags: ['nextjs', 'react', 'ecommerce', 'starter'],
-        githubRepo: 'vercel/commerce', // Using real repo for demo purposes
+        githubRepo: 'vercel/commerce',
         githubBranch: 'main',
         framework: 'nextjs',
         buildConfig: {
-            buildCommand: 'next build',
+            buildCommand: 'pnpm build',
             outputDirectory: '.next',
-            installCommand: 'npm install',
-            devCommand: 'next dev',
+            installCommand: 'pnpm install',
+            devCommand: 'pnpm dev',
             nodeVersion: '20'
         },
         previewImage: 'https://assets.vercel.com/image/upload/v1662130559/nextjs/commerce/commerce-framework.png',
-        // previewUrl: 'https://demo.vercel.store',
         isPremium: false,
         popularity: 100
     },
     {
-        name: 'Next.js Blog Starter',
-        slug: 'nextjs-blog',
-        displayName: 'Next.js Blog',
-        description: 'A dedicated blog starter with markdown support.',
-        category: 'blog',
-        tags: ['nextjs', 'blog', 'markdown'],
-        githubRepo: 'vercel/next.js', // We'd point to specific example folder usually, but for clone logic we need a root repo.
-        // For this demo, let's use a cleaner specific repo if possible, or just the main one.
-        // Let's use a specific starter repo
-        githubRepo: 'vercel/next-learn', // Just as placeholder
-        githubBranch: 'main',
+        name: 'Next.js App Router',
+        slug: 'nextjs-app-starter',
+        displayName: 'Next.js App Starter',
+        description: 'Modern Next.js 14 starter with App Router, TypeScript, and Tailwind CSS.',
+        longDescription: 'A clean, production-ready Next.js 14 starter template featuring the App Router, TypeScript, Tailwind CSS, and best practices for modern web development.',
+        category: 'starter',
+        tags: ['nextjs', 'react', 'typescript', 'tailwind'],
+        githubRepo: 'vercel/next.js',
+        githubBranch: 'canary',
+        githubPath: 'examples/blog-starter',
         framework: 'nextjs',
         buildConfig: {
             buildCommand: 'npm run build',
@@ -48,19 +46,21 @@ const templates = [
             devCommand: 'npm run dev',
             nodeVersion: '20'
         },
-        previewImage: 'https://assets.vercel.com/image/upload/v1588805858/repositories/next-learn/next-learn.png',
+        previewImage: 'https://assets.vercel.com/image/upload/v1588805858/repositories/vercel/vercel.png',
         isPremium: false
     },
     {
-        name: 'Vue.js Starter',
-        slug: 'vue-starter',
-        displayName: 'Vue.js App',
-        description: 'A simple Vue 3 starter project with Vite.',
-        category: 'other',
-        tags: ['vue', 'vite', 'starter'],
-        githubRepo: 'vuejs/create-vue', // Placeholder
+        name: 'Vite + React',
+        slug: 'vite-react',
+        displayName: 'Vite + React',
+        description: 'Lightning-fast React app with Vite bundler.',
+        longDescription: 'A blazing fast React development experience powered by Vite. Includes hot module replacement, optimized builds, and modern tooling out of the box.',
+        category: 'starter',
+        tags: ['react', 'vite', 'typescript', 'starter'],
+        githubRepo: 'vitejs/vite',
         githubBranch: 'main',
-        framework: 'vue',
+        githubPath: 'packages/create-vite/template-react-ts',
+        framework: 'vite',
         buildConfig: {
             buildCommand: 'npm run build',
             outputDirectory: 'dist',
@@ -68,21 +68,29 @@ const templates = [
             devCommand: 'npm run dev',
             nodeVersion: '20'
         },
-        previewImage: 'https://vuejs.org/images/logo.png', // Placeholder
+        previewImage: 'https://vitejs.dev/logo.svg',
         isPremium: false
     },
     {
-        name: 'React Dashboard',
-        slug: 'react-dashboard',
-        displayName: 'Admin Dashboard',
-        description: 'A comprehensive React admin dashboard template.',
-        category: 'dashboard',
-        tags: ['react', 'dashboard', 'admin'],
-        githubRepo: 'facebook/create-react-app', // Placeholder
+        name: 'React App',
+        slug: 'create-react-app',
+        displayName: 'React App',
+        description: 'Classic Create React App starter template.',
+        longDescription: 'The official React starter template with zero configuration. Perfect for learning React or building production-ready single-page applications.',
+        category: 'starter',
+        tags: ['react', 'javascript', 'spa'],
+        githubRepo: 'facebook/create-react-app',
         githubBranch: 'main',
         framework: 'react',
-        previewImage: 'https://reactjs.org/logo-og.png',
-        isPremium: true // Testing premium flag
+        buildConfig: {
+            buildCommand: 'npm run build',
+            outputDirectory: 'build',
+            installCommand: 'npm install',
+            devCommand: 'npm start',
+            nodeVersion: '18'
+        },
+        previewImage: 'https://create-react-app.dev/img/logo.svg',
+        isPremium: false
     }
 ];
 
