@@ -20,7 +20,8 @@ const templates = [
             buildCommand: 'next build',
             outputDirectory: '.next',
             installCommand: 'npm install',
-            devCommand: 'next dev'
+            devCommand: 'next dev',
+            nodeVersion: '20'
         },
         previewImage: 'https://assets.vercel.com/image/upload/v1662130559/nextjs/commerce/commerce-framework.png',
         // previewUrl: 'https://demo.vercel.store',
@@ -44,7 +45,8 @@ const templates = [
             buildCommand: 'npm run build',
             outputDirectory: '.next',
             installCommand: 'npm install',
-            devCommand: 'npm run dev'
+            devCommand: 'npm run dev',
+            nodeVersion: '20'
         },
         previewImage: 'https://assets.vercel.com/image/upload/v1588805858/repositories/next-learn/next-learn.png',
         isPremium: false
@@ -63,7 +65,8 @@ const templates = [
             buildCommand: 'npm run build',
             outputDirectory: 'dist',
             installCommand: 'npm install',
-            devCommand: 'npm run dev'
+            devCommand: 'npm run dev',
+            nodeVersion: '20'
         },
         previewImage: 'https://vuejs.org/images/logo.png', // Placeholder
         isPremium: false

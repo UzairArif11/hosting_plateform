@@ -532,26 +532,41 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
             await onLog('info', `✓ Environment variables written (${project.environmentVariables.length} vars)`);
         }
 
-        // Execute build (Local Build)
-        if (framework !== 'static' && framework !== 'nodejs') {
-            const { stdout, stderr } = await execAsync(buildCommand, {
-                cwd: buildPath,
-                timeout: MAX_BUILD_TIME,
-                maxBuffer: 20 * 1024 * 1024, // 20MB
-                env: {
-                    ...process.env,
-                    NODE_ENV: 'production',
-                    CI: 'false',  // Set to false to allow warnings (CRA treats warnings as errors when CI=true)
-                    PUBLIC_URL: '.'  // Use relative paths for all assets (works with any subpath)
-                }
-            });
+        // Determine Node.js version for Docker build
+        const nodeVersion = project.buildConfig?.nodeVersion || template?.buildConfig?.nodeVersion || '20';
+        await onLog('info', `Using Node.js version: ${nodeVersion} (in Docker)`);
 
-            if (stdout) {
-                const logs = stdout.split('\n').slice(-20).join('\n'); // Last 20 lines
-                await onLog('info', logs);
-            }
-            if (stderr && !stderr.includes('warning')) {
-                await onLog('warn', stderr.substring(0, 500));
+        // Execute build inside Docker container with specific Node.js version
+        if (framework !== 'static' && framework !== 'nodejs') {
+            await onLog('info', `Building inside Docker container with Node.js ${nodeVersion}...`);
+            
+            // Build command to run inside Docker
+            const dockerBuildCommand = `docker run --rm \
+                -v "${buildPath}:/app" \
+                -w /app \
+                -e NODE_ENV=production \
+                -e CI=false \
+                -e PUBLIC_URL=. \
+                node:${nodeVersion}-alpine \
+                sh -c "npm install --legacy-peer-deps && ${buildCommand}"`;
+
+            try {
+                const { stdout, stderr } = await execAsync(dockerBuildCommand, {
+                    timeout: MAX_BUILD_TIME,
+                    maxBuffer: 20 * 1024 * 1024, // 20MB
+                    shell: '/bin/bash'
+                });
+
+                if (stdout) {
+                    const logs = stdout.split('\n').slice(-20).join('\n'); // Last 20 lines
+                    await onLog('info', logs);
+                }
+                if (stderr && !stderr.includes('warning')) {
+                    await onLog('warn', stderr.substring(0, 500));
+                }
+            } catch (error) {
+                await onLog('error', `Docker build failed: ${error.message}`);
+                throw error;
             }
         }
 
