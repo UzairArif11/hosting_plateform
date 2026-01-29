@@ -471,15 +471,23 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
 
         // Check if Prisma is used and generate client locally (before Docker build)
         // This avoids issues with symlinks in node_modules/.bin inside Docker containers
+        let hasPrismaGenerated = false;
         try {
             await fs.access(path.join(buildPath, 'prisma', 'schema.prisma'));
             await onLog('info', '✓ Detected Prisma - generating client locally...');
             
-            const prismaGenCmd = packageManager === 'pnpm' ? 'pnpm exec prisma generate' :
-                                packageManager === 'yarn' ? 'yarn prisma generate' :
-                                'npx prisma generate';
+            // Use local Prisma binary directly (not npx which downloads wrong version)
+            const prismaBinPath = path.join(buildPath, 'node_modules', '.bin', 'prisma');
             
-            const { stdout: prismaOut, stderr: prismaErr } = await execAsync(prismaGenCmd, {
+            // Check if local Prisma CLI exists
+            try {
+                await fs.access(prismaBinPath);
+                await onLog('info', 'Using local Prisma CLI');
+            } catch {
+                throw new Error('Prisma CLI not found in node_modules - ensure prisma is in devDependencies');
+            }
+            
+            const { stdout: prismaOut, stderr: prismaErr } = await execAsync(`${prismaBinPath} generate`, {
                 cwd: buildPath,
                 timeout: 2 * 60 * 1000, // 2 minutes
                 maxBuffer: 5 * 1024 * 1024
@@ -487,6 +495,26 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
             
             if (prismaOut) await onLog('info', prismaOut.substring(0, 300));
             await onLog('info', '✓ Prisma client generated successfully');
+            hasPrismaGenerated = true;
+            
+            // Modify package.json build script to skip prisma generate (already done locally)
+            const packageJsonPath = path.join(buildPath, 'package.json');
+            const packageJsonContent = await fs.readFile(packageJsonPath, 'utf8');
+            const packageJson = JSON.parse(packageJsonContent);
+            
+            if (packageJson.scripts && packageJson.scripts.build) {
+                const originalBuild = packageJson.scripts.build;
+                // Remove "prisma generate &&" from build command
+                packageJson.scripts.build = originalBuild
+                    .replace(/prisma\s+generate\s*&&\s*/gi, '')
+                    .replace(/&&\s*prisma\s+generate/gi, '')
+                    .replace(/^\s*prisma\s+generate\s*$/gi, 'echo "Prisma already generated"');
+                
+                if (originalBuild !== packageJson.scripts.build) {
+                    await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
+                    await onLog('info', `Modified build script: "${originalBuild}" → "${packageJson.scripts.build}"`);
+                }
+            }
         } catch (err) {
             // No Prisma or generation failed (non-fatal, continue with build)
             if (err.code !== 'ENOENT') {
