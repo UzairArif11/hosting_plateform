@@ -616,13 +616,15 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
                 // No Prisma schema found
             }
 
-            // Build command sequence: install -> prisma generate (if needed) -> build
-            let buildSequence = dockerInstallCmd;
+            // Build command sequence
+            // Since dependencies are already installed locally (with devDeps), we use local node_modules
+            // Just run prisma generate (if needed) and build - NO need to reinstall
+            let buildSequence = '';
             if (hasPrisma) {
-                // Use local prisma from node_modules to avoid version mismatch
-                buildSequence += ' && ./node_modules/.bin/prisma generate';
+                // Use local prisma from node_modules (already installed with devDeps)
+                buildSequence = 'npx prisma generate && ';
             }
-            buildSequence += ` && ${dockerBuildCmd}`;
+            buildSequence += dockerBuildCmd;
 
             // Build command to run inside Docker with corepack for pnpm/yarn
             const dockerBuildCommand = `docker run --rm \
