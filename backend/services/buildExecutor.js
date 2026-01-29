@@ -999,11 +999,20 @@ async function deployToContainer(buildPath, buildOutput, deployment, project, us
         const remoteBuild = require('./remoteBuild');
 
         // Optimization: For frontend sites (React/Vue/Angular), we ONLY need the production build folder and 'server.js'
-        // Exclude node_modules, src and .git to make transfer lighting fast (usually < 1MB)
-        // Note: We keep 'public' for Svelte since its build output is often inside public/build
-        // IMPORTANT: Never exclude server.js - it's required for PM2
-        const isCompiledFrontend = ['react', 'vue', 'angular', 'nextjs', 'vite', 'cra', 'nuxtjs'].includes(deployment.framework);
-        const options = isCompiledFrontend ? { exclude: ['node_modules', 'src', 'public', '.git', '.github'], include: ['server.js'] } : { exclude: 'node_modules', include: ['server.js'] };
+        // Exclude source code and .git to make transfer lighting fast
+        // IMPORTANT: For Next.js/Node apps, we NEED production dependencies at runtime
+        // For static compiled apps (React/Vue/Angular), we can exclude everything except build folder
+        const isNodeApp = ['nextjs', 'nodejs', 'nuxtjs'].includes(deployment.framework);
+        const isStaticCompiled = ['react', 'vue', 'angular', 'vite', 'cra'].includes(deployment.framework);
+        
+        let options;
+        if (isStaticCompiled) {
+            // Static apps: exclude everything except build folder and server.js
+            options = { exclude: ['node_modules', 'src', 'public', '.git', '.github'], include: ['server.js'] };
+        } else {
+            // Node apps (Next.js): exclude source but keep dependencies for production
+            options = { exclude: ['src', '.git', '.github'], include: ['server.js', 'node_modules'] };
+        }
 
         await remoteBuild.uploadToRemoteServer(
             buildPath,

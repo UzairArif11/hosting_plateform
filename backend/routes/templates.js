@@ -313,8 +313,11 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
 
                 logger.info(`Admin ${userEmail} deployed demo for template ${templateName} at ${demoUrl}`);
 
-                // Emit success via Socket.IO
-                if (io) {
+                // Emit success via Socket.IO - use websocketService.getIO()
+                const websocketService = require('../services/websocket');
+                const socketIO = websocketService.getIO();
+                
+                if (socketIO) {
                     const successPayload = {
                         templateId: templateId,
                         status: 'success',
@@ -323,9 +326,9 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
                         message: 'Deployment successful!'
                     };
                     logger.info(`📡 Emitting template-demo-status (success) for ${templateId}:`, successPayload);
-                    io.emit('template-demo-status', successPayload);
+                    socketIO.emit('template-demo-status', successPayload);
                 } else {
-                    logger.warn('⚠️ Socket.IO not available to emit success event');
+                    logger.warn('⚠️ Socket.IO not initialized yet');
                 }
             } else {
                 // Update template with error
@@ -336,8 +339,11 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
 
                 logger.error(`Failed to deploy demo for template ${templateName}: ${result.error}`);
 
-                // Emit failure via Socket.IO
-                if (io) {
+                // Emit failure via Socket.IO - use websocketService.getIO()
+                const websocketService = require('../services/websocket');
+                const socketIO = websocketService.getIO();
+                
+                if (socketIO) {
                     const failurePayload = {
                         templateId: templateId,
                         status: 'failed',
@@ -346,7 +352,7 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
                         message: 'Deployment failed'
                     };
                     logger.info(`📡 Emitting template-demo-status (failed) for ${templateId}:`, failurePayload);
-                    io.emit('template-demo-status', failurePayload);
+                    socketIO.emit('template-demo-status', failurePayload);
                 } else {
                     logger.warn('⚠️ Socket.IO not available to emit failure event');
                 }
@@ -364,8 +370,11 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
 
             logger.error(`Failed to deploy template demo ${templateName}:`, error);
 
-            // Emit failure via Socket.IO
-            if (io) {
+            // Emit failure via Socket.IO - use websocketService.getIO()
+            const websocketService = require('../services/websocket');
+            const socketIO = websocketService.getIO();
+            
+            if (socketIO) {
                 const errorPayload = {
                     templateId: templateId,
                     status: 'failed',
@@ -374,7 +383,7 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
                     message: 'Deployment failed'
                 };
                 logger.info(`📡 Emitting template-demo-status (error) for ${templateId}:`, errorPayload);
-                io.emit('template-demo-status', errorPayload);
+                socketIO.emit('template-demo-status', errorPayload);
             } else {
                 logger.warn('⚠️ Socket.IO not available to emit error event');
             }
