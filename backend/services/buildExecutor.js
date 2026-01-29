@@ -469,6 +469,31 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
         const installTime = Date.now() - startTime;
         await onLog('info', `✓ Dependencies installed in ${(installTime / 1000).toFixed(2)}s`);
 
+        // Check if Prisma is used and generate client locally (before Docker build)
+        // This avoids issues with symlinks in node_modules/.bin inside Docker containers
+        try {
+            await fs.access(path.join(buildPath, 'prisma', 'schema.prisma'));
+            await onLog('info', '✓ Detected Prisma - generating client locally...');
+            
+            const prismaGenCmd = packageManager === 'pnpm' ? 'pnpm exec prisma generate' :
+                                packageManager === 'yarn' ? 'yarn prisma generate' :
+                                'npx prisma generate';
+            
+            const { stdout: prismaOut, stderr: prismaErr } = await execAsync(prismaGenCmd, {
+                cwd: buildPath,
+                timeout: 2 * 60 * 1000, // 2 minutes
+                maxBuffer: 5 * 1024 * 1024
+            });
+            
+            if (prismaOut) await onLog('info', prismaOut.substring(0, 300));
+            await onLog('info', '✓ Prisma client generated successfully');
+        } catch (err) {
+            // No Prisma or generation failed (non-fatal, continue with build)
+            if (err.code !== 'ENOENT') {
+                await onLog('warn', `Prisma generation warning: ${err.message.substring(0, 200)}`);
+            }
+        }
+
         // Save package.json hash for next build
         const packageJsonPath = path.join(buildPath, 'package.json');
         const packageJson = await fs.readFile(packageJsonPath, 'utf8');
@@ -611,21 +636,15 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
             try {
                 await fs.access(path.join(buildPath, 'prisma', 'schema.prisma'));
                 hasPrisma = true;
-                await onLog('info', '✓ Detected Prisma - will run prisma generate before build');
+                await onLog('info', '✓ Prisma detected - client already generated locally');
             } catch (err) {
                 // No Prisma schema found
             }
 
             // Build command sequence
-            // Since dependencies are already installed locally (with devDeps), we use local node_modules
-            // Just run prisma generate (if needed) and build - NO need to reinstall
-            let buildSequence = '';
-            if (hasPrisma) {
-                // Use local prisma from node_modules (already installed with devDeps)
-                // Must use ./node_modules/.bin/prisma to match the installed @prisma/client version
-                buildSequence = './node_modules/.bin/prisma generate && ';
-            }
-            buildSequence += dockerBuildCmd;
+            // Note: Prisma client already generated locally during install phase
+            // Docker build just runs the build command with pre-generated Prisma client
+            const buildSequence = dockerBuildCmd;
 
             // Build command to run inside Docker with corepack for pnpm/yarn
             const dockerBuildCommand = `docker run --rm \
