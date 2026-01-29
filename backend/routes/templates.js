@@ -212,15 +212,32 @@ router.put('/:id', requireAuth, requireAdmin, async (req, res) => {
 // Admin: Delete template
 router.delete('/:id', requireAuth, requireAdmin, async (req, res) => {
     try {
-        const template = await Template.findByIdAndDelete(req.params.id);
+        const template = await Template.findById(req.params.id);
 
         if (!template) {
             return res.status(404).json({ success: false, error: 'Template not found' });
         }
 
+        // Delete demo deployment if exists (project, deployment, container cleanup)
+        if (template.demoProjectId) {
+            const Project = require('../models/Project');
+            const Deployment = require('../models/Deployment');
+            
+            // Delete demo project (cascade deletes associated deployments)
+            await Project.findByIdAndDelete(template.demoProjectId);
+            
+            // Delete all deployments for this demo project
+            await Deployment.deleteMany({ projectId: template.demoProjectId });
+            
+            logger.info(`Deleted demo deployment for template ${template.name}`);
+        }
+
+        // Delete the template
+        await Template.findByIdAndDelete(req.params.id);
+
         res.json({
             success: true,
-            message: 'Template deleted successfully'
+            message: 'Template and demo deployment deleted successfully'
         });
     } catch (error) {
         logger.error('Failed to delete template:', error);

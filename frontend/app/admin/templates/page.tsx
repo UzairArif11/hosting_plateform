@@ -158,11 +158,22 @@ export default function TemplateManagement() {
                 setDemoDeploying(false);
             }
 
-            // Show toast notifications
+            // Show toast notifications (always fire, even if socket is late)
             if (data.status === 'success') {
-                toast.success(`Demo deployment successful!`, { duration: 5000 });
+                toast.success(`✅ Demo deployment successful!`, { 
+                    duration: 5000,
+                    icon: '🚀'
+                });
             } else if (data.status === 'failed') {
-                toast.error(`Demo deployment failed: ${data.error || 'Unknown error'}`, { duration: 8000 });
+                toast.error(`❌ Demo deployment failed: ${data.error || 'Unknown error'}`, { 
+                    duration: 8000,
+                    icon: '⚠️'
+                });
+            } else if (data.status === 'deploying') {
+                toast.loading(`📦 Deploying demo...`, {
+                    duration: 2000,
+                    id: `deploy-${data.templateId}` // Prevent duplicates
+                });
             }
         });
 

@@ -182,15 +182,15 @@ export default function CapacityManagementPage() {
                         <div className="space-y-2">
                             <div className="flex justify-between text-sm">
                                 <span className="text-gray-400">CPU</span>
-                                <span className="text-white font-mono">{capacity.usagePercentage.cpu}%</span>
+                                <span className="text-white font-mono">{capacity.usagePercentage?.cpu || '0'}%</span>
                             </div>
                             <div className="h-3 bg-gray-800 rounded-full overflow-hidden">
                                 <div
-                                    className={`h-full transition-all ${parseFloat(capacity.usagePercentage.cpu) > capacity.warningThresholds.cpu
+                                    className={`h-full transition-all ${parseFloat(capacity.usagePercentage?.cpu || '0') > capacity.warningThresholds.cpu
                                         ? 'bg-red-500'
                                         : 'bg-blue-500'
                                         }`}
-                                    style={{ width: `${capacity.usagePercentage.cpu}%` }}
+                                    style={{ width: `${capacity.usagePercentage?.cpu || '0'}%` }}
                                 />
                             </div>
                             <div className="flex justify-between text-xs text-gray-500">
@@ -203,15 +203,15 @@ export default function CapacityManagementPage() {
                         <div className="space-y-2">
                             <div className="flex justify-between text-sm">
                                 <span className="text-gray-400">RAM</span>
-                                <span className="text-white font-mono">{capacity.usagePercentage.ram}%</span>
+                                <span className="text-white font-mono">{capacity.usagePercentage?.ram || '0'}%</span>
                             </div>
                             <div className="h-3 bg-gray-800 rounded-full overflow-hidden">
                                 <div
-                                    className={`h-full transition-all ${parseFloat(capacity.usagePercentage.ram) > capacity.warningThresholds.ram
+                                    className={`h-full transition-all ${parseFloat(capacity.usagePercentage?.ram || '0') > capacity.warningThresholds.ram
                                         ? 'bg-red-500'
                                         : 'bg-purple-500'
                                         }`}
-                                    style={{ width: `${capacity.usagePercentage.ram}%` }}
+                                    style={{ width: `${capacity.usagePercentage?.ram || '0'}%` }}
                                 />
                             </div>
                             <div className="flex justify-between text-xs text-gray-500">
@@ -224,15 +224,15 @@ export default function CapacityManagementPage() {
                         <div className="space-y-2">
                             <div className="flex justify-between text-sm">
                                 <span className="text-gray-400">Storage</span>
-                                <span className="text-white font-mono">{capacity.usagePercentage.storage}%</span>
+                                <span className="text-white font-mono">{capacity.usagePercentage?.storage || '0'}%</span>
                             </div>
                             <div className="h-3 bg-gray-800 rounded-full overflow-hidden">
                                 <div
-                                    className={`h-full transition-all ${parseFloat(capacity.usagePercentage.storage) > capacity.warningThresholds.storage
+                                    className={`h-full transition-all ${parseFloat(capacity.usagePercentage?.storage || '0') > capacity.warningThresholds.storage
                                         ? 'bg-red-500'
                                         : 'bg-green-500'
                                         }`}
-                                    style={{ width: `${capacity.usagePercentage.storage}%` }}
+                                    style={{ width: `${capacity.usagePercentage?.storage || '0'}%` }}
                                 />
                             </div>
                             <div className="flex justify-between text-xs text-gray-500">
