@@ -10,6 +10,7 @@ const Settings = require('../models/Settings');
 const docker = require('./docker');
 const containerOrchestrator = require('./containerOrchestrator');
 const githubService = require('./github');
+const websocketService = require('./websocket');
 const logger = require('../utils/logger');
 
 const BUILD_DIR = process.env.BUILD_DIR || '/tmp/builds';
@@ -40,12 +41,18 @@ async function executeBuild(deploymentId, callbacks = {}) {
         user = deployment.userId;
 
         await deployment.updateStatus('building');
+        websocketService.emitDeploymentStatus(deploymentId, 'building');
+        websocketService.emitDeploymentLog(deploymentId, { message: '🚀 Starting deployment...', level: 'info' });
+        websocketService.emitDeploymentProgress(deploymentId, 5);
         await onLog('info', '🚀 Starting deployment...');
         await onProgress(5);
 
         // Step 1: Clone repository
+        websocketService.emitDeploymentLog(deploymentId, { message: '📦 Cloning repository...', level: 'info' });
         await onLog('info', '📦 Cloning repository...');
         buildPath = await cloneRepository(deployment, project, user, onLog);
+        websocketService.emitDeploymentLog(deploymentId, { message: '✓ Repository cloned successfully', level: 'success' });
+        websocketService.emitDeploymentProgress(deploymentId, 20);
         await onProgress(20);
 
         // Step 2: Detect framework
@@ -54,20 +61,29 @@ async function executeBuild(deploymentId, callbacks = {}) {
         await onProgress(25);
 
         // Step 3: Install dependencies (Local Build)
+        websocketService.emitDeploymentLog(deploymentId, { message: '📥 Installing dependencies locally...', level: 'info' });
         await onLog('info', '📥 Installing dependencies locally...');
         await installDependencies(buildPath, framework, deployment, onLog);
+        websocketService.emitDeploymentLog(deploymentId, { message: '✓ Dependencies installed', level: 'success' });
+        websocketService.emitDeploymentProgress(deploymentId, 45);
         await onProgress(45);
 
         // Step 4: Build project (Local Build)
+        websocketService.emitDeploymentLog(deploymentId, { message: '🔨 Building project locally...', level: 'info' });
         await onLog('info', '🔨 Building project locally...');
         const buildOutput = await buildProject(buildPath, framework, deployment, project, onLog);
-
+        websocketService.emitDeploymentLog(deploymentId, { message: '✓ Build completed successfully', level: 'success' });
+        websocketService.emitDeploymentProgress(deploymentId, 70);
         await onProgress(70);
 
         // Step 5: Deploy to container
+        websocketService.emitDeploymentLog(deploymentId, { message: '🚢 Deploying to container...', level: 'info' });
         await onLog('info', '🚢 Deploying to container...');
         await deployment.updateStatus('deploying');
+        websocketService.emitDeploymentStatus(deploymentId, 'deploying');
         const deploymentInfo = await deployToContainer(buildPath, buildOutput, deployment, project, user, onLog);
+        websocketService.emitDeploymentLog(deploymentId, { message: '✓ Container deployed', level: 'success' });
+        websocketService.emitDeploymentProgress(deploymentId, 90);
         await onProgress(90);
 
         // Step 6: Finalize
@@ -81,6 +97,9 @@ async function executeBuild(deploymentId, callbacks = {}) {
         });
 
         await deployment.calculateAnalytics();
+        websocketService.emitDeploymentLog(deploymentId, { message: '✅ Deployment successful!', level: 'success' });
+        websocketService.emitDeploymentProgress(deploymentId, 100);
+        websocketService.emitDeploymentStatus(deploymentId, 'success', { url: deploymentInfo.url });
         await onProgress(100);
 
         // Cleanup local build directory
@@ -129,6 +148,16 @@ async function executeBuild(deploymentId, callbacks = {}) {
             await deployment.setError(error, getCurrentPhase(error));
             await onLog('error', `❌ Deployment failed: ${error.message}`);
         }
+
+        // Emit failure via Socket.IO
+        websocketService.emitDeploymentLog(deploymentId, {
+            message: `❌ Deployment failed: ${error.message}`,
+            level: 'error'
+        });
+        websocketService.emitDeploymentStatus(deploymentId, 'failed', {
+            error: error.message,
+            phase: getCurrentPhase(error)
+        });
 
         // Cleanup on error
         if (buildPath) {
@@ -185,10 +214,17 @@ async function cloneRepository(deployment, project, user, onLog) {
         await fs.mkdir(BUILD_DIR, { recursive: true });
 
         // Get repository URL with token
+        // For template deployments, use platform token as fallback
+        const githubToken = user.githubAccessToken || process.env.GITHUB_TOKEN;
+
+        if (!githubToken) {
+            throw new Error('No GitHub token available for repository access. Add GITHUB_TOKEN to .env');
+        }
+
         const repoUrl = project.repository.url;
         const repoWithAuth = repoUrl.replace(
             'https://github.com/',
-            `https://${user.githubAccessToken}@github.com/`
+            `https://${githubToken}@github.com/`
         );
 
         await onLog('info', `Cloning ${project.repository.fullName}...`);
@@ -539,7 +575,7 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
         // Detect package manager from lock files
         let dockerPackageManager = 'npm';
         let dockerInstallCmd = 'npm install --legacy-peer-deps';
-        
+
         try {
             if (await fs.access(path.join(buildPath, 'pnpm-lock.yaml')).then(() => true).catch(() => false)) {
                 dockerPackageManager = 'pnpm';
@@ -557,10 +593,10 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
         // Execute build inside Docker container with specific Node.js version
         if (framework !== 'static' && framework !== 'nodejs') {
             await onLog('info', `Building inside Docker container with Node.js ${nodeVersion} and ${dockerPackageManager}...`);
-            
+
             // Ensure build command uses the correct package manager
             let dockerBuildCmd = buildCommand;
-            
+
             // If using pnpm but build command starts with npm/npx, replace it
             if (dockerPackageManager === 'pnpm' && dockerBuildCmd.startsWith('npx ')) {
                 dockerBuildCmd = dockerBuildCmd.replace(/^npx /, 'pnpm exec ');
@@ -569,7 +605,7 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
                 dockerBuildCmd = dockerBuildCmd.replace(/^npm run /, 'pnpm ');
                 await onLog('info', `Converted build command for pnpm: ${dockerBuildCmd}`);
             }
-            
+
             // Build command to run inside Docker with corepack for pnpm/yarn
             const dockerBuildCommand = `docker run --rm \
                 -v "${buildPath}:/app" \
@@ -696,11 +732,11 @@ console.log('Server running at http://localhost:' + port);
                 await onLog('warn', `Error generating server.js: ${err.message}`);
             }
         }
-        
+
         // Generate Next.js starter script that uses next start
         if (framework === 'nextjs') {
             await onLog('info', 'Generating Next.js starter script...');
-            
+
             const nextServerScript = `
 const { spawn } = require('child_process');
 
@@ -731,7 +767,7 @@ child.on('exit', (code) => {
 process.on('SIGTERM', () => child.kill('SIGTERM'));
 process.on('SIGINT', () => child.kill('SIGINT'));
 `;
-            
+
             await fs.writeFile(path.join(buildPath, 'server.js'), nextServerScript);
             await onLog('info', '✓ Next.js starter script generated (uses next start)');
         }
