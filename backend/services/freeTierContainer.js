@@ -11,7 +11,9 @@ async function createUserContainer(user, serverKey, server, resources) {
     try {
         // Deterministic naming using User Mongo ID (No timestamp)
         // This ensures the user always maps to the same container
-        const containerName = `${serverKey}-user-${user._id}`;
+        // Use 'admin' prefix for admin users deploying templates, 'user' prefix for regular users
+        const userType = user.role === 'admin' ? 'admin' : 'user';
+        const containerName = `${serverKey}-${userType}-${user._id}`;
 
         // We still get a port variable for metadata, even if using Host Networking
         const port = await getAvailablePort();
