@@ -606,6 +606,23 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
                 await onLog('info', `Converted build command for pnpm: ${dockerBuildCmd}`);
             }
 
+            // Check if Prisma is used (schema.prisma exists)
+            let hasPrisma = false;
+            try {
+                await fs.access(path.join(buildPath, 'prisma', 'schema.prisma'));
+                hasPrisma = true;
+                await onLog('info', '✓ Detected Prisma - will run prisma generate before build');
+            } catch (err) {
+                // No Prisma schema found
+            }
+
+            // Build command sequence: install -> prisma generate (if needed) -> build
+            let buildSequence = dockerInstallCmd;
+            if (hasPrisma) {
+                buildSequence += ' && npx prisma generate';
+            }
+            buildSequence += ` && ${dockerBuildCmd}`;
+
             // Build command to run inside Docker with corepack for pnpm/yarn
             const dockerBuildCommand = `docker run --rm \
                 -v "${buildPath}:/app" \
@@ -614,7 +631,7 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
                 -e CI=false \
                 -e PUBLIC_URL=. \
                 node:${nodeVersion}-alpine \
-                sh -c "${dockerInstallCmd} && ${dockerBuildCmd}"`;
+                sh -c "${buildSequence}"`;
 
             try {
                 const { stdout, stderr } = await execAsync(dockerBuildCommand, {
