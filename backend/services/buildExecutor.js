@@ -215,10 +215,10 @@ async function cloneRepository(deployment, project, user, onLog) {
 
         // Get repository URL with token
         // For template deployments, use platform token as fallback
-        const githubToken = user.githubAccessToken || process.env.GITHUB_TOKEN;
+        const githubToken = user.githubAccessToken || process.env.GITHUB_API_TOKEN;
 
         if (!githubToken) {
-            throw new Error('No GitHub token available for repository access. Add GITHUB_TOKEN to .env');
+            throw new Error('No GitHub token available for repository access. Add GITHUB_API_TOKEN to .env');
         }
 
         const repoUrl = project.repository.url;
