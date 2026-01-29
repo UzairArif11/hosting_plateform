@@ -476,21 +476,24 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
             await fs.access(path.join(buildPath, 'prisma', 'schema.prisma'));
             await onLog('info', '✓ Detected Prisma - generating client locally...');
             
-            // Use local Prisma binary directly (not npx which downloads wrong version)
-            const prismaBinPath = path.join(buildPath, 'node_modules', '.bin', 'prisma');
+            // Read package.json to get exact Prisma version
+            const packageJsonPath = path.join(buildPath, 'package.json');
+            const packageJsonContent = await fs.readFile(packageJsonPath, 'utf8');
+            const packageJson = JSON.parse(packageJsonContent);
             
-            // Check if local Prisma CLI exists
-            try {
-                await fs.access(prismaBinPath);
-                await onLog('info', 'Using local Prisma CLI');
-            } catch {
-                throw new Error('Prisma CLI not found in node_modules - ensure prisma is in devDependencies');
-            }
+            // Get Prisma version from devDependencies or dependencies
+            const prismaVersion = packageJson.devDependencies?.prisma || packageJson.dependencies?.prisma || 'latest';
+            const versionClean = prismaVersion.replace(/[\^~]/, ''); // Remove ^ or ~
             
-            const { stdout: prismaOut, stderr: prismaErr } = await execAsync(`${prismaBinPath} generate`, {
+            await onLog('info', `Using Prisma version: ${versionClean}`);
+            
+            // Use npx with specific version to match @prisma/client version
+            // This works even if devDependencies weren't installed
+            const { stdout: prismaOut, stderr: prismaErr } = await execAsync(`npx -y prisma@${versionClean} generate`, {
                 cwd: buildPath,
-                timeout: 2 * 60 * 1000, // 2 minutes
-                maxBuffer: 5 * 1024 * 1024
+                timeout: 3 * 60 * 1000, // 3 minutes (npx needs time to download)
+                maxBuffer: 5 * 1024 * 1024,
+                env: { ...process.env, PRISMA_SKIP_POSTINSTALL_GENERATE: '1' }
             });
             
             if (prismaOut) await onLog('info', prismaOut.substring(0, 300));
@@ -498,10 +501,6 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
             hasPrismaGenerated = true;
             
             // Modify package.json build script to skip prisma generate (already done locally)
-            const packageJsonPath = path.join(buildPath, 'package.json');
-            const packageJsonContent = await fs.readFile(packageJsonPath, 'utf8');
-            const packageJson = JSON.parse(packageJsonContent);
-            
             if (packageJson.scripts && packageJson.scripts.build) {
                 const originalBuild = packageJson.scripts.build;
                 // Remove "prisma generate &&" from build command
