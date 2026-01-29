@@ -487,6 +487,14 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
             
             await onLog('info', `Using Prisma version: ${versionClean}`);
             
+            // Provide dummy DATABASE_URL for Prisma generation (required by schema validation)
+            // The actual DATABASE_URL will be provided at runtime
+            const dummyEnv = {
+                ...process.env,
+                DATABASE_URL: 'file:./dev.db',
+                PRISMA_SKIP_POSTINSTALL_GENERATE: '1'
+            };
+            
             // Use npx with specific version to match @prisma/client version
             // This works even if devDependencies weren't installed
             const schemaPath = path.join(buildPath, 'prisma', 'schema.prisma');
@@ -494,7 +502,7 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
                 cwd: buildPath,
                 timeout: 3 * 60 * 1000, // 3 minutes (npx needs time to download)
                 maxBuffer: 5 * 1024 * 1024,
-                env: { ...process.env, PRISMA_SKIP_POSTINSTALL_GENERATE: '1' }
+                env: dummyEnv
             });
             
             if (prismaOut) await onLog('info', prismaOut.substring(0, 300));
