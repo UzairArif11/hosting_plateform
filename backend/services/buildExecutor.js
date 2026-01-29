@@ -622,7 +622,8 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
             let buildSequence = '';
             if (hasPrisma) {
                 // Use local prisma from node_modules (already installed with devDeps)
-                buildSequence = 'npx prisma generate && ';
+                // Must use ./node_modules/.bin/prisma to match the installed @prisma/client version
+                buildSequence = './node_modules/.bin/prisma generate && ';
             }
             buildSequence += dockerBuildCmd;
 
