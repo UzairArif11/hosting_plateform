@@ -489,7 +489,8 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
             
             // Use npx with specific version to match @prisma/client version
             // This works even if devDependencies weren't installed
-            const { stdout: prismaOut, stderr: prismaErr } = await execAsync(`npx -y prisma@${versionClean} generate`, {
+            const schemaPath = path.join(buildPath, 'prisma', 'schema.prisma');
+            const { stdout: prismaOut, stderr: prismaErr } = await execAsync(`npx -y prisma@${versionClean} generate --schema="${schemaPath}"`, {
                 cwd: buildPath,
                 timeout: 3 * 60 * 1000, // 3 minutes (npx needs time to download)
                 maxBuffer: 5 * 1024 * 1024,
