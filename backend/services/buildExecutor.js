@@ -619,7 +619,8 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
             // Build command sequence: install -> prisma generate (if needed) -> build
             let buildSequence = dockerInstallCmd;
             if (hasPrisma) {
-                buildSequence += ' && npx prisma generate';
+                // Use local prisma from node_modules to avoid version mismatch
+                buildSequence += ' && ./node_modules/.bin/prisma generate';
             }
             buildSequence += ` && ${dockerBuildCmd}`;
 
