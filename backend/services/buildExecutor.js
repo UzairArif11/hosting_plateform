@@ -450,7 +450,7 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
                 // If npm ci fails (no package-lock.json), fallback to npm install
                 if (packageManager === 'npm' && (error.message.includes('package-lock.json') || error.message.includes('ERESOLVE'))) {
                     await onLog('warn', 'npm ci failed/conflict, falling back to npm install --legacy-peer-deps...');
-                    installCmd = 'npm install --legacy-peer-deps';
+                    installCmd = 'npm install --legacy-peer-deps --include=dev';
                     const result = await execAsync(installCmd, {
                         cwd: buildPath,
                         timeout: 10 * 60 * 1000,
@@ -487,22 +487,47 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
             
             await onLog('info', `Using Prisma version: ${versionClean}`);
             
-            // Provide dummy DATABASE_URL for Prisma generation (required by schema validation)
-            // The actual DATABASE_URL will be provided at runtime
-            const dummyEnv = {
-                ...process.env,
-                DATABASE_URL: 'file:./dev.db',
-                PRISMA_SKIP_POSTINSTALL_GENERATE: '1'
-            };
+            // Write DATABASE_URL to .env for Prisma generation
+            const envPath = path.join(buildPath, '.env');
+            let envContent = '';
+            try {
+                envContent = await fs.readFile(envPath, 'utf8');
+            } catch {}
+            if (!envContent.includes('DATABASE_URL')) {
+                await fs.writeFile(envPath, `${envContent}\nDATABASE_URL=file:./dev.db\n`);
+            }
             
-            // Use npx with specific version to match @prisma/client version
-            // This works even if devDependencies weren't installed
+            // Detect architecture and configure binaryTargets for Docker
+            const arch = process.arch;
+            const isARM = arch === 'arm64' || arch === 'aarch64';
+            const binaryTarget = isARM ? 'linux-arm64-openssl-3.0.x' : 'linux-amd64-openssl-3.0.x';
+            
+            // Read and modify schema.prisma to add binaryTargets
             const schemaPath = path.join(buildPath, 'prisma', 'schema.prisma');
-            const { stdout: prismaOut, stderr: prismaErr } = await execAsync(`npx -y prisma@${versionClean} generate --schema="${schemaPath}"`, {
+            let schemaContent = await fs.readFile(schemaPath, 'utf8');
+            if (!schemaContent.includes('binaryTargets')) {
+                schemaContent = schemaContent.replace(
+                    /(generator\s+client\s*{[^}]*provider\s*=\s*["']prisma-client-js["'])/,
+                    `$1\n  binaryTargets = ["native", "${binaryTarget}"]`
+                );
+                await fs.writeFile(schemaPath, schemaContent);
+                await onLog('info', `Added binaryTargets: ["native", "${binaryTarget}"]`);
+            }
+            
+            // Use local prisma binary if devDeps installed, otherwise npx
+            const prismaBin = path.join(buildPath, 'node_modules', '.bin', 'prisma');
+            let prismaCmd;
+            try {
+                await fs.access(prismaBin);
+                prismaCmd = `"${prismaBin}" generate`;
+            } catch {
+                prismaCmd = `npx -y prisma@${versionClean} generate --schema="${schemaPath}"`;
+            }
+            
+            const { stdout: prismaOut, stderr: prismaErr } = await execAsync(prismaCmd, {
                 cwd: buildPath,
-                timeout: 3 * 60 * 1000, // 3 minutes (npx needs time to download)
-                maxBuffer: 5 * 1024 * 1024,
-                env: dummyEnv
+                timeout: 3 * 60 * 1000,
+                maxBuffer: 5 * 1024 * 1024
             });
             
             if (prismaOut) await onLog('info', prismaOut.substring(0, 300));
@@ -633,6 +658,9 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
         const nodeVersion = project.buildConfig?.nodeVersion || template?.buildConfig?.nodeVersion || '20';
         await onLog('info', `Using Node.js version: ${nodeVersion} (in Docker)`);
 
+        // Use slim instead of alpine for better compatibility (Next.js SWC on ARM64, OpenSSL)
+        const dockerImage = `node:${nodeVersion}-slim`;
+
         // Detect package manager from lock files
         let dockerPackageManager = 'npm';
         let dockerInstallCmd = 'npm install --legacy-peer-deps';
@@ -689,7 +717,7 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
                 -e NODE_ENV=production \
                 -e CI=false \
                 -e PUBLIC_URL=. \
-                node:${nodeVersion}-alpine \
+                ${dockerImage} \
                 sh -c "${buildSequence}"`;
 
             try {
@@ -1072,7 +1100,7 @@ async function deployToContainer(buildPath, buildOutput, deployment, project, us
 function generateDockerfile(framework, outputDir) {
     const dockerfiles = {
         nextjs: `
-FROM node:18-alpine
+FROM node:18-slim
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --only=production
@@ -1102,7 +1130,7 @@ EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
     `,
         nodejs: `
-FROM node:18-alpine
+FROM node:18-slim
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --only=production
