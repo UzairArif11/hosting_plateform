@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const Template = require('../models/Template');
-const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { requireAuth } = require('../middleware/auth');
+const { requireAdmin } = require('../middleware/admin');
 const logger = require('../utils/logger');
 const templateDeployer = require('../services/templateDeployer');
 const adminDemoDeployer = require('../services/adminDemoDeployer');
