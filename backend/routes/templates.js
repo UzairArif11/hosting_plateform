@@ -113,7 +113,8 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
         }
 
         // Generate unique deployment ID for tracking logs
-        const deploymentId = require('mongoose').Types.ObjectId().toString();
+        const mongoose = require('mongoose');
+        const deploymentId = new mongoose.Types.ObjectId().toString();
 
         // Update template status immediately 
         template.demoStatus = 'deploying';
