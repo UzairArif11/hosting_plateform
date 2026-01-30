@@ -222,13 +222,13 @@ router.delete('/:id', requireAuth, requireAdmin, async (req, res) => {
         if (template.demoProjectId) {
             const Project = require('../models/Project');
             const Deployment = require('../models/Deployment');
-            
+
             // Delete demo project (cascade deletes associated deployments)
             await Project.findByIdAndDelete(template.demoProjectId);
-            
+
             // Delete all deployments for this demo project
             await Deployment.deleteMany({ projectId: template.demoProjectId });
-            
+
             logger.info(`Deleted demo deployment for template ${template.name}`);
         }
 
@@ -249,7 +249,7 @@ router.delete('/:id', requireAuth, requireAdmin, async (req, res) => {
 router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
     try {
         const template = await Template.findById(req.params.id);
-        
+
         if (!template) {
             return res.status(404).json({ success: false, error: 'Template not found' });
         }
@@ -316,7 +316,7 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
                 // Emit success via Socket.IO - use websocketService.getIO()
                 const websocketService = require('../services/websocket');
                 const socketIO = websocketService.getIO();
-                
+
                 if (socketIO) {
                     const successPayload = {
                         templateId: templateId,
@@ -342,7 +342,7 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
                 // Emit failure via Socket.IO - use websocketService.getIO()
                 const websocketService = require('../services/websocket');
                 const socketIO = websocketService.getIO();
-                
+
                 if (socketIO) {
                     const failurePayload = {
                         templateId: templateId,
@@ -373,7 +373,7 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
             // Emit failure via Socket.IO - use websocketService.getIO()
             const websocketService = require('../services/websocket');
             const socketIO = websocketService.getIO();
-            
+
             if (socketIO) {
                 const errorPayload = {
                     templateId: templateId,
@@ -387,6 +387,7 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
             } else {
                 logger.warn('⚠️ Socket.IO not available to emit error event');
             }
+            */
         });
 
         // Return immediately with deploying status
