@@ -104,11 +104,21 @@ async function deployAdminDemo({ template, deploymentId }) {
 
         if (hasPrisma) {
             emitLog('info', '🔧 Generating Prisma client...');
-            execSync('npx prisma generate', {
-                cwd: buildPath,
-                stdio: 'pipe'
-            });
-            emitLog('info', '✓ Prisma client generated');
+            try {
+                execSync('npx prisma generate', {
+                    cwd: buildPath,
+                    stdio: 'pipe',
+                    env: {
+                        ...process.env,
+                        DATABASE_URL: 'file:./dev.db' // Default for demos
+                    }
+                });
+                emitLog('info', '✓ Prisma client generated');
+            } catch (prismaError) {
+                emitLog('warn', `⚠️ Prisma generation failed, skipping (not critical for demo)`);
+                emitLog('warn', `Prisma error: ${prismaError.message.split('\n')[0]}`);
+                // Continue deployment - many templates work without Prisma client
+            }
         }
 
         emitProgress(50);
