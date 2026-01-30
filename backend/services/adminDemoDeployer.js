@@ -123,6 +123,36 @@ async function deployAdminDemo({ template, deploymentId }) {
 
         emitProgress(50);
 
+        // Sanitize package.json (remove prisma generate from build scripts)
+        try {
+            const packageJsonPath = path.join(buildPath, 'package.json');
+            const packageJsonData = await fs.readFile(packageJsonPath, 'utf8');
+            const packageJson = JSON.parse(packageJsonData);
+
+            let modified = false;
+
+            // Remove prisma generate from build script
+            if (packageJson.scripts && packageJson.scripts.build && packageJson.scripts.build.includes('prisma generate')) {
+                packageJson.scripts.build = packageJson.scripts.build.replace('prisma generate &&', '').replace('prisma generate', '').trim();
+                if (packageJson.scripts.build === '') packageJson.scripts.build = 'next build';
+                modified = true;
+                emitLog('info', '🔧 Autosix: Removed broken prisma generate from build script');
+            }
+
+            // Remove postinstall if it has prisma
+            if (packageJson.scripts && packageJson.scripts.postinstall && packageJson.scripts.postinstall.includes('prisma')) {
+                delete packageJson.scripts.postinstall;
+                modified = true;
+                emitLog('info', '🔧 Autosix: Removed broken postinstall script');
+            }
+
+            if (modified) {
+                await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
+            }
+        } catch (err) {
+            emitLog('warn', `Failed to sanitize package.json: ${err.message}`);
+        }
+
         // Build project
         emitLog('info', '🔨 Building project...');
         try {
