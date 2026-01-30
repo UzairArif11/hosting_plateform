@@ -28,6 +28,8 @@ interface Template {
     previewImage: string;
     previewUrl?: string; // Live website
     demoDeploymentUrl?: string; // Admin-deployed demo URL
+    demoDeploymentId?: string; // Deployment ID for Socket.IO room
+    demoProjectId?: string; // Project ID for cleanup
     demoStatus?: 'none' | 'deploying' | 'success' | 'failed';
     demoProgress?: number; // 0-100
     demoError?: string;
@@ -146,6 +148,16 @@ export default function TemplateManagement() {
             }]);
         });
 
+        // Listen for deployment progress
+        socketRef.current.on('deployment-progress', (data: {
+            deploymentId: string;
+            progress: number;
+            timestamp: string;
+        }) => {
+            console.log('📊 Deployment progress:', data);
+            // Progress updates are also reflected in template-demo-status events
+        });
+
         socketRef.current.on('template-demo-status', (data: {
             templateId: string;
             status: 'deploying' | 'success' | 'failed';
@@ -219,6 +231,22 @@ export default function TemplateManagement() {
             }
         };
     }, []);
+
+    // Join/leave deployment room when logs modal opens/closes
+    useEffect(() => {
+        if (showLogsModal && logsTemplate?.demoDeploymentId && socketRef.current) {
+            console.log(`🔗 Joining deployment room: ${logsTemplate.demoDeploymentId}`);
+            socketRef.current.emit('join-deployment', logsTemplate.demoDeploymentId);
+
+            // Cleanup: leave room when modal closes
+            return () => {
+                if (socketRef.current && logsTemplate.demoDeploymentId) {
+                    console.log(`👋 Leaving deployment room: ${logsTemplate.demoDeploymentId}`);
+                    socketRef.current.emit('leave-deployment', logsTemplate.demoDeploymentId);
+                }
+            };
+        }
+    }, [showLogsModal, logsTemplate?.demoDeploymentId]);
 
     // Auto-scroll logs to bottom
     useEffect(() => {
@@ -397,6 +425,12 @@ export default function TemplateManagement() {
             });
 
             if (res.data.success) {
+                // Join the deployment room to receive real-time logs
+                if (socketRef.current && res.data.deploymentId) {
+                    console.log(`🔗 Joining deployment room: ${res.data.deploymentId}`);
+                    socketRef.current.emit('join-deployment', res.data.deploymentId);
+                }
+
                 // Deployment started successfully - Socket.IO will provide updates
                 toast.success(`🚀 Demo deployment started! Watch the progress below.`, { duration: 5000 });
                 setShowDemoModal(false);
