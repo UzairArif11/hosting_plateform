@@ -290,18 +290,19 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
             environmentVariables: environmentVariables || [],
             mode: 'lite' // Use lite mode for demos
         }).then(async (result) => {
+            /* DISABLED - Fires when queued, not completed. Events handled by buildExecutor.js
             // Refetch template to ensure we have latest state
             const updatedTemplate = await Template.findById(templateId);
             if (!updatedTemplate) {
                 logger.error(`Template ${templateId} not found for update`);
                 return;
             }
-
+            
             if (result.success) {
                 // Demo URL will be generated automatically like regular deployments
                 // Format: https://foodpanda.site/demo-templatename-abc123/
                 const demoUrl = result.deployment.deploymentUrl;
-
+            
                 // Update template with demo deployment info
                 updatedTemplate.demoDeploymentUrl = demoUrl;
                 updatedTemplate.demoProjectId = result.project._id;
@@ -310,13 +311,13 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
                 updatedTemplate.demoProgress = 100;
                 updatedTemplate.demoError = null;
                 await updatedTemplate.save();
-
+            
                 logger.info(`Admin ${userEmail} deployed demo for template ${templateName} at ${demoUrl}`);
-
+            
                 // Emit success via Socket.IO - use websocketService.getIO()
                 const websocketService = require('../services/websocket');
                 const socketIO = websocketService.getIO();
-
+            
                 if (socketIO) {
                     const successPayload = {
                         templateId: templateId,
@@ -336,13 +337,13 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
                 updatedTemplate.demoError = result.error || 'Deployment failed';
                 updatedTemplate.demoProgress = 0;
                 await updatedTemplate.save();
-
+            
                 logger.error(`Failed to deploy demo for template ${templateName}: ${result.error}`);
-
+            
                 // Emit failure via Socket.IO - use websocketService.getIO()
                 const websocketService = require('../services/websocket');
                 const socketIO = websocketService.getIO();
-
+            
                 if (socketIO) {
                     const failurePayload = {
                         templateId: templateId,
@@ -357,7 +358,9 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
                     logger.warn('⚠️ Socket.IO not available to emit failure event');
                 }
             }
+            */
         }).catch(async (error) => {
+            /* DISABLED - Same reason
             // Refetch template to ensure we have latest state
             const updatedTemplate = await Template.findById(templateId);
             if (updatedTemplate) {
@@ -367,13 +370,13 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
                 updatedTemplate.demoProgress = 0;
                 await updatedTemplate.save();
             }
-
+            
             logger.error(`Failed to deploy template demo ${templateName}:`, error);
-
+            
             // Emit failure via Socket.IO - use websocketService.getIO()
             const websocketService = require('../services/websocket');
             const socketIO = websocketService.getIO();
-
+            
             if (socketIO) {
                 const errorPayload = {
                     templateId: templateId,
@@ -387,6 +390,7 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
             } else {
                 logger.warn('⚠️ Socket.IO not available to emit error event');
             }
+            */
         });
 
         // Return immediately with deploying status
