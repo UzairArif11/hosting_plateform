@@ -281,8 +281,11 @@ async function cloneRepository(deployment, project, user, onLog) {
         await fs.mkdir(BUILD_DIR, { recursive: true });
 
         // Get repository URL with token
-        // For template deployments, use platform token as fallback
-        const githubToken = user.githubAccessToken || process.env.GITHUB_API_TOKEN;
+        // For template deployments, use platform token FIRST (user's token may not have access to template repos)
+        const isTemplateDeployment = deployment.metadata?.isTemplateDeployment;
+        const githubToken = isTemplateDeployment
+            ? (process.env.GITHUB_API_TOKEN || user.githubAccessToken)
+            : (user.githubAccessToken || process.env.GITHUB_API_TOKEN);
 
         if (!githubToken) {
             throw new Error('No GitHub token available for repository access. Add GITHUB_API_TOKEN to .env');
