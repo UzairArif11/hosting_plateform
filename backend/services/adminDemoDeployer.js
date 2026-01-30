@@ -136,14 +136,14 @@ async function deployAdminDemo({ template, deploymentId }) {
                 packageJson.scripts.build = packageJson.scripts.build.replace('prisma generate &&', '').replace('prisma generate', '').trim();
                 if (packageJson.scripts.build === '') packageJson.scripts.build = 'next build';
                 modified = true;
-                emitLog('info', '🔧 Autosix: Removed broken prisma generate from build script');
+                emitLog('info', '🔧 Removed broken prisma generate from build script');
             }
 
             // Remove postinstall if it has prisma
             if (packageJson.scripts && packageJson.scripts.postinstall && packageJson.scripts.postinstall.includes('prisma')) {
                 delete packageJson.scripts.postinstall;
                 modified = true;
-                emitLog('info', '🔧 Autosix: Removed broken postinstall script');
+                emitLog('info', '🔧 Removed broken postinstall script');
             }
 
             if (modified) {
