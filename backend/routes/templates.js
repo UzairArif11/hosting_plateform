@@ -5,7 +5,6 @@ const { requireAuth } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/admin');
 const logger = require('../utils/logger');
 const templateDeployer = require('../services/templateDeployer');
-const adminDemoDeployer = require('../services/adminDemoDeployer');
 const websocketService = require('../services/websocket');
 
 // Admin: Get all templates
@@ -86,10 +85,14 @@ router.delete('/:id', requireAuth, requireAdmin, async (req, res) => {
             return res.status(404).json({ success: false, error: 'Template not found' });
         }
 
-        // Also remove demo if exists
-        if (template.demoContainerName) {
+        // Also remove demo project if exists
+        if (template.demoProjectId) {
             try {
-                await adminDemoDeployer.removeAdminDemo({ template });
+                const Project = require('../models/Project');
+                const Deployment = require('../models/Deployment');
+                await Project.findByIdAndDelete(template.demoProjectId);
+                await Deployment.deleteMany({ projectId: template.demoProjectId });
+                logger.info(`Deleted demo project for template: ${template.name}`);
             } catch (err) {
                 logger.warn(`Failed to remove demo for deleted template: ${err.message}`);
             }
@@ -103,7 +106,7 @@ router.delete('/:id', requireAuth, requireAdmin, async (req, res) => {
     }
 });
 
-// Admin: Deploy template as live demo (NEW - uses admin containers)
+// Admin: Deploy template as live demo (uses proper build queue)
 router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
     try {
         const template = await Template.findById(req.params.id);
@@ -111,10 +114,6 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
         if (!template) {
             return res.status(404).json({ success: false, error: 'Template not found' });
         }
-
-        // Generate unique deployment ID for tracking logs
-        const mongoose = require('mongoose');
-        const deploymentId = new mongoose.Types.ObjectId().toString();
 
         // Update template status immediately 
         template.demoStatus = 'deploying';
@@ -133,69 +132,49 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
             });
         }
 
-        // Return immediately - deployment continues in background
-        res.status(202).json({
-            success: true,
-            message: 'Template demo deployment started',
-            status: 'deploying',
-            templateId: template._id,
-            deploymentId
-        });
-
-        // Deploy asynchronously using new admin demo deployer
-        adminDemoDeployer.deployAdminDemo({
+        // Deploy template using the proper build queue system
+        // This will handle Socket.IO events at the RIGHT time (after deployment completes)
+        const result = await templateDeployer.deployTemplate({
             template,
-            deploymentId
-        }).then(async (result) => {
-            // Update template with demo URL
-            const updatedTemplate = await Template.findById(template._id);
-            if (updatedTemplate) {
-                updatedTemplate.demoDeploymentUrl = result.demoUrl;
-                updatedTemplate.demoStatus = 'success';
-                updatedTemplate.demoProgress = 100;
-                updatedTemplate.demoError = null;
-                updatedTemplate.demoContainerName = result.containerName;
-                await updatedTemplate.save();
-
-                // Emit success
-                if (io) {
-                    io.emit('template-demo-status', {
-                        templateId: template._id.toString(),
-                        status: 'success',
-                        progress: 100,
-                        demoUrl: result.demoUrl,
-                        message: 'Deployment successful!'
-                    });
-                }
-
-                logger.info(`✅ Admin demo deployed: ${template.name} → ${result.demoUrl}`);
-            }
-        }).catch(async (error) => {
-            // Update template with error
-            const updatedTemplate = await Template.findById(template._id);
-            if (updatedTemplate) {
-                updatedTemplate.demoStatus = 'failed';
-                updatedTemplate.demoError = error.message;
-                updatedTemplate.demoProgress = 0;
-                await updatedTemplate.save();
-
-                // Emit failure
-                if (io) {
-                    io.emit('template-demo-status', {
-                        templateId: template._id.toString(),
-                        status: 'failed',
-                        progress: 0,
-                        error: error.message,
-                        message: 'Deployment failed'
-                    });
-                }
-
-                logger.error(`❌ Admin demo failed: ${template.name}`, error);
-            }
+            user: req.user,
+            projectName: `demo-${template.name}`,
+            environmentVariables: req.body.environmentVariables || [],
+            mode: req.body.mode || 'lite',
+            isAdminDemo: true // Flag to indicate this is an admin demo deployment
         });
 
+        if (result.success) {
+            logger.info(`Admin ${req.user.email} deployed demo for template ${template.name}`);
+            res.status(202).json({
+                success: true,
+                message: 'Template demo deployment started',
+                status: 'deploying',
+                templateId: template._id,
+                deploymentId: result.deployment.id
+            });
+        } else {
+            // Update template with error immediately
+            template.demoStatus = 'failed';
+            template.demoError = result.error || 'Failed to start deployment';
+            await template.save();
+
+            res.status(400).json(result);
+        }
     } catch (error) {
         logger.error('Failed to start template demo deployment:', error);
+        
+        // Update template with error
+        try {
+            const template = await Template.findById(req.params.id);
+            if (template) {
+                template.demoStatus = 'failed';
+                template.demoError = error.message;
+                await template.save();
+            }
+        } catch (updateError) {
+            logger.error('Failed to update template with error:', updateError);
+        }
+        
         res.status(500).json({ success: false, error: 'Failed to start template demo deployment' });
     }
 });
@@ -209,17 +188,23 @@ router.delete('/:id/remove-demo', requireAuth, requireAdmin, async (req, res) =>
             return res.status(404).json({ success: false, error: 'Template not found' });
         }
 
-        // Remove container if exists
-        if (template.demoContainerName) {
-            await adminDemoDeployer.removeAdminDemo({ template });
+        // Remove demo project and deployments if exists
+        if (template.demoProjectId) {
+            const Project = require('../models/Project');
+            const Deployment = require('../models/Deployment');
+            
+            await Project.findByIdAndDelete(template.demoProjectId);
+            await Deployment.deleteMany({ projectId: template.demoProjectId });
+            logger.info(`Deleted demo project and deployments for template: ${template.name}`);
         }
 
         // Clear template demo fields
         template.demoDeploymentUrl = null;
+        template.demoProjectId = null;
+        template.demoDeploymentId = null;
         template.demoStatus = 'none';
         template.demoProgress = 0;
         template.demoError = null;
-        template.demoContainerName = null;
         await template.save();
 
         logger.info(`Admin demo removed for template: ${template.name}`);

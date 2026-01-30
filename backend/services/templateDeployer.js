@@ -5,9 +5,9 @@ const buildQueue = require('./buildQueue');
 const logger = require('../utils/logger');
 
 /**
- * Deploy a template for a user
+ * Deploy a template for a user or as an admin demo
  */
-async function deployTemplate({ template, user, projectName, environmentVariables, mode }) {
+async function deployTemplate({ template, user, projectName, environmentVariables, mode, isAdminDemo = false }) {
     try {
         // ===== SMART TEMPLATE VALIDATION =====
         // 1. Validate mode is supported by template
@@ -145,7 +145,7 @@ async function deployTemplate({ template, user, projectName, environmentVariable
             userId: user._id,
             branch: template.githubBranch || 'main',
             commitSha: 'TEMPLATE_INIT', // Placeholder for validation
-            commitMessage: 'Initial template deployment',
+            commitMessage: isAdminDemo ? 'Admin demo template deployment' : 'Initial template deployment',
             commitAuthor: {
                 name: 'System',
                 email: 'system@vcp.dev'
@@ -157,7 +157,8 @@ async function deployTemplate({ template, user, projectName, environmentVariable
                 templateId: template._id,
                 templateName: template.name,
                 deploymentMode: mode || null, // Track Smart Template mode
-                isTemplateDeployment: true // Flag for UI/Logic differentiation
+                isTemplateDeployment: true, // Flag for UI/Logic differentiation
+                isAdminDemo: isAdminDemo // Flag to track admin demo deployments
             }
         });
 

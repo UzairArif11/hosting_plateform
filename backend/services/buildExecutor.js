@@ -102,8 +102,8 @@ async function executeBuild(deploymentId, callbacks = {}) {
         websocketService.emitDeploymentStatus(deploymentId, 'success', { url: deploymentInfo.url });
         await onProgress(100);
 
-        // Check if this is a template demo deployment - emit template-specific event
-        if (deployment.metadata?.isTemplateDeployment && deployment.metadata?.templateId) {
+        // Check if this is an admin demo deployment - emit template-specific event
+        if (deployment.metadata?.isAdminDemo && deployment.metadata?.templateId) {
             try {
                 const Template = require('../models/Template');
                 const template = await Template.findById(deployment.metadata.templateId);
@@ -128,9 +128,11 @@ async function executeBuild(deploymentId, callbacks = {}) {
                             demoUrl: deploymentInfo.url,
                             message: 'Deployment successful!'
                         };
-                        logger.info(`📡 Emitting template-demo-status (success) for ${template._id}:`, payload);
+                        logger.info(`📡 Emitting template-demo-status (success) for ${template._id}: ${deploymentInfo.url}`);
                         io.emit('template-demo-status', payload);
                     }
+                    
+                    logger.info(`Admin ${deployment.userId} deployed demo for template ${template.name} at ${deploymentInfo.url}`);
                 }
             } catch (err) {
                 logger.error('Failed to update template after successful deployment:', err);
@@ -194,8 +196,8 @@ async function executeBuild(deploymentId, callbacks = {}) {
             phase: getCurrentPhase(error)
         });
 
-        // Check if this is a template demo deployment - emit template-specific failure event
-        if (deployment.metadata?.isTemplateDeployment && deployment.metadata?.templateId) {
+        // Check if this is an admin demo deployment - emit template-specific failure event
+        if (deployment.metadata?.isAdminDemo && deployment.metadata?.templateId) {
             try {
                 const Template = require('../models/Template');
                 const template = await Template.findById(deployment.metadata.templateId);
@@ -217,9 +219,11 @@ async function executeBuild(deploymentId, callbacks = {}) {
                             error: error.message,
                             message: 'Deployment failed'
                         };
-                        logger.info(`📡 Emitting template-demo-status (failed) for ${template._id}:`, payload);
+                        logger.info(`📡 Emitting template-demo-status (failed) for ${template._id}: ${error.message}`);
                         io.emit('template-demo-status', payload);
                     }
+                    
+                    logger.error(`❌ Admin demo failed: ${template.name}`, error);
                 }
             } catch (err) {
                 logger.error('Failed to update template after deployment failure:', err);
