@@ -81,11 +81,17 @@ export default function TemplateManagement() {
     const [editingTemplate, setEditingTemplate] = useState<Template | null>(null);
     const [showModal, setShowModal] = useState(false);
     const [activeTab, setActiveTab] = useState<'basic' | 'build' | 'preview' | 'env' | 'limits'>('basic');
-    
+
     // Deploy Demo Modal
     const [showDemoModal, setShowDemoModal] = useState(false);
     const [demoTemplate, setDemoTemplate] = useState<Template | null>(null);
     const [demoDeploying, setDemoDeploying] = useState(false);
+
+    // Deployment Logs Modal
+    const [showLogsModal, setShowLogsModal] = useState(false);
+    const [logsTemplate, setLogsTemplate] = useState<Template | null>(null);
+    const [deploymentLogs, setDeploymentLogs] = useState<Array<{ timestamp: string, message: string, level: string }>>([]);
+    const logsEndRef = useRef<HTMLDivElement>(null);
 
     // Socket.IO for real-time demo deployment updates
     const socketRef = useRef<Socket | null>(null);
@@ -129,6 +135,16 @@ export default function TemplateManagement() {
             console.error('❌ Socket.IO connection error:', error.message);
         });
 
+        // Listen for deployment logs
+        socketRef.current.on('deployment-log', (data: any) => {
+            console.log('📋 Deployment log:', data);
+            setDeploymentLogs(prev => [...prev, {
+                timestamp: data.timestamp || new Date().toISOString(),
+                message: data.message || data.log || '',
+                level: data.level || 'info'
+            }]);
+        });
+
         socketRef.current.on('template-demo-status', (data: {
             templateId: string;
             status: 'deploying' | 'success' | 'failed';
@@ -138,7 +154,7 @@ export default function TemplateManagement() {
             message?: string;
         }) => {
             console.log('📡 Template demo status update:', data);
-            
+
             // Update templates array with new status
             setTemplates(prev => prev.map(t => {
                 if (t._id === data.templateId) {
@@ -160,12 +176,12 @@ export default function TemplateManagement() {
 
             // Show toast notifications (always fire, even if socket is late)
             if (data.status === 'success') {
-                toast.success(`✅ Demo deployment successful!`, { 
+                toast.success(`✅ Demo deployment successful!`, {
                     duration: 5000,
                     icon: '🚀'
                 });
             } else if (data.status === 'failed') {
-                toast.error(`❌ Demo deployment failed: ${data.error || 'Unknown error'}`, { 
+                toast.error(`❌ Demo deployment failed: ${data.error || 'Unknown error'}`, {
                     duration: 8000,
                     icon: '⚠️'
                 });
@@ -202,6 +218,13 @@ export default function TemplateManagement() {
             }
         };
     }, []);
+
+    // Auto-scroll logs to bottom
+    useEffect(() => {
+        if (logsEndRef.current) {
+            logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+    }, [deploymentLogs]);
 
     const fetchTemplates = async () => {
         try {
@@ -348,11 +371,25 @@ export default function TemplateManagement() {
         setShowDemoModal(true);
     };
 
+    const handleRetryDeploy = (template: Template) => {
+        // Clear previous logs and deploy again
+        setDeploymentLogs([]);
+        handleDeployDemo(template);
+    };
+
+    const handleViewLogs = (template: Template) => {
+        setLogsTemplate(template);
+        setShowLogsModal(true);
+    };
+
     const handleDemoSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!demoTemplate) return;
 
         setDemoDeploying(true);
+        // Clear previous logs
+        setDeploymentLogs([]);
+
         try {
             const res = await api.post(`/templates/${demoTemplate._id}/deploy-demo`, {
                 environmentVariables: [],
@@ -362,13 +399,17 @@ export default function TemplateManagement() {
                 // Deployment started successfully - Socket.IO will provide updates
                 toast.success(`🚀 Demo deployment started! Watch the progress below.`, { duration: 5000 });
                 setShowDemoModal(false);
-                
+
                 // Update local state to show deploying status immediately
-                setTemplates(prev => prev.map(t => 
-                    t._id === demoTemplate._id 
+                setTemplates(prev => prev.map(t =>
+                    t._id === demoTemplate._id
                         ? { ...t, demoStatus: 'deploying' as const, demoProgress: 0 }
                         : t
                 ));
+
+                // Open logs modal automatically
+                setLogsTemplate(demoTemplate);
+                setShowLogsModal(true);
             }
         } catch (error: any) {
             console.error('Demo deployment error:', error);
@@ -380,7 +421,7 @@ export default function TemplateManagement() {
 
     const handleRemoveDemo = async (templateId: string, templateName: string) => {
         if (!confirm(`Remove live demo for "${templateName}"?`)) return;
-        
+
         try {
             await api.delete(`/templates/${templateId}/demo`);
             toast.success('Demo removed successfully');
@@ -460,46 +501,89 @@ export default function TemplateManagement() {
                             {/* Demo Deployment Status */}
                             <div className="mb-3 space-y-2">
                                 {template.demoStatus === 'deploying' && (
-                                    <div className="flex items-center gap-2 text-xs bg-blue-500/10 border border-blue-500/30 rounded-lg p-2">
-                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
-                                        <div className="flex-1">
-                                            <div className="text-blue-400 font-medium">Deploying...</div>
-                                            <div className="w-full bg-gray-700 rounded-full h-1.5 mt-1">
-                                                <div 
-                                                    className="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
-                                                    style={{ width: `${template.demoProgress || 0}%` }}
-                                                ></div>
+                                    <div className="bg-gradient-to-r from-blue-500/20 to-purple-500/20 border border-blue-500/40 rounded-xl p-3 space-y-2">
+                                        <div className="flex items-center gap-2">
+                                            <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent"></div>
+                                            <div className="flex-1">
+                                                <div className="text-blue-300 font-semibold text-sm">Deploying Demo...</div>
+                                                <div className="text-xs text-blue-400/70">{template.demoProgress || 0}% complete</div>
                                             </div>
                                         </div>
+                                        <div className="w-full bg-gray-800 rounded-full h-2 overflow-hidden">
+                                            <div
+                                                className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full transition-all duration-500 ease-out"
+                                                style={{ width: `${template.demoProgress || 0}%` }}
+                                            ></div>
+                                        </div>
+                                        <button
+                                            onClick={() => handleViewLogs(template)}
+                                            className="w-full text-xs text-blue-300 hover:text-blue-200 underline"
+                                        >
+                                            View Live Logs →
+                                        </button>
                                     </div>
                                 )}
 
                                 {template.demoStatus === 'success' && template.demoDeploymentUrl && (
-                                    <div className="flex items-center gap-2 text-xs bg-green-500/10 border border-green-500/30 rounded-lg p-2">
-                                        <GlobeAltIcon className="w-4 h-4 text-green-500 flex-shrink-0" />
-                                        <div className="flex-1 min-w-0">
-                                            <div className="text-green-400 font-medium">Live Demo Active</div>
-                                            <a 
-                                                href={template.demoDeploymentUrl} 
-                                                target="_blank" 
+                                    <div className="bg-gradient-to-r from-green-500/20 to-emerald-500/20 border border-green-500/40 rounded-xl p-3 space-y-2">
+                                        <div className="flex items-center gap-2">
+                                            <div className="bg-green-500 rounded-full p-1">
+                                                <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                                </svg>
+                                            </div>
+                                            <div className="flex-1">
+                                                <div className="text-green-300 font-semibold text-sm">✨ Live Demo Ready!</div>
+                                                <div className="text-xs text-green-400/70 truncate">{template.demoDeploymentUrl}</div>
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <a
+                                                href={template.demoDeploymentUrl}
+                                                target="_blank"
                                                 rel="noopener noreferrer"
-                                                className="text-green-500/80 hover:text-green-400 truncate block"
+                                                className="flex-1 bg-green-600 hover:bg-green-500 text-white text-xs font-medium py-2 px-3 rounded-lg transition flex items-center justify-center gap-1.5"
                                                 onClick={(e) => e.stopPropagation()}
                                             >
-                                                {template.demoDeploymentUrl}
+                                                <GlobeAltIcon className="w-4 h-4" />
+                                                Preview Demo
                                             </a>
+                                            <button
+                                                onClick={() => handleViewLogs(template)}
+                                                className="bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs py-2 px-3 rounded-lg transition"
+                                            >
+                                                Logs
+                                            </button>
                                         </div>
                                     </div>
                                 )}
 
                                 {template.demoStatus === 'failed' && (
-                                    <div className="flex items-center gap-2 text-xs bg-red-500/10 border border-red-500/30 rounded-lg p-2">
-                                        <XMarkIcon className="w-4 h-4 text-red-500 flex-shrink-0" />
-                                        <div className="flex-1">
-                                            <div className="text-red-400 font-medium">Deployment Failed</div>
-                                            {template.demoError && (
-                                                <div className="text-red-500/70 text-xs truncate">{template.demoError}</div>
-                                            )}
+                                    <div className="bg-gradient-to-r from-red-500/20 to-orange-500/20 border border-red-500/40 rounded-xl p-3 space-y-2">
+                                        <div className="flex items-center gap-2">
+                                            <div className="bg-red-500 rounded-full p-1">
+                                                <XMarkIcon className="w-3 h-3 text-white" />
+                                            </div>
+                                            <div className="flex-1">
+                                                <div className="text-red-300 font-semibold text-sm">Deployment Failed</div>
+                                                {template.demoError && (
+                                                    <div className="text-xs text-red-400/70 truncate">{template.demoError}</div>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => handleRetryDeploy(template)}
+                                                className="flex-1 bg-red-600/30 hover:bg-red-600/50 text-red-300 text-xs font-medium py-2 px-3 rounded-lg transition"
+                                            >
+                                                🔄 Retry
+                                            </button>
+                                            <button
+                                                onClick={() => handleViewLogs(template)}
+                                                className="bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs py-2 px-3 rounded-lg transition"
+                                            >
+                                                View Logs
+                                            </button>
                                         </div>
                                     </div>
                                 )}
@@ -523,11 +607,10 @@ export default function TemplateManagement() {
                                 <button
                                     onClick={() => handleDeployDemo(template)}
                                     disabled={template.demoStatus === 'deploying'}
-                                    className={`flex-1 flex items-center justify-center space-x-1 px-3 py-2.5 sm:px-2 sm:py-2 rounded-lg transition text-sm sm:text-xs ${
-                                        template.demoStatus === 'deploying'
-                                            ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                                            : 'bg-blue-600/20 hover:bg-blue-600/40 text-blue-400'
-                                    }`}
+                                    className={`flex-1 flex items-center justify-center space-x-1 px-3 py-2.5 sm:px-2 sm:py-2 rounded-lg transition text-sm sm:text-xs ${template.demoStatus === 'deploying'
+                                        ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                        : 'bg-blue-600/20 hover:bg-blue-600/40 text-blue-400'
+                                        }`}
                                     title={template.demoStatus === 'deploying' ? 'Deployment in progress...' : 'Deploy as live demo'}
                                 >
                                     {template.demoStatus === 'deploying' ? (
@@ -580,11 +663,10 @@ export default function TemplateManagement() {
                                 <button
                                     key={tab}
                                     onClick={() => setActiveTab(tab)}
-                                    className={`px-3 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm font-medium border-b-2 transition whitespace-nowrap ${
-                                        activeTab === tab
-                                            ? 'border-purple-500 text-purple-400'
-                                            : 'border-transparent text-gray-400 hover:text-white'
-                                    }`}
+                                    className={`px-3 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm font-medium border-b-2 transition whitespace-nowrap ${activeTab === tab
+                                        ? 'border-purple-500 text-purple-400'
+                                        : 'border-transparent text-gray-400 hover:text-white'
+                                        }`}
                                 >
                                     {tab === 'limits' ? (
                                         <span className="hidden sm:inline">Resource Limits</span>
@@ -1337,7 +1419,7 @@ export default function TemplateManagement() {
                                     <p className="text-xs text-yellow-200 mb-2">
                                         ⚠️ This template already has a live demo:
                                     </p>
-                                    <a 
+                                    <a
                                         href={(demoTemplate as any).demoDeploymentUrl}
                                         target="_blank"
                                         rel="noopener noreferrer"
@@ -1392,6 +1474,146 @@ export default function TemplateManagement() {
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Deployment Logs Modal */}
+            {showLogsModal && logsTemplate && (
+                <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-gray-900 border border-gray-700 rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl">
+                        {/* Header */}
+                        <div className="p-6 border-b border-gray-800 flex justify-between items-center">
+                            <div>
+                                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                                    <CommandLineIcon className="w-6 h-6 text-purple-400" />
+                                    Deployment Logs
+                                </h2>
+                                <p className="text-sm text-gray-400 mt-1">{logsTemplate.displayName}</p>
+                            </div>
+                            <button
+                                onClick={() => setShowLogsModal(false)}
+                                className="text-gray-400 hover:text-white transition p-2 hover:bg-gray-800 rounded-lg"
+                            >
+                                <XMarkIcon className="h-6 w-6" />
+                            </button>
+                        </div>
+
+                        {/* Status Bar */}
+                        <div className="px-6 py-4 border-b border-gray-800 bg-gray-800/50">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    {logsTemplate.demoStatus === 'deploying' && (
+                                        <>
+                                            <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent"></div>
+                                            <div>
+                                                <div className="text-blue-300 font-semibold">Deploying...</div>
+                                                <div className="text-xs text-gray-400">{logsTemplate.demoProgress || 0}% complete</div>
+                                            </div>
+                                        </>
+                                    )}
+                                    {logsTemplate.demoStatus === 'success' && (
+                                        <>
+                                            <div className="bg-green-500 rounded-full p-1">
+                                                <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                                </svg>
+                                            </div>
+                                            <div>
+                                                <div className="text-green-300 font-semibold">Deployment Successful!</div>
+                                                <a href={logsTemplate.demoDeploymentUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-green-400 hover:underline">
+                                                    {logsTemplate.demoDeploymentUrl}
+                                                </a>
+                                            </div>
+                                        </>
+                                    )}
+                                    {logsTemplate.demoStatus === 'failed' && (
+                                        <>
+                                            <div className="bg-red-500 rounded-full p-1">
+                                                <XMarkIcon className="w-4 h-4 text-white" />
+                                            </div>
+                                            <div>
+                                                <div className="text-red-300 font-semibold">Deployment Failed</div>
+                                                {logsTemplate.demoError && (
+                                                    <div className="text-xs text-red-400">{logsTemplate.demoError}</div>
+                                                )}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                                {logsTemplate.demoStatus === 'deploying' && (
+                                    <div className="w-48">
+                                        <div className="w-full bg-gray-700 rounded-full h-2">
+                                            <div
+                                                className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full transition-all duration-500"
+                                                style={{ width: `${logsTemplate.demoProgress || 0}%` }}
+                                            ></div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Logs Container */}
+                        <div className="flex-1 overflow-y-auto p-4 bg-gray-950 font-mono text-sm">
+                            {deploymentLogs.length === 0 ? (
+                                <div className="flex items-center justify-center h-full text-gray-500">
+                                    <div className="text-center">
+                                        <CommandLineIcon className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                                        <p>Waiting for deployment logs...</p>
+                                        <p className="text-xs mt-2">Logs will appear here in real-time</p>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="space-y-1">
+                                    {deploymentLogs.map((log, idx) => (
+                                        <div key={idx} className={`py-1 px-3 rounded ${log.level === 'error' ? 'bg-red-500/10 text-red-300' :
+                                            log.level === 'warn' ? 'bg-yellow-500/10 text-yellow-300' :
+                                                log.level === 'success' ? 'bg-green-500/10 text-green-300' :
+                                                    'text-gray-300'
+                                            }`}>
+                                            <span className="text-gray-600 text-xs mr-2">
+                                                {new Date(log.timestamp).toLocaleTimeString()}
+                                            </span>
+                                            <span>{log.message}</span>
+                                        </div>
+                                    ))}
+                                    <div ref={logsEndRef} />
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Footer Actions */}
+                        <div className="p-4 border-t border-gray-800 flex gap-3">
+                            {logsTemplate.demoStatus === 'failed' && (
+                                <button
+                                    onClick={() => {
+                                        setShowLogsModal(false);
+                                        handleRetryDeploy(logsTemplate);
+                                    }}
+                                    className="flex-1 bg-red-600/30 hover:bg-red-600/50 text-red-300 py-2.5 rounded-lg transition font-medium"
+                                >
+                                    🔄 Retry Deployment
+                                </button>
+                            )}
+                            {logsTemplate.demoStatus === 'success' && logsTemplate.demoDeploymentUrl && (
+                                <a
+                                    href={logsTemplate.demoDeploymentUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex-1 bg-green-600 hover:bg-green-500 text-white py-2.5 rounded-lg transition font-medium text-center flex items-center justify-center gap-2"
+                                >
+                                    <GlobeAltIcon className="w-5 h-5" />
+                                    Preview Demo
+                                </a>
+                            )}
+                            <button
+                                onClick={() => setShowLogsModal(false)}
+                                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2.5 rounded-lg transition"
+                            >
+                                Close
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
