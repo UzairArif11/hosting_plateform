@@ -50,40 +50,61 @@ function initializeWebSocket(server) {
  * Emit deployment log to all clients watching this deployment
  */
 function emitDeploymentLog(deploymentId, log) {
-    if (!io) return;
+    if (!io) {
+        logger.warn('Socket.IO not initialized, skipping deployment log');
+        return;
+    }
 
-    io.to(`deployment-${deploymentId}`).emit('deployment-log', {
-        deploymentId,
-        timestamp: new Date().toISOString(),
-        ...log
-    });
+    try {
+        io.to(`deployment-${deploymentId}`).emit('deployment-log', {
+            deploymentId,
+            timestamp: new Date().toISOString(),
+            ...log
+        });
+    } catch (err) {
+        logger.error('Failed to emit deployment log:', err);
+    }
 }
 
 /**
  * Emit deployment progress update
  */
 function emitDeploymentProgress(deploymentId, progress) {
-    if (!io) return;
+    if (!io) {
+        logger.warn('Socket.IO not initialized, skipping deployment progress');
+        return;
+    }
 
-    io.to(`deployment-${deploymentId}`).emit('deployment-progress', {
-        deploymentId,
-        progress,
-        timestamp: new Date().toISOString()
-    });
+    try {
+        io.to(`deployment-${deploymentId}`).emit('deployment-progress', {
+            deploymentId,
+            progress,
+            timestamp: new Date().toISOString()
+        });
+    } catch (err) {
+        logger.error('Failed to emit deployment progress:', err);
+    }
 }
 
 /**
  * Emit deployment status change
  */
 function emitDeploymentStatus(deploymentId, status, data = {}) {
-    if (!io) return;
+    if (!io) {
+        logger.warn('Socket.IO not initialized, skipping deployment status');
+        return;
+    }
 
-    io.to(`deployment-${deploymentId}`).emit('deployment-status', {
-        deploymentId,
-        status,
-        timestamp: new Date().toISOString(),
-        ...data
-    });
+    try {
+        io.to(`deployment-${deploymentId}`).emit('deployment-status', {
+            deploymentId,
+            status,
+            timestamp: new Date().toISOString(),
+            ...data
+        });
+    } catch (err) {
+        logger.error('Failed to emit deployment status:', err);
+    }
 }
 
 module.exports = {
