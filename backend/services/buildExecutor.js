@@ -102,6 +102,41 @@ async function executeBuild(deploymentId, callbacks = {}) {
         websocketService.emitDeploymentStatus(deploymentId, 'success', { url: deploymentInfo.url });
         await onProgress(100);
 
+        // Check if this is a template demo deployment - emit template-specific event
+        if (deployment.metadata?.isTemplateDeployment && deployment.metadata?.templateId) {
+            try {
+                const Template = require('../models/Template');
+                const template = await Template.findById(deployment.metadata.templateId);
+
+                if (template) {
+                    // Update template document with deployment info
+                    template.demoDeploymentUrl = deploymentInfo.url;
+                    template.demoProjectId = project._id;
+                    template.demoDeploymentId = deployment._id;
+                    template.demoStatus = 'success';
+                    template.demoProgress = 100;
+                    template.demoError = null;
+                    await template.save();
+
+                    // Emit template-demo-status event for admin UI
+                    const io = websocketService.getIO();
+                    if (io) {
+                        const payload = {
+                            templateId: template._id.toString(),
+                            status: 'success',
+                            progress: 100,
+                            demoUrl: deploymentInfo.url,
+                            message: 'Deployment successful!'
+                        };
+                        logger.info(`📡 Emitting template-demo-status (success) for ${template._id}:`, payload);
+                        io.emit('template-demo-status', payload);
+                    }
+                }
+            } catch (err) {
+                logger.error('Failed to update template after successful deployment:', err);
+            }
+        }
+
         // Cleanup local build directory
         await cleanup(buildPath);
 
@@ -158,6 +193,38 @@ async function executeBuild(deploymentId, callbacks = {}) {
             error: error.message,
             phase: getCurrentPhase(error)
         });
+
+        // Check if this is a template demo deployment - emit template-specific failure event
+        if (deployment.metadata?.isTemplateDeployment && deployment.metadata?.templateId) {
+            try {
+                const Template = require('../models/Template');
+                const template = await Template.findById(deployment.metadata.templateId);
+
+                if (template) {
+                    // Update template document with error
+                    template.demoStatus = 'failed';
+                    template.demoError = error.message;
+                    template.demoProgress = 0;
+                    await template.save();
+
+                    // Emit template-demo-status event for admin UI
+                    const io = websocketService.getIO();
+                    if (io) {
+                        const payload = {
+                            templateId: template._id.toString(),
+                            status: 'failed',
+                            progress: 0,
+                            error: error.message,
+                            message: 'Deployment failed'
+                        };
+                        logger.info(`📡 Emitting template-demo-status (failed) for ${template._id}:`, payload);
+                        io.emit('template-demo-status', payload);
+                    }
+                }
+            } catch (err) {
+                logger.error('Failed to update template after deployment failure:', err);
+            }
+        }
 
         // Cleanup on error
         if (buildPath) {
@@ -475,33 +542,33 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
         try {
             await fs.access(path.join(buildPath, 'prisma', 'schema.prisma'));
             await onLog('info', '✓ Detected Prisma - generating client locally...');
-            
+
             // Read package.json to get exact Prisma version
             const packageJsonPath = path.join(buildPath, 'package.json');
             const packageJsonContent = await fs.readFile(packageJsonPath, 'utf8');
             const packageJson = JSON.parse(packageJsonContent);
-            
+
             // Get Prisma version from devDependencies or dependencies
             const prismaVersion = packageJson.devDependencies?.prisma || packageJson.dependencies?.prisma || 'latest';
             const versionClean = prismaVersion.replace(/[\^~]/, ''); // Remove ^ or ~
-            
+
             await onLog('info', `Using Prisma version: ${versionClean}`);
-            
+
             // Write DATABASE_URL to .env for Prisma generation
             const envPath = path.join(buildPath, '.env');
             let envContent = '';
             try {
                 envContent = await fs.readFile(envPath, 'utf8');
-            } catch {}
+            } catch { }
             if (!envContent.includes('DATABASE_URL')) {
                 await fs.writeFile(envPath, `${envContent}\nDATABASE_URL=file:./dev.db\n`);
             }
-            
+
             // Detect architecture and configure binaryTargets for Docker
             const arch = process.arch;
             const isARM = arch === 'arm64' || arch === 'aarch64';
             const binaryTarget = isARM ? 'linux-arm64-openssl-3.0.x' : 'linux-amd64-openssl-3.0.x';
-            
+
             // Read and modify schema.prisma to add binaryTargets
             const schemaPath = path.join(buildPath, 'prisma', 'schema.prisma');
             let schemaContent = await fs.readFile(schemaPath, 'utf8');
@@ -513,7 +580,7 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
                 await fs.writeFile(schemaPath, schemaContent);
                 await onLog('info', `Added binaryTargets: ["native", "${binaryTarget}"]`);
             }
-            
+
             // Use local prisma binary if devDeps installed, otherwise npx
             const prismaBin = path.join(buildPath, 'node_modules', '.bin', 'prisma');
             let prismaCmd;
@@ -523,17 +590,17 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
             } catch {
                 prismaCmd = `npx -y prisma@${versionClean} generate --schema="${schemaPath}"`;
             }
-            
+
             const { stdout: prismaOut, stderr: prismaErr } = await execAsync(prismaCmd, {
                 cwd: buildPath,
                 timeout: 3 * 60 * 1000,
                 maxBuffer: 5 * 1024 * 1024
             });
-            
+
             if (prismaOut) await onLog('info', prismaOut.substring(0, 300));
             await onLog('info', '✓ Prisma client generated successfully');
             hasPrismaGenerated = true;
-            
+
             // Modify package.json build script to skip prisma generate (already done locally)
             if (packageJson.scripts && packageJson.scripts.build) {
                 const originalBuild = packageJson.scripts.build;
@@ -542,7 +609,7 @@ async function installDependencies(buildPath, framework, deployment, onLog) {
                     .replace(/prisma\s+generate\s*&&\s*/gi, '')
                     .replace(/&&\s*prisma\s+generate/gi, '')
                     .replace(/^\s*prisma\s+generate\s*$/gi, 'echo "Prisma already generated"');
-                
+
                 if (originalBuild !== packageJson.scripts.build) {
                     await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
                     await onLog('info', `Modified build script: "${originalBuild}" → "${packageJson.scripts.build}"`);
@@ -1004,7 +1071,7 @@ async function deployToContainer(buildPath, buildOutput, deployment, project, us
         // For static compiled apps (React/Vue/Angular), we can exclude everything except build folder
         const isNodeApp = ['nextjs', 'nodejs', 'nuxtjs'].includes(deployment.framework);
         const isStaticCompiled = ['react', 'vue', 'angular', 'vite', 'cra'].includes(deployment.framework);
-        
+
         let options;
         if (isStaticCompiled) {
             // Static apps: exclude everything except build folder and server.js
