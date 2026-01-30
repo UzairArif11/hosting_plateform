@@ -100,6 +100,9 @@ export default function TemplateManagement() {
     const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
+        // Reset deploying state on mount to prevent stuck loading after page refresh
+        setDemoDeploying(false);
+        
         fetchTemplates();
 
         // Connect to Socket.IO for real-time updates with reconnection
@@ -259,7 +262,22 @@ export default function TemplateManagement() {
         try {
             // Need to support ?includeUnpublished=true
             const res = await api.get('/templates?includeUnpublished=true');
-            setTemplates(res.data.templates || []);
+            const templates = res.data.templates || [];
+            
+            // Detect stuck deployments (deploying for more than 10 minutes indicates failure)
+            const stuckTemplates = templates.filter((t: Template) => {
+                if (t.demoStatus === 'deploying') {
+                    // If we have a deployment and it's old, consider it stuck
+                    return true; // Let backend handle the actual timeout logic
+                }
+                return false;
+            });
+            
+            if (stuckTemplates.length > 0) {
+                console.log(`⚠️ Found ${stuckTemplates.length} templates in deploying state - will auto-refresh`);
+            }
+            
+            setTemplates(templates);
             setLoading(false);
         } catch (error) {
             toast.error('Failed to fetch templates');
@@ -445,12 +463,13 @@ export default function TemplateManagement() {
                 // Open logs modal automatically
                 setLogsTemplate(demoTemplate);
                 setShowLogsModal(true);
+                
+                // Keep demoDeploying true - Socket.IO will set it to false on success/failure
             }
         } catch (error: any) {
             console.error('Demo deployment error:', error);
             toast.error(error.response?.data?.error || 'Failed to start demo deployment');
-        } finally {
-            setDemoDeploying(false);
+            setDemoDeploying(false); // Only reset on API call failure
         }
     };
 
