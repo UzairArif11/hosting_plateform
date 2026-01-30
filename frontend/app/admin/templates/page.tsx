@@ -103,6 +103,7 @@ export default function TemplateManagement() {
         // Connect to Socket.IO for real-time updates with reconnection
         const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
         socketRef.current = io(socketUrl, {
+            path: '/api/socket.io/', // Match backend config
             reconnection: true,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
