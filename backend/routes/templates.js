@@ -387,7 +387,6 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
             } else {
                 logger.warn('⚠️ Socket.IO not available to emit error event');
             }
-            */
         });
 
         // Return immediately with deploying status
