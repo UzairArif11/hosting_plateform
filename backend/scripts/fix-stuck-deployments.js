@@ -43,10 +43,10 @@ async function fixStuckDeployments() {
                         
                         // Update deployment
                         deployment.status = 'failed';
-                        deployment.error = deployment.error || {
-                            message: 'Deployment timed out or failed',
-                            phase: 'timeout'
-                        };
+                        if (!deployment.error) {
+                            deployment.error = {};
+                        }
+                        deployment.error.message = deployment.error.message || 'Deployment timed out or failed';
                         await deployment.save();
 
                         // Update template

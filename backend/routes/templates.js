@@ -230,12 +230,12 @@ router.post('/:id/check-demo-timeout', requireAuth, requireAdmin, async (req, re
                         age: `${Math.floor(deploymentAge / 1000 / 60)} minutes`
                     });
 
-                    // Update deployment
+                    // Update deployment (don't set phase - just message)
                     deployment.status = 'failed';
-                    deployment.error = {
-                        message: 'Deployment timed out after 10 minutes',
-                        phase: 'timeout'
-                    };
+                    if (!deployment.error) {
+                        deployment.error = {};
+                    }
+                    deployment.error.message = 'Deployment timed out after 10 minutes';
                     await deployment.save();
 
                     // Update template
