@@ -138,11 +138,29 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
 
         // Deploy template using the proper build queue system
         // This will handle Socket.IO events at the RIGHT time (after deployment completes)
+        
+        // CRITICAL FIX: Add DATABASE_URL for Prisma templates
+        const envVars = req.body.environmentVariables || [];
+        
+        // Check if template needs DATABASE_URL (has Prisma)
+        const needsDatabase = template.environmentVariables?.some(v => 
+            v.key === 'DATABASE_URL' || v.key.includes('DATABASE')
+        );
+        
+        // If DATABASE_URL not provided, add default SQLite file path
+        if (needsDatabase && !envVars.some(v => v.key === 'DATABASE_URL')) {
+            envVars.push({
+                key: 'DATABASE_URL',
+                value: 'file:./data/portfolio.db'
+            });
+            logger.info(`✅ Added DATABASE_URL for Prisma template`);
+        }
+        
         const result = await templateDeployer.deployTemplate({
             template,
             user: req.user,
             projectName: `demo-${template.name}`,
-            environmentVariables: req.body.environmentVariables || [],
+            environmentVariables: envVars,
             mode: req.body.mode || 'lite',
             isAdminDemo: true // Flag to indicate this is an admin demo deployment
         });
