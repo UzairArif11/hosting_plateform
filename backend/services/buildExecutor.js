@@ -196,6 +196,51 @@ async function executeBuild(deploymentId, callbacks = {}) {
             phase: getCurrentPhase(error)
         });
 
+        // CRITICAL FIX: Always try to update template status on failure
+        // Look up template by checking if this project was deployed from a template
+        try {
+            const Template = require('../models/Template');
+            const Project = require('../models/Project');
+            
+            if (deployment && deployment.projectId) {
+                const project = await Project.findById(deployment.projectId);
+                
+                // Check if this is a demo deployment by finding template with matching demoDeploymentId
+                const template = await Template.findOne({ demoDeploymentId: deploymentId });
+                
+                if (template) {
+                    logger.error(`🔧 FOUND template via demoDeploymentId lookup: ${template.displayName}`);
+                    
+                    // Update template status
+                    template.demoStatus = 'failed';
+                    template.demoError = error.message || 'Deployment failed';
+                    template.demoProgress = 0;
+                    await template.save();
+                    
+                    // Emit socket event
+                    const io = websocketService.getIO();
+                    if (io) {
+                        const payload = {
+                            templateId: template._id.toString(),
+                            status: 'failed',
+                            progress: 0,
+                            error: error.message || 'Deployment failed',
+                            message: 'Deployment failed'
+                        };
+                        logger.error(`📡 FORCE EMITTING template-demo-status (failed) for ${template._id}`);
+                        io.emit('template-demo-status', payload);
+                        io.sockets.emit('template-demo-status', payload);
+                    }
+                    
+                    logger.error(`✅ Template status updated via direct lookup`);
+                } else {
+                    logger.warn(`No template found with demoDeploymentId: ${deploymentId}`);
+                }
+            }
+        } catch (templateLookupError) {
+            logger.error('Failed to lookup template for failed deployment:', templateLookupError);
+        }
+
         // Check if this is an admin demo deployment - emit template-specific failure event
         // CRITICAL: Check metadata properly
         const isAdminDemo = deployment?.metadata?.isAdminDemo === true || deployment?.metadata?.isAdminDemo === 'true';
