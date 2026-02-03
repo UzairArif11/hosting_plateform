@@ -146,16 +146,8 @@ const deploymentSchema = new mongoose.Schema({
     }
   },
 
-  // Metadata
-  metadata: {
-    buildSize: Number, // in bytes
-    filesCount: Number,
-    nodeVersion: String,
-    npmVersion: String,
-    dependencies: mongoose.Schema.Types.Mixed,
-    envVarsCount: Number,
-    buildCache: Boolean
-  },
+  // Metadata - Using Mixed to allow flexible data
+  metadata: mongoose.Schema.Types.Mixed,
 
   // Analytics
   analytics: {
