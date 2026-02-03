@@ -33,10 +33,21 @@ async function deployTemplate({ template, user, projectName, environmentVariable
             }
         }
 
-        // 3. For Lite Mode: Strip DATABASE_URL if accidentally provided
+        // 3. For Lite Mode: Only strip EXTERNAL database URLs (keep local SQLite files)
         if (mode === 'lite' && environmentVariables) {
-            environmentVariables = environmentVariables.filter(v => v.key !== 'DATABASE_URL');
-            logger.info('Lite Mode: DATABASE_URL stripped from environment variables');
+            environmentVariables = environmentVariables.filter(v => {
+                // Keep DATABASE_URL if it's a local SQLite file
+                if (v.key === 'DATABASE_URL' && v.value && v.value.startsWith('file:')) {
+                    logger.info('Lite Mode: Keeping local SQLite DATABASE_URL');
+                    return true; // Keep it
+                }
+                // Strip external database URLs (postgres, mysql, mongodb)
+                if (v.key === 'DATABASE_URL') {
+                    logger.info('Lite Mode: Stripped external DATABASE_URL (use local SQLite instead)');
+                    return false; // Remove it
+                }
+                return true; // Keep other variables
+            });
         }
         // ===== END SMART TEMPLATE VALIDATION =====
         // Generate unique slug
