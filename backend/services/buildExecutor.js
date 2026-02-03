@@ -197,10 +197,24 @@ async function executeBuild(deploymentId, callbacks = {}) {
         });
 
         // Check if this is an admin demo deployment - emit template-specific failure event
-        if (deployment && deployment.metadata?.isAdminDemo && deployment.metadata?.templateId) {
+        // CRITICAL: Check metadata properly
+        const isAdminDemo = deployment?.metadata?.isAdminDemo === true || deployment?.metadata?.isAdminDemo === 'true';
+        const templateId = deployment?.metadata?.templateId;
+
+        logger.error('Checking template metadata for failure event:', {
+            deploymentId: deployment?._id,
+            hasDeployment: !!deployment,
+            hasMetadata: !!deployment?.metadata,
+            metadataKeys: deployment?.metadata ? Object.keys(deployment.metadata) : [],
+            isAdminDemo: isAdminDemo,
+            templateId: templateId,
+            rawMetadata: deployment?.metadata
+        });
+
+        if (deployment && isAdminDemo && templateId) {
             try {
                 const Template = require('../models/Template');
-                const template = await Template.findById(deployment.metadata.templateId);
+                const template = await Template.findById(templateId);
 
                 if (template) {
                     // Update template document with error
@@ -224,6 +238,9 @@ async function executeBuild(deploymentId, callbacks = {}) {
                         
                         // Also emit to specific room if exists
                         io.to(`template-${template._id}`).emit('template-demo-status', payload);
+                        
+                        // Emit globally to ensure frontend receives it
+                        io.sockets.emit('template-demo-status', payload);
                     } else {
                         logger.error(`❌ Socket.IO not available to emit template-demo-status`);
                     }
@@ -233,18 +250,56 @@ async function executeBuild(deploymentId, callbacks = {}) {
                         error: error.message
                     });
                 } else {
-                    logger.error(`❌ Template not found for failed deployment: ${deployment.metadata.templateId}`);
+                    logger.error(`❌ Template not found for failed deployment: ${templateId}`);
                 }
             } catch (err) {
                 logger.error('Failed to update template after deployment failure:', err);
             }
         } else {
-            logger.warn('Deployment failed but no template metadata found', {
+            logger.warn('Deployment failed but no template metadata found - checking database directly', {
                 deploymentId: deployment?._id,
                 hasMetadata: !!deployment?.metadata,
-                isAdminDemo: deployment?.metadata?.isAdminDemo,
-                templateId: deployment?.metadata?.templateId
+                isAdminDemo: isAdminDemo,
+                templateId: templateId
             });
+
+            // FALLBACK: Try to find template by checking recent deployments
+            if (deployment) {
+                try {
+                    const Project = require('../models/Project');
+                    const project = await Project.findById(deployment.projectId);
+                    
+                    if (project?.metadata?.deployedFromTemplate) {
+                        const Template = require('../models/Template');
+                        const template = await Template.findById(project.metadata.deployedFromTemplate);
+                        
+                        if (template && template.demoDeploymentId?.toString() === deployment._id.toString()) {
+                            logger.info(`📡 Found template via project metadata - updating status`);
+                            
+                            template.demoStatus = 'failed';
+                            template.demoError = error.message || 'Deployment failed';
+                            template.demoProgress = 0;
+                            await template.save();
+
+                            const io = websocketService.getIO();
+                            if (io) {
+                                const payload = {
+                                    templateId: template._id.toString(),
+                                    status: 'failed',
+                                    progress: 0,
+                                    error: error.message || 'Deployment failed',
+                                    message: 'Deployment failed'
+                                };
+                                logger.error(`📡 EMITTING template-demo-status via fallback for ${template._id}`);
+                                io.emit('template-demo-status', payload);
+                                io.sockets.emit('template-demo-status', payload);
+                            }
+                        }
+                    }
+                } catch (fallbackErr) {
+                    logger.error('Fallback template lookup failed:', fallbackErr);
+                }
+            }
         }
 
         // Cleanup on error
