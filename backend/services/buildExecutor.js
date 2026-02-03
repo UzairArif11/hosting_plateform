@@ -64,12 +64,12 @@ async function executeBuild(deploymentId, callbacks = {}) {
         const prismaSchemaPath = path.join(buildPath, 'prisma', 'schema.prisma');
         try {
             // Check if prisma schema exists
-            await fsPromises.access(prismaSchemaPath);
+            await fs.promises.access(prismaSchemaPath);
             
             // File exists, proceed with fix
             await onLog('info', '🔧 Checking Prisma schema for invalid syntax...');
             
-            let schemaContent = await fsPromises.readFile(prismaSchemaPath, 'utf8');
+            let schemaContent = await fs.promises.readFile(prismaSchemaPath, 'utf8');
             
             // Check for invalid conditional syntax in url field
             if (schemaContent.includes('env("DATABASE_URL") != ""') || 
@@ -79,13 +79,14 @@ async function executeBuild(deploymentId, callbacks = {}) {
                 await onLog('info', '⚠️  Invalid Prisma syntax detected - auto-fixing...');
                 
                 // Fix: Replace the invalid conditional with simple env variable
+                // This regex matches the exact pattern we saw in the template
                 schemaContent = schemaContent.replace(
                     /url\s*=\s*env\("DATABASE_URL"\)\s*!=\s*""\s*\?\s*env\("DATABASE_URL"\)\s*:\s*"[^"]+"/g,
                     'url = env("DATABASE_URL")'
                 );
                 
                 // Write fixed schema back
-                await fsPromises.writeFile(prismaSchemaPath, schemaContent, 'utf8');
+                await fs.promises.writeFile(prismaSchemaPath, schemaContent, 'utf8');
                 await onLog('info', '✅ Prisma schema auto-fixed - conditional syntax removed');
                 logger.info(`[${deploymentId}] Auto-fixed invalid Prisma schema syntax`);
             }
