@@ -644,6 +644,13 @@ export default function TemplateManagement() {
                                                 Preview Demo
                                             </a>
                                             <button
+                                                onClick={() => handleDeleteDemo(template)}
+                                                className="bg-red-600/30 hover:bg-red-600/50 text-red-300 text-xs py-2 px-3 rounded-lg transition flex items-center gap-1"
+                                                title="Delete demo deployment"
+                                            >
+                                                <TrashIcon className="w-3 h-3" />
+                                            </button>
+                                            <button
                                                 onClick={() => handleViewLogs(template)}
                                                 className="bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs py-2 px-3 rounded-lg transition"
                                             >
@@ -714,15 +721,29 @@ export default function TemplateManagement() {
                                     disabled={template.demoStatus === 'deploying'}
                                     className={`flex-1 flex items-center justify-center space-x-1 px-3 py-2.5 sm:px-2 sm:py-2 rounded-lg transition text-sm sm:text-xs ${template.demoStatus === 'deploying'
                                         ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                                        : 'bg-blue-600/20 hover:bg-blue-600/40 text-blue-400'
+                                        : template.demoStatus === 'failed'
+                                            ? 'bg-red-600/20 hover:bg-red-600/40 text-red-400'
+                                            : 'bg-blue-600/20 hover:bg-blue-600/40 text-blue-400'
                                         }`}
-                                    title={template.demoStatus === 'deploying' ? 'Deployment in progress...' : 'Deploy as live demo'}
+                                    title={
+                                        template.demoStatus === 'deploying' 
+                                            ? 'Deployment in progress...' 
+                                            : template.demoStatus === 'failed'
+                                                ? 'Retry deployment'
+                                                : 'Deploy as live demo'
+                                    }
                                 >
                                     {template.demoStatus === 'deploying' ? (
                                         <>
                                             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-500"></div>
                                             <span className="hidden xs:inline">Deploying...</span>
                                             <span className="xs:hidden">...</span>
+                                        </>
+                                    ) : template.demoStatus === 'failed' ? (
+                                        <>
+                                            <ArrowPathIcon className="h-4 w-4" />
+                                            <span className="hidden xs:inline">Retry Deploy</span>
+                                            <span className="xs:hidden">Retry</span>
                                         </>
                                     ) : (
                                         <>

@@ -197,7 +197,7 @@ async function executeBuild(deploymentId, callbacks = {}) {
         });
 
         // Check if this is an admin demo deployment - emit template-specific failure event
-        if (deployment.metadata?.isAdminDemo && deployment.metadata?.templateId) {
+        if (deployment && deployment.metadata?.isAdminDemo && deployment.metadata?.templateId) {
             try {
                 const Template = require('../models/Template');
                 const template = await Template.findById(deployment.metadata.templateId);
@@ -205,29 +205,46 @@ async function executeBuild(deploymentId, callbacks = {}) {
                 if (template) {
                     // Update template document with error
                     template.demoStatus = 'failed';
-                    template.demoError = error.message;
+                    template.demoError = error.message || 'Deployment failed';
                     template.demoProgress = 0;
                     await template.save();
 
-                    // Emit template-demo-status event for admin UI
+                    // Emit template-demo-status event for admin UI (CRITICAL - ALWAYS EMIT)
                     const io = websocketService.getIO();
                     if (io) {
                         const payload = {
                             templateId: template._id.toString(),
                             status: 'failed',
                             progress: 0,
-                            error: error.message,
+                            error: error.message || 'Deployment failed',
                             message: 'Deployment failed'
                         };
-                        logger.info(`📡 Emitting template-demo-status (failed) for ${template._id}: ${error.message}`);
+                        logger.error(`📡 EMITTING template-demo-status (failed) for ${template._id}: ${error.message}`);
                         io.emit('template-demo-status', payload);
+                        
+                        // Also emit to specific room if exists
+                        io.to(`template-${template._id}`).emit('template-demo-status', payload);
+                    } else {
+                        logger.error(`❌ Socket.IO not available to emit template-demo-status`);
                     }
                     
-                    logger.error(`❌ Admin demo failed: ${template.name}`, error);
+                    logger.error(`❌ Admin demo deployment failed for template: ${template.name}`, {
+                        templateId: template._id,
+                        error: error.message
+                    });
+                } else {
+                    logger.error(`❌ Template not found for failed deployment: ${deployment.metadata.templateId}`);
                 }
             } catch (err) {
                 logger.error('Failed to update template after deployment failure:', err);
             }
+        } else {
+            logger.warn('Deployment failed but no template metadata found', {
+                deploymentId: deployment?._id,
+                hasMetadata: !!deployment?.metadata,
+                isAdminDemo: deployment?.metadata?.isAdminDemo,
+                templateId: deployment?.metadata?.templateId
+            });
         }
 
         // Cleanup on error
