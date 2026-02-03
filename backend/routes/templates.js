@@ -1,11 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const Template = require('../models/Template');
+const Deployment = require('../models/Deployment');
 const { requireAuth } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/admin');
 const logger = require('../utils/logger');
 const templateDeployer = require('../services/templateDeployer');
 const websocketService = require('../services/websocket');
+
+// Timeout: 10 minutes
+const DEPLOYMENT_TIMEOUT_MS = 10 * 60 * 1000;
 
 // Admin: Get all templates
 router.get('/', requireAuth, requireAdmin, async (req, res) => {
@@ -144,19 +148,37 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
         });
 
         if (result.success) {
+            // Update template with deployment reference
+            template.demoProjectId = result.project._id;
+            template.demoDeploymentId = result.deployment._id;
+            await template.save();
+
             logger.info(`Admin ${req.user.email} deployed demo for template ${template.name}`);
             res.status(202).json({
                 success: true,
                 message: 'Template demo deployment started',
                 status: 'deploying',
                 templateId: template._id,
-                deploymentId: result.deployment.id
+                deploymentId: result.deployment._id,
+                projectId: result.project._id
             });
         } else {
             // Update template with error immediately
             template.demoStatus = 'failed';
             template.demoError = result.error || 'Failed to start deployment';
             await template.save();
+
+            // Emit socket event
+            const io = websocketService.getIO();
+            if (io) {
+                io.emit('template-demo-status', {
+                    templateId: template._id.toString(),
+                    status: 'failed',
+                    progress: 0,
+                    error: result.error || 'Failed to start deployment',
+                    message: 'Deployment failed to start'
+                });
+            }
 
             res.status(400).json(result);
         }
@@ -176,6 +198,114 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
         }
         
         res.status(500).json({ success: false, error: 'Failed to start template demo deployment' });
+    }
+});
+
+// Check for demo deployment timeout (called by frontend polling)
+router.post('/:id/check-demo-timeout', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const template = await Template.findById(req.params.id);
+        
+        if (!template) {
+            return res.status(404).json({ success: false, error: 'Template not found' });
+        }
+
+        // Only check if currently deploying
+        if (template.demoStatus !== 'deploying') {
+            return res.json({ success: true, message: 'No timeout check needed' });
+        }
+
+        // Check if deployment exists and how long it's been running
+        if (template.demoDeploymentId) {
+            const deployment = await Deployment.findById(template.demoDeploymentId);
+            
+            if (deployment) {
+                const deploymentAge = Date.now() - new Date(deployment.createdAt).getTime();
+                
+                if (deploymentAge > DEPLOYMENT_TIMEOUT_MS) {
+                    // Deployment timed out - mark as failed
+                    logger.warn(`⏱️ Demo deployment timed out for template ${template.name}`, {
+                        templateId: template._id,
+                        deploymentId: deployment._id,
+                        age: `${Math.floor(deploymentAge / 1000 / 60)} minutes`
+                    });
+
+                    // Update deployment
+                    deployment.status = 'failed';
+                    deployment.error = {
+                        message: 'Deployment timed out after 10 minutes',
+                        phase: 'timeout'
+                    };
+                    await deployment.save();
+
+                    // Update template
+                    template.demoStatus = 'failed';
+                    template.demoError = 'Deployment timed out after 10 minutes';
+                    template.demoProgress = 0;
+                    await template.save();
+
+                    // Emit socket event for UI update
+                    const io = websocketService.getIO();
+                    if (io) {
+                        io.emit('template-demo-status', {
+                            templateId: template._id.toString(),
+                            status: 'failed',
+                            progress: 0,
+                            error: 'Deployment timed out after 10 minutes',
+                            message: 'Deployment timeout'
+                        });
+                    }
+
+                    return res.json({ 
+                        success: true, 
+                        message: 'Deployment marked as failed due to timeout',
+                        timedOut: true
+                    });
+                }
+            } else {
+                // Deployment doesn't exist but status is deploying - mark as failed
+                logger.warn(`⚠️ Template ${template.name} stuck in deploying state without deployment record`);
+                template.demoStatus = 'failed';
+                template.demoError = 'Deployment record not found';
+                template.demoProgress = 0;
+                await template.save();
+
+                const io = websocketService.getIO();
+                if (io) {
+                    io.emit('template-demo-status', {
+                        templateId: template._id.toString(),
+                        status: 'failed',
+                        progress: 0,
+                        error: 'Deployment record not found',
+                        message: 'Invalid deployment state'
+                    });
+                }
+
+                return res.json({ 
+                    success: true, 
+                    message: 'Template status reset due to missing deployment',
+                    reset: true
+                });
+            }
+        } else {
+            // No deployment ID but status is deploying - reset
+            logger.warn(`⚠️ Template ${template.name} in deploying state without deployment ID`);
+            template.demoStatus = 'none';
+            template.demoError = null;
+            template.demoProgress = 0;
+            await template.save();
+
+            return res.json({ 
+                success: true, 
+                message: 'Template status reset',
+                reset: true
+            });
+        }
+
+        res.json({ success: true, message: 'Deployment is still within timeout period' });
+    } catch (error) {
+        logger.error('Check demo timeout error:', error);
+        res.status(500).json({ success: false, error: 'Failed to check timeout' });
     }
 });
 
@@ -228,6 +358,19 @@ router.post('/:id/deploy', requireAuth, async (req, res) => {
             return res.status(403).json({ success: false, error: 'Template is not published' });
         }
 
+        // CRITICAL: Check templates feature access
+        const User = require('../models/User');
+        const { hasFeature } = require('../utils/featureCheck');
+        const fullUser = await User.findById(req.user._id).populate('plan');
+
+        if (!hasFeature(fullUser.plan, 'templates')) {
+            return res.status(403).json({
+                success: false,
+                error: 'Template deployment not available in your current plan',
+                upgradeRequired: true
+            });
+        }
+
         const { projectName, environmentVariables, mode } = req.body;
 
         if (!projectName) {
@@ -244,14 +387,29 @@ router.post('/:id/deploy', requireAuth, async (req, res) => {
         });
 
         if (result.success) {
-            logger.info(`User ${req.user.email} deployed template ${template.name} as project ${projectName}`);
-            res.status(202).json(result);
+            // Increment template deploy count
+            template.deployCount = (template.deployCount || 0) + 1;
+            await template.save();
+
+            logger.info(`User ${fullUser.email} deployed template ${template.name} as project ${projectName}`);
+            res.status(201).json({
+                success: true,
+                project: result.project,
+                deployment: result.deployment,
+                message: 'Template deployed successfully'
+            });
         } else {
-            res.status(400).json(result);
+            res.status(400).json({
+                success: false,
+                error: result.error || 'Failed to deploy template'
+            });
         }
     } catch (error) {
         logger.error('Failed to deploy template:', error);
-        res.status(500).json({ success: false, error: 'Failed to deploy template' });
+        res.status(500).json({ 
+            success: false, 
+            error: error.message || 'Failed to deploy template'
+        });
     }
 });
 

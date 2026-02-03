@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
+import FeatureGuard from '@/components/FeatureGuard';
 
 interface Domain {
     _id: string;
@@ -16,6 +17,14 @@ interface Domain {
 }
 
 export default function DomainsPage({ params }: { params: { id: string } }) {
+    return (
+        <FeatureGuard feature="customDomains">
+            <DomainsPageContent params={params} />
+        </FeatureGuard>
+    );
+}
+
+function DomainsPageContent({ params }: { params: { id: string } }) {
     const [project, setProject] = useState<any>(null);
     const [domains, setDomains] = useState<Domain[]>([]);
     const [loading, setLoading] = useState(true);

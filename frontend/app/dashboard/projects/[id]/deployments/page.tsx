@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useSelector } from 'react-redux';
+import { RootState } from '@/lib/store';
+import { useHasFeature } from '@/lib/features';
 import toast from 'react-hot-toast';
 
 interface Deployment {
@@ -27,6 +30,7 @@ export default function DeploymentsPage({ params }: { params: { id: string } }) 
     const [loading, setLoading] = useState(true);
     const [rollbackTarget, setRollbackTarget] = useState<Deployment | null>(null);
     const [isRollingBack, setIsRollingBack] = useState(false);
+    const hasRollbackFeature = useHasFeature('rollback');
 
     useEffect(() => {
         fetchDeployments();

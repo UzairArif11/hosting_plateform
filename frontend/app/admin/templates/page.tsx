@@ -10,7 +10,8 @@ import {
     GlobeAltIcon,
     CodeBracketIcon,
     PhotoIcon,
-    CommandLineIcon
+    CommandLineIcon,
+    ArrowPathIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 import { io, Socket } from 'socket.io-client';
@@ -209,7 +210,7 @@ export default function TemplateManagement() {
             }
         });
 
-        // Fallback polling for templates stuck in "deploying" state
+        // Fallback polling for templates stuck in "deploying" state with timeout detection
         pollingIntervalRef.current = setInterval(() => {
             setTemplates(prev => {
                 const hasDeploying = prev.some(t => t.demoStatus === 'deploying');
@@ -217,6 +218,19 @@ export default function TemplateManagement() {
                     console.log('🔄 Polling for template updates (fallback)...');
                     // Refetch templates to get latest status
                     fetchTemplates();
+                    
+                    // Check for deployments stuck for more than 10 minutes (timeout)
+                    prev.forEach(async (t) => {
+                        if (t.demoStatus === 'deploying') {
+                            // Mark as failed after timeout on client side
+                            // Backend should also do this, but this is a safety net
+                            try {
+                                await api.post(`/templates/${t._id}/check-demo-timeout`);
+                            } catch (err) {
+                                console.error('Failed to check timeout:', err);
+                            }
+                        }
+                    });
                 }
                 return prev;
             });
@@ -418,10 +432,37 @@ export default function TemplateManagement() {
         setShowDemoModal(true);
     };
 
-    const handleRetryDeploy = (template: Template) => {
+    const handleRetryDeploy = async (template: Template) => {
+        // Clear previous error state first
+        try {
+            await api.put(`/templates/${template._id}`, {
+                ...template,
+                demoStatus: 'none',
+                demoError: null,
+                demoProgress: 0
+            });
+        } catch (err) {
+            console.error('Failed to clear error state:', err);
+        }
+        
         // Clear previous logs and deploy again
         setDeploymentLogs([]);
         handleDeployDemo(template);
+    };
+
+    const handleDeleteDemo = async (template: Template) => {
+        if (!confirm(`Delete demo deployment for "${template.displayName}"? This will remove the live demo.`)) return;
+        
+        try {
+            toast.loading('Deleting demo deployment...');
+            await api.delete(`/templates/${template._id}/remove-demo`);
+            toast.dismiss();
+            toast.success('✅ Demo deployment deleted');
+            fetchTemplates();
+        } catch (error: any) {
+            toast.dismiss();
+            toast.error(error.response?.data?.error || 'Failed to delete demo deployment');
+        }
     };
 
     const handleViewLogs = (template: Template) => {
@@ -621,22 +662,32 @@ export default function TemplateManagement() {
                                             <div className="flex-1">
                                                 <div className="text-red-300 font-semibold text-sm">Deployment Failed</div>
                                                 {template.demoError && (
-                                                    <div className="text-xs text-red-400/70 truncate">{template.demoError}</div>
+                                                    <div className="text-xs text-red-400/70 truncate" title={template.demoError}>
+                                                        {template.demoError}
+                                                    </div>
                                                 )}
                                             </div>
                                         </div>
                                         <div className="flex gap-2">
                                             <button
-                                                onClick={() => handleRetryDeploy(template)}
-                                                className="flex-1 bg-red-600/30 hover:bg-red-600/50 text-red-300 text-xs font-medium py-2 px-3 rounded-lg transition"
+                                                onClick={() => handleDeleteDemo(template)}
+                                                className="flex-1 bg-red-600/30 hover:bg-red-600/50 text-red-300 text-xs font-medium py-2 px-3 rounded-lg transition flex items-center justify-center gap-1"
                                             >
-                                                🔄 Retry
+                                                <TrashIcon className="w-3 h-3" />
+                                                Delete Demo
+                                            </button>
+                                            <button
+                                                onClick={() => handleRetryDeploy(template)}
+                                                className="flex-1 bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 text-xs font-medium py-2 px-3 rounded-lg transition flex items-center justify-center gap-1"
+                                            >
+                                                <ArrowPathIcon className="w-3 h-3" />
+                                                Redeploy
                                             </button>
                                             <button
                                                 onClick={() => handleViewLogs(template)}
                                                 className="bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs py-2 px-3 rounded-lg transition"
                                             >
-                                                View Logs
+                                                Logs
                                             </button>
                                         </div>
                                     </div>
