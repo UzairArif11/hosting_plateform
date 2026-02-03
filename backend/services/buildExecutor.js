@@ -1,4 +1,5 @@
-const fs = require('fs').promises;
+const fs = require('fs');
+const fsPromises = require('fs/promises');
 const path = require('path');
 const { exec } = require('child_process');
 const { promisify } = require('util');
@@ -64,12 +65,12 @@ async function executeBuild(deploymentId, callbacks = {}) {
         const prismaSchemaPath = path.join(buildPath, 'prisma', 'schema.prisma');
         try {
             // Check if prisma schema exists
-            await fs.promises.access(prismaSchemaPath);
+            await fsPromises.access(prismaSchemaPath);
             
             // File exists, proceed with fix
             await onLog('info', '🔧 Checking Prisma schema for invalid syntax...');
             
-            let schemaContent = await fs.promises.readFile(prismaSchemaPath, 'utf8');
+            let schemaContent = await fsPromises.readFile(prismaSchemaPath, 'utf8');
             
             // Check for invalid conditional syntax in url field
             if (schemaContent.includes('env("DATABASE_URL") != ""') || 
@@ -86,9 +87,11 @@ async function executeBuild(deploymentId, callbacks = {}) {
                 );
                 
                 // Write fixed schema back
-                await fs.promises.writeFile(prismaSchemaPath, schemaContent, 'utf8');
+                await fsPromises.writeFile(prismaSchemaPath, schemaContent, 'utf8');
                 await onLog('info', '✅ Prisma schema auto-fixed - conditional syntax removed');
                 logger.info(`[${deploymentId}] Auto-fixed invalid Prisma schema syntax`);
+            } else {
+                await onLog('info', '✅ Prisma schema is valid - no fix needed');
             }
         } catch (prismaFixError) {
             // Schema file doesn't exist or can't be read - not a Prisma project, skip
