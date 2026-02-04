@@ -1167,9 +1167,19 @@ child.on('error', (error) => {
     process.exit(1);
 });
 
+// IMPORTANT:
+// The Next.js CLI process may exit with code 0/null after spawning
+// the actual server process. If we exit the wrapper on code 0/null,
+// PM2 will constantly restart us and cause flapping + 502s.
+// Only treat non‑zero exit codes as fatal.
 child.on('exit', (code) => {
-    console.log('Next.js exited with code', code);
-    process.exit(code || 0);
+    console.log('Next.js CLI exited with code', code);
+    if (code && code !== 0) {
+        console.error('Next.js failed, shutting down wrapper');
+        process.exit(code);
+    } else {
+        console.log('Next.js server is likely running in a child process; keeping wrapper alive.');
+    }
 });
 
 // Handle shutdown gracefully
