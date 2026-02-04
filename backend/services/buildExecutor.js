@@ -1136,12 +1136,13 @@ console.log('Server running at http://localhost:' + port);
             }
         }
 
-        // Generate Next.js starter script that uses next start
+        // Generate Next.js starter script that uses Next's Node API
         if (framework === 'nextjs') {
             await onLog('info', 'Generating Next.js starter script...');
 
             const nextServerScript = `
-const { spawn } = require('child_process');
+const http = require('http');
+const next = require('next');
 
 // Ensure we run Next.js from the project directory where
 // the .next production build lives (same folder as server.js).
@@ -1163,37 +1164,39 @@ const args = process.argv.slice(2);
 const portIdx = args.indexOf('--port');
 const port = portIdx !== -1 ? args[portIdx + 1] : (process.env.PORT || '3000');
 
-console.log('Starting Next.js on port', port, 'with basePath', deploymentBasePath || '(root)');
+console.log('Preparing Next.js app on port', port, 'with basePath', deploymentBasePath || '(root)');
 
-// Start Next.js production server
-const child = spawn('npx', ['next', 'start', '-p', port], {
-    stdio: 'inherit',
-    env: { ...process.env, PORT: port }
+const app = next({
+  dev: false,
+  dir: __dirname
 });
 
-child.on('error', (error) => {
-    console.error('Failed to start Next.js:', error);
+const handle = app.getRequestHandler();
+
+app.prepare()
+  .then(() => {
+    const server = http.createServer((req, res) => {
+      handle(req, res);
+    });
+
+    server.listen(port, () => {
+      console.log('Next.js app ready on port', port);
+    });
+
+    // Handle shutdown gracefully
+    process.on('SIGTERM', () => {
+      console.log('Received SIGTERM, shutting down Next.js server...');
+      server.close(() => process.exit(0));
+    });
+    process.on('SIGINT', () => {
+      console.log('Received SIGINT, shutting down Next.js server...');
+      server.close(() => process.exit(0));
+    });
+  })
+  .catch((err) => {
+    console.error('Failed to prepare Next.js app:', err);
     process.exit(1);
-});
-
-// IMPORTANT:
-// The Next.js CLI process may exit with code 0/null after spawning
-// the actual server process. If we exit the wrapper on code 0/null,
-// PM2 will constantly restart us and cause flapping + 502s.
-// Only treat non‑zero exit codes as fatal.
-child.on('exit', (code) => {
-    console.log('Next.js CLI exited with code', code);
-    if (code && code !== 0) {
-        console.error('Next.js failed, shutting down wrapper');
-        process.exit(code);
-    } else {
-        console.log('Next.js server is likely running in a child process; keeping wrapper alive.');
-    }
-});
-
-// Handle shutdown gracefully
-process.on('SIGTERM', () => child.kill('SIGTERM'));
-process.on('SIGINT', () => child.kill('SIGINT'));
+  });
 `;
 
             await fs.writeFile(path.join(buildPath, 'server.js'), nextServerScript);
