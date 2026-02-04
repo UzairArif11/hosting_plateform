@@ -899,6 +899,42 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
             await deployment.save();
 
             await onLog('info', `Using deployment URL path for Next.js basePath: /${deploymentUrlPath}`);
+
+            // Also ensure the cloned template's next.config.js respects this basePath.
+            // We modify next.config.js inside the buildPath so that during the build
+            // it picks up NEXT_PUBLIC_BASE_PATH / __NEXT_ROUTER_BASEPATH and generates
+            // correct asset URLs under the sub-path (fixes missing CSS/JS in demos).
+            const nextConfigPath = path.join(buildPath, 'next.config.js');
+            try {
+                let nextConfigContent = await fs.readFile(nextConfigPath, 'utf8');
+
+                if (!nextConfigContent.includes('NEXT_PUBLIC_BASE_PATH') && !nextConfigContent.includes('__NEXT_ROUTER_BASEPATH')) {
+                    const injection = `
+// Auto-injected by platform buildExecutor to support sub-path deployments.
+// Do NOT remove: ensures CSS/JS load correctly under paths like /project-xxxx.
+const basePathFromEnv = process.env.NEXT_PUBLIC_BASE_PATH || process.env.__NEXT_ROUTER_BASEPATH || '';
+
+// Support "const nextConfig = { ... }; module.exports = nextConfig" style configs
+if (typeof module !== 'undefined' && module.exports) {
+  const cfg = module.exports.default || module.exports.nextConfig || module.exports;
+  if (cfg && !cfg.basePath && basePathFromEnv) {
+    cfg.basePath = basePathFromEnv;
+  }
+  if (cfg && !cfg.assetPrefix && basePathFromEnv) {
+    cfg.assetPrefix = basePathFromEnv;
+  }
+}
+`;
+                    nextConfigContent += injection;
+                    await fs.writeFile(nextConfigPath, nextConfigContent, 'utf8');
+                    await onLog('info', '✓ Injected basePath/assetPrefix handling into next.config.js for sub-path deployment');
+                } else {
+                    await onLog('info', 'next.config.js already handles NEXT_PUBLIC_BASE_PATH - no injection needed');
+                }
+            } catch (e) {
+                // If next.config.js does not exist, log and continue (Next will use defaults).
+                await onLog('warn', `next.config.js not found or unreadable, relying on default basePath: ${e.message}`);
+            }
         }
 
         // Write environment variables
