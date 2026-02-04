@@ -1149,12 +1149,21 @@ const { spawn } = require('child_process');
 // throw "Could not find a production build in the '.next' directory".
 process.chdir(__dirname);
 
+// Base path for this deployment (baked in at build time)
+const deploymentBasePath = '${deploymentUrlPath ? '/' + deploymentUrlPath : ''}';
+
+// Ensure Next.js sees the correct basePath/assetPrefix at runtime
+if (deploymentBasePath) {
+  process.env.NEXT_PUBLIC_BASE_PATH = deploymentBasePath;
+  process.env.__NEXT_ROUTER_BASEPATH = deploymentBasePath;
+}
+
 // Get port from args
 const args = process.argv.slice(2);
 const portIdx = args.indexOf('--port');
 const port = portIdx !== -1 ? args[portIdx + 1] : (process.env.PORT || '3000');
 
-console.log('Starting Next.js on port', port);
+console.log('Starting Next.js on port', port, 'with basePath', deploymentBasePath || '(root)');
 
 // Start Next.js production server
 const child = spawn('npx', ['next', 'start', '-p', port], {
