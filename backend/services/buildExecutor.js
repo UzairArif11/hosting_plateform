@@ -1107,6 +1107,12 @@ console.log('Server running at http://localhost:' + port);
             const nextServerScript = `
 const { spawn } = require('child_process');
 
+// Ensure we run Next.js from the project directory where
+// the .next production build lives (same folder as server.js).
+// Without this, Next.js may not find the .next directory and will
+// throw "Could not find a production build in the '.next' directory".
+process.chdir(__dirname);
+
 // Get port from args
 const args = process.argv.slice(2);
 const portIdx = args.indexOf('--port');
