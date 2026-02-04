@@ -158,9 +158,22 @@ async function updateNginxRouting(projectName, port, serverHost, serverKey, depl
         let config = readResult.stdout;
 
         // Create location block
+        // IMPORTANT: We serve all apps from a sub-path like /demosmartpor-xxxx/.
+        // To keep Next.js simple (no hard basePath assumptions), we strip the
+        // prefix before proxying so the app always sees requests starting at `/`.
+        //
+        // Example:
+        //   https://ec2.foodpanda.site/demosmartpor-1234/       → http://localhost:PORT/
+        //   https://ec2.foodpanda.site/demosmartpor-1234/_next → http://localhost:PORT/_next
+        //
+        // This avoids 404s and missing CSS/JS when templates are not configured
+        // with a basePath, and works for both pages and static assets.
         const locationBlock = `    # ${projectName} - Port ${port} - ${deploymentId}
     location /${urlPath}/ {
-        proxy_pass http://localhost:${port}/;
+        # Strip the deployment prefix so the app sees root-relative paths
+        rewrite ^\\/${urlPath}(.*)$ $1 break;
+
+        proxy_pass http://localhost:${port};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';

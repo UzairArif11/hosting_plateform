@@ -875,10 +875,10 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
 
         await onLog('info', `Build command: ${buildCommand}`);
 
-        // For Next.js deployments that are served from a sub-path (e.g. /project-xxxx),
-        // we need a deterministic URL path so we can:
-        // 1) Configure Next.js basePath/assetPrefix during build
-        // 2) Configure Nginx routing to the same sub-path after deployment
+        // For Next.js deployments we still compute a deterministic URL path
+        // for metadata/debugging, but routing is now handled purely by Nginx
+        // (which rewrites /slug-id/* → /*), so we do NOT configure basePath
+        // in Next.js anymore. This keeps templates simple and avoids CSS/JS issues.
         let deploymentUrlPath = null;
         if (framework === 'nextjs') {
             const shortName = project.name
@@ -888,8 +888,6 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
 
             const shortId = deployment._id.toString().substring(0, 8);
 
-            // IMPORTANT: This MUST stay in sync with nginxRouter.js
-            // (see updateNginxRouting URL path generation).
             deploymentUrlPath = `${shortName}-${shortId}`;
 
             deployment.metadata = {
@@ -898,43 +896,7 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
             };
             await deployment.save();
 
-            await onLog('info', `Using deployment URL path for Next.js basePath: /${deploymentUrlPath}`);
-
-            // Also ensure the cloned template's next.config.js respects this basePath.
-            // We modify next.config.js inside the buildPath so that during the build
-            // it picks up NEXT_PUBLIC_BASE_PATH / __NEXT_ROUTER_BASEPATH and generates
-            // correct asset URLs under the sub-path (fixes missing CSS/JS in demos).
-            const nextConfigPath = path.join(buildPath, 'next.config.js');
-            try {
-                let nextConfigContent = await fs.readFile(nextConfigPath, 'utf8');
-
-                if (!nextConfigContent.includes('NEXT_PUBLIC_BASE_PATH') && !nextConfigContent.includes('__NEXT_ROUTER_BASEPATH')) {
-                    const injection = `
-// Auto-injected by platform buildExecutor to support sub-path deployments.
-// Do NOT remove: ensures CSS/JS load correctly under paths like /project-xxxx.
-const basePathFromEnv = process.env.NEXT_PUBLIC_BASE_PATH || process.env.__NEXT_ROUTER_BASEPATH || '';
-
-// Support "const nextConfig = { ... }; module.exports = nextConfig" style configs
-if (typeof module !== 'undefined' && module.exports) {
-  const cfg = module.exports.default || module.exports.nextConfig || module.exports;
-  if (cfg && !cfg.basePath && basePathFromEnv) {
-    cfg.basePath = basePathFromEnv;
-  }
-  if (cfg && !cfg.assetPrefix && basePathFromEnv) {
-    cfg.assetPrefix = basePathFromEnv;
-  }
-}
-`;
-                    nextConfigContent += injection;
-                    await fs.writeFile(nextConfigPath, nextConfigContent, 'utf8');
-                    await onLog('info', '✓ Injected basePath/assetPrefix handling into next.config.js for sub-path deployment');
-                } else {
-                    await onLog('info', 'next.config.js already handles NEXT_PUBLIC_BASE_PATH - no injection needed');
-                }
-            } catch (e) {
-                // If next.config.js does not exist, log and continue (Next will use defaults).
-                await onLog('warn', `next.config.js not found or unreadable, relying on default basePath: ${e.message}`);
-            }
+            await onLog('info', `Using deployment URL path (for Nginx): /${deploymentUrlPath}`);
         }
 
         // Write environment variables
@@ -1003,19 +965,14 @@ if (typeof module !== 'undefined' && module.exports) {
             const buildSequence = dockerBuildCmd;
 
             // Build command to run inside Docker with corepack for pnpm/yarn
-            // NOTE: For Next.js we also pass a per-deployment basePath so that
-            // static assets (/_next/...) are generated under the correct sub-path.
-            const basePathEnvArgs = (framework === 'nextjs' && deploymentUrlPath)
-                ? `-e NEXT_PUBLIC_BASE_PATH=/${deploymentUrlPath} -e __NEXT_ROUTER_BASEPATH=/${deploymentUrlPath}`
-                : '';
-
+            // We no longer set any basePath env here; Next.js builds for root
+            // and Nginx handles sub-path routing via rewrite rules.
             const dockerBuildCommand = `docker run --rm \
                 -v "${buildPath}:/app" \
                 -w /app \
                 -e NODE_ENV=production \
                 -e CI=false \
                 -e PUBLIC_URL=. \
-                ${basePathEnvArgs} \
                 ${dockerImage} \
                 sh -c "${buildSequence}"`;
 
@@ -1150,21 +1107,12 @@ const next = require('next');
 // throw "Could not find a production build in the '.next' directory".
 process.chdir(__dirname);
 
-// Base path for this deployment (baked in at build time)
-const deploymentBasePath = '${deploymentUrlPath ? '/' + deploymentUrlPath : ''}';
-
-// Ensure Next.js sees the correct basePath/assetPrefix at runtime
-if (deploymentBasePath) {
-  process.env.NEXT_PUBLIC_BASE_PATH = deploymentBasePath;
-  process.env.__NEXT_ROUTER_BASEPATH = deploymentBasePath;
-}
-
 // Get port from args
 const args = process.argv.slice(2);
 const portIdx = args.indexOf('--port');
 const port = portIdx !== -1 ? args[portIdx + 1] : (process.env.PORT || '3000');
 
-console.log('Preparing Next.js app on port', port, 'with basePath', deploymentBasePath || '(root)');
+console.log('Preparing Next.js app on port', port, 'with basePath (root)');
 
 const app = next({
   dev: false,
