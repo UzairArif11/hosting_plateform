@@ -875,6 +875,32 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
 
         await onLog('info', `Build command: ${buildCommand}`);
 
+        // For Next.js deployments that are served from a sub-path (e.g. /project-xxxx),
+        // we need a deterministic URL path so we can:
+        // 1) Configure Next.js basePath/assetPrefix during build
+        // 2) Configure Nginx routing to the same sub-path after deployment
+        let deploymentUrlPath = null;
+        if (framework === 'nextjs') {
+            const shortName = project.name
+                .toLowerCase()
+                .replace(/[^a-z0-9]/g, '')
+                .substring(0, 12);
+
+            const shortId = deployment._id.toString().substring(0, 8);
+
+            // IMPORTANT: This MUST stay in sync with nginxRouter.js
+            // (see updateNginxRouting URL path generation).
+            deploymentUrlPath = `${shortName}-${shortId}`;
+
+            deployment.metadata = {
+                ...deployment.metadata,
+                urlPath: deploymentUrlPath
+            };
+            await deployment.save();
+
+            await onLog('info', `Using deployment URL path for Next.js basePath: /${deploymentUrlPath}`);
+        }
+
         // Write environment variables
         if (project.environmentVariables && project.environmentVariables.length > 0) {
             const envContent = project.environmentVariables
@@ -941,12 +967,19 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
             const buildSequence = dockerBuildCmd;
 
             // Build command to run inside Docker with corepack for pnpm/yarn
+            // NOTE: For Next.js we also pass a per-deployment basePath so that
+            // static assets (/_next/...) are generated under the correct sub-path.
+            const basePathEnvArgs = (framework === 'nextjs' && deploymentUrlPath)
+                ? `-e NEXT_PUBLIC_BASE_PATH=/${deploymentUrlPath} -e __NEXT_ROUTER_BASEPATH=/${deploymentUrlPath}`
+                : '';
+
             const dockerBuildCommand = `docker run --rm \
                 -v "${buildPath}:/app" \
                 -w /app \
                 -e NODE_ENV=production \
                 -e CI=false \
                 -e PUBLIC_URL=. \
+                ${basePathEnvArgs} \
                 ${dockerImage} \
                 sh -c "${buildSequence}"`;
 

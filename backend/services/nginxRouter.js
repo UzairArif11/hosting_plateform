@@ -128,17 +128,20 @@ async function updateNginxRouting(projectName, port, serverHost, serverKey, depl
         });
 
         // Generate Vercel-style unique URL path
+        // IMPORTANT: This must stay in sync with any URL path generation
+        // logic used during the build step (e.g. for Next.js basePath)
         const shortName = projectName
             .toLowerCase()
             .replace(/[^a-z0-9]/g, '')
             .substring(0, 12);
 
         const shortId = deploymentId.substring(0, 8);
-        const timestamp = Date.now().toString().substring(5, 13); // 8 digits
 
-        const urlPath = `${shortName}-${shortId}-${timestamp}`;
+        // Deterministic URL path (no timestamp) so it can be computed
+        // consistently during both build and routing configuration.
+        const urlPath = `${shortName}-${shortId}`;
 
-        logger.info(`Generated unique URL path: ${urlPath}`);
+        logger.info(`Generated unique URL path (deterministic): ${urlPath}`);
 
         // Get domain from database settings
         const domain = await Settings.getDomainForServer(serverKey);
