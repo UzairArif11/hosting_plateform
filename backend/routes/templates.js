@@ -340,7 +340,56 @@ router.delete('/:id/remove-demo', requireAuth, requireAdmin, async (req, res) =>
         if (template.demoProjectId) {
             const Project = require('../models/Project');
             const Deployment = require('../models/Deployment');
-            
+            const nginxRouter = require('../services/nginxRouter');
+            const freeTierContainer = require('../services/freeTierContainer');
+            const containerOrchestrator = require('../services/containerOrchestrator');
+
+            const project = await Project.findById(template.demoProjectId);
+
+            // Clean up all deployments tied to this demo project
+            const deployments = await Deployment.find({ projectId: template.demoProjectId });
+
+            for (const deployment of deployments) {
+                // 1) Remove Nginx routing for this deployment (so old demo URL stops pointing anywhere)
+                if (deployment.deploymentUrl && deployment.serverKey) {
+                    try {
+                        const serverKey = deployment.serverKey;
+                        const serverHost = process.env[`${serverKey}_SERVER_IP`] ||
+                            (serverKey === 'EC2' ? process.env.EC2_SERVER_IP : process.env.EC3_SERVER_IP);
+
+                        if (serverHost) {
+                            await nginxRouter.removeNginxRouting(
+                                deployment._id.toString(),
+                                serverHost,
+                                serverKey
+                            );
+                            logger.info(`Removed Nginx config for demo deployment ${deployment._id}`);
+                        }
+                    } catch (nginxError) {
+                        logger.warn(`Failed to remove Nginx config for demo deployment ${deployment._id}: ${nginxError.message}`);
+                    }
+                }
+
+                // 2) Stop PM2 process and remove project files from user container
+                if (deployment.containerName && deployment.serverKey && project) {
+                    try {
+                        const server = containerOrchestrator.ORACLE_SERVERS[deployment.serverKey];
+                        if (server) {
+                            await freeTierContainer.removeProjectFromUserContainer(
+                                project,
+                                deployment.containerName,
+                                server.host,
+                                deployment.serverKey
+                            );
+                            logger.info(`Removed PM2 process and files for demo deployment ${deployment._id}`);
+                        }
+                    } catch (pm2Error) {
+                        logger.warn(`Failed to remove PM2 process for demo deployment ${deployment._id}: ${pm2Error.message}`);
+                    }
+                }
+            }
+
+            // Finally, delete the project and its deployments from MongoDB
             await Project.findByIdAndDelete(template.demoProjectId);
             await Deployment.deleteMany({ projectId: template.demoProjectId });
             logger.info(`Deleted demo project and deployments for template: ${template.name}`);
@@ -356,7 +405,7 @@ router.delete('/:id/remove-demo', requireAuth, requireAdmin, async (req, res) =>
         await template.save();
 
         logger.info(`Admin demo removed for template: ${template.name}`);
-        res.json({ success: true, message: 'Demo removed successfully' });
+        res.json({ success: true, message: 'Demo removed successfully (URL, process, and cache cleared)' });
     } catch (error) {
         logger.error('Failed to remove demo:', error);
         res.status(500).json({ success: false, error: 'Failed to remove demo' });

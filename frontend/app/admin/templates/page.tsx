@@ -515,14 +515,14 @@ export default function TemplateManagement() {
     };
 
     const handleRemoveDemo = async (templateId: string, templateName: string) => {
-        if (!confirm(`Remove live demo for "${templateName}"?`)) return;
+        if (!confirm(`Remove live demo deployment for "${templateName}"?`)) return;
 
         try {
-            await api.delete(`/templates/${templateId}/demo`);
-            toast.success('Demo removed successfully');
+            await api.delete(`/templates/${templateId}/remove-demo`);
+            toast.success('✅ Demo deployment removed');
             fetchTemplates();
         } catch (error: any) {
-            toast.error(error.response?.data?.error || 'Failed to remove demo');
+            toast.error(error.response?.data?.error || 'Failed to remove demo deployment');
         }
     };
 
