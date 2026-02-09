@@ -30,6 +30,12 @@ interface User {
     githubUsername?: string;
     githubId?: string;
     googleId?: string;
+    // Suspension fields
+    suspendedAt?: string;
+    suspendedBy?: string;
+    suspensionReason?: string;
+    autoSuspended?: boolean;
+    planType?: string;
 }
 
 interface AuthState {
