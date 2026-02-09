@@ -28,8 +28,8 @@ const connectDB = async () => {
     });
 
   } catch (error) {
-    logger.error('❌ MongoDB connection failed:', error.message);
-    process.exit(1);
+    logger.error('❌ MongoDB connection failed:', error?.message || String(error) || 'Unknown error');
+    throw error; // Re-throw so async IIFE can handle it
   }
 };
 

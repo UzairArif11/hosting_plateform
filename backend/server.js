@@ -121,12 +121,8 @@ app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Connect to MongoDB
-connectDB().then(() => {
-  // Runmigrations
-  require('./migrations/fix-indexes')();
-});
-
+// MongoDB and migrations are now initialized in the async IIFE at the end of this file
+// (removed duplicate connectDB call that was causing crashes)
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -252,7 +248,25 @@ const PORT = process.env.PORT || 5000;
 (async () => {
   try {
     await connectDB();
-    await initializeSSHTunnels();
+    
+    // Run migrations with error handling (non-fatal)
+    try {
+      logger.info('Running database migrations...');
+      await require('./migrations/fix-indexes')();
+      logger.info('✅ Migrations completed');
+    } catch (migrationError) {
+      logger.error('⚠️  Migration failed (non-fatal):', migrationError?.message || String(migrationError));
+      // Continue server startup even if migration fails
+    }
+    
+    // Initialize SSH tunnels with error handling (non-fatal)
+    try {
+      await initializeSSHTunnels();
+    } catch (tunnelError) {
+      logger.error('⚠️  SSH tunnel initialization failed (non-fatal):', tunnelError?.message || String(tunnelError));
+      logger.warn('Server will start without SSH tunnels. Remote Docker operations may fail.');
+      // Continue server startup - tunnels are optional for local Docker
+    }
 
     server.listen(PORT, () => {
       logger.info(`🚀 Server running on port ${PORT}`);
