@@ -2,11 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useSelector } from 'react-redux';
-import { RootState } from '@/lib/store';
-
-// Force dynamic rendering - don't pre-render this page
-export const dynamic = 'force-dynamic';
 import { 
   ExclamationTriangleIcon, 
   ArrowUpCircleIcon, 
@@ -15,24 +10,50 @@ import {
   CreditCardIcon
 } from '@heroicons/react/24/outline';
 
+// Don't use Redux to avoid SSR issues - fetch user directly
 export default function SuspendedAccountPage() {
   const router = useRouter();
-  const { user } = useSelector((state: RootState) => state.auth);
+  const [user, setUser] = useState<any>(null);
   const [daysUntilDeletion, setDaysUntilDeletion] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Calculate days until account deletion (30 days after suspension)
-    if (user?.suspendedAt) {
-      const suspendedDate = new Date(user.suspendedAt);
-      const deletionDate = new Date(suspendedDate.getTime() + 30 * 24 * 60 * 60 * 1000);
-      const now = new Date();
-      const daysLeft = Math.max(0, Math.ceil((deletionDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)));
-      setDaysUntilDeletion(daysLeft);
-    }
-  }, [user]);
+    // Fetch user data client-side only
+    fetch('/api/auth/me')
+      .then(res => res.json())
+      .then(data => {
+        if (data.user) {
+          setUser(data.user);
+          
+          // Calculate days until deletion
+          if (data.user.suspendedAt) {
+            const suspendedDate = new Date(data.user.suspendedAt);
+            const deletionDate = new Date(suspendedDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+            const now = new Date();
+            const daysLeft = Math.max(0, Math.ceil((deletionDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)));
+            setDaysUntilDeletion(daysLeft);
+          }
+        }
+        setLoading(false);
+      })
+      .catch(() => {
+        setLoading(false);
+        router.push('/login');
+      });
+  }, [router]);
 
-  if (user?.status !== 'suspended') {
-    router.push('/dashboard');
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
+      </div>
+    );
+  }
+
+  if (!user || user.status !== 'suspended') {
+    if (typeof window !== 'undefined') {
+      router.push('/dashboard');
+    }
     return null;
   }
 
