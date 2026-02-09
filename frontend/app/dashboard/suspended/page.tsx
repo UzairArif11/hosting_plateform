@@ -4,6 +4,9 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSelector } from 'react-redux';
 import { RootState } from '@/lib/store';
+
+// Force dynamic rendering - don't pre-render this page
+export const dynamic = 'force-dynamic';
 import { 
   ExclamationTriangleIcon, 
   ArrowUpCircleIcon, 
