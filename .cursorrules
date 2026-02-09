@@ -1,0 +1,113 @@
+# Platform AI Context – Use this when giving solutions
+
+---
+
+## Build vs Runtime Architecture (CRITICAL)
+
+**Build happens on the platform backend server, NOT in user/admin containers.**
+
+| Phase | Location | What runs | RAM used by |
+|-------|----------|-----------|-------------|
+| **Build** | Platform server (`/tmp/builds/<id>`) | `npm install`, `npm run build` (via Docker) | Platform server Docker |
+| **Runtime** | User/admin container on EC2 | `node server.js` → `app.prepare()` | User/admin container |
+
+### Flow
+
+1. **Platform server**: Clone repo → install deps → `npm run build` (Docker) → outputs `.next`, `node_modules`, `server.js`
+2. **Upload**: Pre-built tarball sent to EC2 at `/tmp/builds/<deploymentId>`
+3. **Container**: `docker cp` into user/admin container → PM2 runs `node server.js --port PORT`
+
+### Why containers still need RAM
+
+- The container does **not** run `npm run build`; it runs the pre-built app.
+- **Runtime** still needs memory: Node process, loading `.next`, `app.prepare()`, Prisma, serving requests.
+- Next.js `app.prepare()` often uses 500MB–1GB+.
+- If container RAM is too low (e.g. 512MB), the process is OOM-killed during `app.prepare()`.
+
+**Key takeaway:** OOM during startup → increase **container** RAM (runtime limit), not build resources.
+
+---
+
+## Known Issues & Fixes
+
+### 1. 502 Bad Gateway (OOM during app.prepare)
+- **Cause:** Container RAM too low; Next.js OOM-killed during startup.
+- **Fix:** Increase container memory limit for admin/user containers (e.g. in containerOrchestrator / plan resources). Target ~1GB+ for Next.js runtime.
+
+### 2. CSS/JS not loading on template demos (subpath deployments)
+- **Cause:** Deployments use subpaths (e.g. `/demosmartpor-123/`). Next.js emits asset URLs as `/_next/static/...` (root-relative). Browser requests `https://domain.com/_next/...` instead of `https://domain.com/demosmartpor-123/_next/...`, so the request misses the subpath location block and 404s.
+- **Current:** Nginx rewrite strips prefix before proxying (`rewrite ^\/${urlPath}(.*)$ $1 break`), but HTML still has root-relative asset URLs.
+- **Best solutions (pick one):**
+  - **A) Subdomains:** Use `demo1.domain.com` instead of `domain.com/demo1/` – no basePath needed.
+  - **B) basePath in build:** Set `NEXT_PUBLIC_BASE_PATH` / `basePath` during build in buildExecutor.js so Next.js emits `/demosmartpor-123/_next/...`.
+  - **C) Accept limitation:** Demos work functionally (HTML loads) but may be unstyled on subpaths.
+
+### 3. Prisma schema invalid syntax
+- **Cause:** Templates sometimes use invalid conditional syntax in `url = env("DATABASE_URL") != "" ? ...`
+- **Fix:** buildExecutor.js auto-fixes Prisma schema before install (replace with `url = env("DATABASE_URL")`).
+
+### 4. Deployment URL not saved / undefined
+- **Fix:** Ensure `deployment.deploymentUrl` and `deployment.save()` after routing. Use `Settings.getDomainForServer(serverKey)` for domain.
+
+### 5. Container allocation failures
+- **Cause:** Plan not loaded from DB; static fallbacks used.
+- **Fix:** Load plan from Plan model when string passed; use plan resources for container creation.
+
+---
+
+## Templates by Resource Needs
+
+### Prisma/DB templates (need ~1GB+ RAM, full Next.js runtime)
+- **nextjs-portfolio** – Uses Prisma, API routes (/api/seed, /api/contact), server-side data. Cannot use static export.
+- **nextjs-commerce** – Uses Prisma, API routes (/api/seed), server-side data. Cannot use static export.
+
+### No-Prisma templates (lighter, suitable for free tier)
+- **nextjs-blog-smart** – No Prisma; can use static export or minimal Node. Works for free users.
+- **nextjs-starter** – Minimal; no Prisma. Works for free users.
+
+**For free tier:** Offer/route users to templates without Prisma (nextjs-blog-smart, nextjs-starter) so they run in low-RAM containers. Reserve Prisma templates (portfolio, commerce) for paid plans with higher RAM.
+
+---
+
+## Important Files
+
+- `backend/services/buildExecutor.js` – Build flow, Prisma fix, server.js generation
+- `backend/services/nginxRouter.js` – Nginx location blocks, rewrite rules
+- `backend/services/freeTierContainer.js` – PM2 deployment, container creation
+- `backend/services/containerOrchestrator.js` – Plan resources, RAM limits
+- `backend/services/remoteBuild.js` – Upload to EC2
+- `platform-templates/` – nextjs-portfolio, nextjs-commerce (Prisma); nextjs-blog-smart, nextjs-starter (no Prisma, free-tier friendly)
+
+---
+
+## Pending Task: Lightweight Template for 500MB Containers
+
+**Directive:** When asked to deep review templates or create a lightweight template:
+
+1. **Deep review** the project templates in:
+   - `platform-templates/` (nextjs-portfolio, nextjs-commerce, nextjs-blog-smart, nextjs-starter)
+   - `platform/` (optimization2 – if exists)
+
+2. **Create a new lightweight template** that runs in **500MB RAM** containers:
+   - Must NOT use Prisma, database, or API routes
+   - Use static export (`output: 'export'`) or minimal Node server (serve static files)
+   - No `app.prepare()` – use React/Vite/static HTML, or Next.js static export only
+   - Target: ~50–150MB runtime footprint
+   - Example: Next.js static blog, React SPA, or Vite static site
+
+3. **Requirements:**
+   - Compatible with existing buildExecutor.js (framework detection, deploy flow)
+   - Single `server.js` that serves static files (no Next.js server runtime)
+   - Minimal dependencies – no Prisma, no heavy runtimes
+
+---
+
+## When giving solutions
+
+1. **Architecture:** Build runs on platform server; runtime runs in user/admin container. OOM at startup → raise container RAM.
+2. **502/OOM:** Prefer increasing container memory over changing build pipeline.
+3. **Free tier:** Use templates without Prisma (nextjs-blog-smart, nextjs-starter); avoid Prisma templates (portfolio, commerce) unless paid plan.
+4. **500MB containers:** Use static export or minimal static server – no Next.js full runtime, no Prisma.
+5. **New templates:** For free users, prefer templates that don't need Prisma – static export or minimal Node works.
+6. **CSS/assets on subpaths:** Prefer subdomains or basePath during build; avoid assuming assets will load from root under subpaths.
+7. **Fixes:** Use the known fixes above and suggest concrete code changes (file + approach) rather than generic advice.

@@ -4,20 +4,33 @@ const logger = require('../utils/logger');
 // Create Docker client
 const createDockerClient = (host = null) => {
   if (host) {
-    // Remote Docker host (Oracle instance)
-    // Try HTTPS first, fallback to HTTP
-    const useHttps = process.env.DOCKER_USE_HTTPS !== 'false';
+    // 🔒 SECURE: Use SSH tunnel via localhost
+    // Determine which server we're connecting to
+    const serverKey = host === process.env.EC2_SERVER_IP ? 'EC2' : 'EC3';
+
+    // Get tunnel info from SSH tunnel manager
+    const sshTunnelManager = require('./sshTunnelManager');
+    const tunnelInfo = sshTunnelManager.getTunnelInfo(serverKey);
+
+    if (!tunnelInfo) {
+      logger.error(`No SSH tunnel found for ${serverKey}. Server startup may have failed.`);
+      throw new Error(
+        `SSH tunnel for ${serverKey} not available. ` +
+        `Check that SSH_${serverKey}_KEY is configured in .env and ` +
+        `sshTunnelManager was initialized on server startup.`
+      );
+    }
+
+    if (!sshTunnelManager.isTunnelActive(serverKey)) {
+      logger.warn(`SSH tunnel for ${serverKey} is not active. Attempting to use anyway...`);
+    }
+
+    logger.info(`Using SSH tunnel for ${serverKey}: localhost:${tunnelInfo.localPort} → ${host}:2376`);
 
     return new Docker({
-      host: host,
-      port: 2376,
-      protocol: useHttps ? 'https' : 'http',
-      // Skip certificate verification for self-signed certs
-      // In production, you should use proper certificates
-      ca: null,
-      cert: null,
-      key: null,
-      checkServerIdentity: () => undefined
+      host: 'localhost',              // ✅ Connect via SSH tunnel
+      port: tunnelInfo.localPort,     // 2376 (EC2) or 2377 (EC3)
+      protocol: 'http',               // Local connection, encrypted by SSH
     });
   }
 

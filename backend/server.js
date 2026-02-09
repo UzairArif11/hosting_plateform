@@ -14,6 +14,7 @@ const cookieParser = require('cookie-parser');
 // Import utilities
 const connectDB = require('./utils/database');
 const logger = require('./utils/logger');
+const sshTunnelManager = require('./services/sshTunnelManager');
 
 // Global error handlers for debugging
 process.on('uncaughtException', (err) => {
@@ -214,28 +215,74 @@ app.use((err, req, res, next) => {
 const containerOrchestrator = require('./services/containerOrchestrator');
 let monitoringInterval = null;
 
+// SSH Tunnel Initialization for Secure Docker API Access
+async function initializeSSHTunnels() {
+  console.log('\n🔒 Initializing SSH tunnels for secure Docker access...');
+
+  const tunnels = [];
+
+  if (process.env.EC2_SERVER_IP) {
+    console.log(`   Creating EC2 tunnel: localhost:2376 → ${process.env.EC2_SERVER_IP}:2376`);
+    const result = await sshTunnelManager.createTunnel('EC2', process.env.EC2_SERVER_IP, 2376, 2376);
+    tunnels.push({ server: 'EC2', success: result.success });
+    if (result.success) console.log('   ✅ EC2 tunnel active');
+    else console.error(`   ❌ EC2 failed: ${result.error}`);
+  }
+
+  if (process.env.EC3_SERVER_IP) {
+    console.log(`   Creating EC3 tunnel: localhost:2377 → ${process.env.EC3_SERVER_IP}:2376`);
+    const result = await sshTunnelManager.createTunnel('EC3', process.env.EC3_SERVER_IP, 2377, 2376);
+    tunnels.push({ server: 'EC3', success: result.success });
+    if (result.success) console.log('   ✅ EC3 tunnel active');
+    else console.error(`   ❌ EC3 failed: ${result.error}`);
+  }
+
+  const successCount = tunnels.filter(t => t.success).length;
+  console.log(`✅ SSH tunnels: ${successCount}/${tunnels.length} active\n`);
+
+  if (successCount === 0 && tunnels.length > 0) {
+    console.warn('⚠️  WARNING: No tunnels established! Remote Docker management unavailable.\n');
+  }
+}
+
 // Start server
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  logger.info(`🚀 Server running on port ${PORT}`);
-  logger.info(`🔗 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
-  logger.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 
-  // Start resource monitoring for shared containers
-  monitoringInterval = containerOrchestrator.startResourceMonitoring(60000); // Check every minute
-  logger.info(`📊 Resource monitoring active for shared containers`);
+// Initialize database and tunnels before starting HTTP server
+(async () => {
+  try {
+    await connectDB();
+    await initializeSSHTunnels();
 
-  // Start alert monitoring (High Server Load)
-  containerOrchestrator.startAlertMonitoring();
+    server.listen(PORT, () => {
+      logger.info(`🚀 Server running on port ${PORT}`);
+      logger.info(`🔗 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
+      logger.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 
-  // Start User Resource Enforcement (RAM/Storage Limits)
-  const resourceEnforcer = require('./services/resourceEnforcer');
-  resourceEnforcer.startEnforcement();
-});
+      // Start resource monitoring for shared containers
+      monitoringInterval = containerOrchestrator.startResourceMonitoring(60000); // Check every minute
+      logger.info(`📊 Resource monitoring active for shared containers`);
+
+      // Start alert monitoring (High Server Load)
+      containerOrchestrator.startAlertMonitoring();
+
+      // Start User Resource Enforcement (RAM/Storage Limits)
+      const resourceEnforcer = require('./services/resourceEnforcer');
+      resourceEnforcer.startEnforcement();
+    });
+  } catch (error) {
+    logger.error('Server startup failed:', error);
+    process.exit(1);
+  }
+})();
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   logger.info('SIGTERM received. Shutting down gracefully...');
+
+  // Close SSH tunnels
+  logger.info('Closing SSH tunnels...');
+  await sshTunnelManager.closeAllTunnels();
 
   // Stop resource monitoring
   if (monitoringInterval) {
@@ -243,10 +290,16 @@ process.on('SIGTERM', () => {
     logger.info('Resource monitoring stopped');
   }
 
-
   server.close(() => {
     logger.info('Process terminated');
+    process.exit(0);
   });
+});
+
+process.on('SIGINT', async () => {
+  logger.info('SIGINT received. Shutting down gracefully...');
+  await sshTunnelManager.closeAllTunnels();
+  process.exit(0);
 });
 
 module.exports = { app };
