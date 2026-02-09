@@ -4,8 +4,20 @@ const logger = require('../utils/logger');
 // Create Docker client
 const createDockerClient = (host = null) => {
   if (host) {
-    // 🔒 SECURE: Use SSH tunnel via localhost
-    // Determine which server we're connecting to
+    // Check if this is the local server (EC1/EC3 same machine)
+    const localIP = process.env.EC1_SERVER_IP || 'localhost';
+    const isLocalServer = host === localIP || 
+                         host === 'localhost' || 
+                         host === '127.0.0.1' ||
+                         host === process.env.EC3_SERVER_IP; // EC3 = EC1 (same server)
+
+    if (isLocalServer || host === process.env.EC3_SERVER_IP) {
+      // 🏠 Local server: Connect directly to local Docker daemon
+      logger.info(`Connecting to local Docker daemon (same machine)`);
+      return new Docker(); // Uses unix socket by default
+    }
+
+    // 🔒 SECURE: Use SSH tunnel for remote servers (EC2)
     const serverKey = host === process.env.EC2_SERVER_IP ? 'EC2' : 'EC3';
 
     // Get tunnel info from SSH tunnel manager
@@ -13,23 +25,20 @@ const createDockerClient = (host = null) => {
     const tunnelInfo = sshTunnelManager.getTunnelInfo(serverKey);
 
     if (!tunnelInfo) {
-      logger.error(`No SSH tunnel found for ${serverKey}. Server startup may have failed.`);
-      throw new Error(
-        `SSH tunnel for ${serverKey} not available. ` +
-        `Check that SSH_${serverKey}_KEY is configured in .env and ` +
-        `sshTunnelManager was initialized on server startup.`
-      );
+      logger.warn(`No SSH tunnel found for ${serverKey}. Falling back to local Docker.`);
+      return new Docker(); // Fallback to local Docker
     }
 
     if (!sshTunnelManager.isTunnelActive(serverKey)) {
-      logger.warn(`SSH tunnel for ${serverKey} is not active. Attempting to use anyway...`);
+      logger.warn(`SSH tunnel for ${serverKey} is not active. Using local Docker.`);
+      return new Docker(); // Fallback to local Docker
     }
 
     logger.info(`Using SSH tunnel for ${serverKey}: localhost:${tunnelInfo.localPort} → ${host}:2376`);
 
     return new Docker({
       host: 'localhost',              // ✅ Connect via SSH tunnel
-      port: tunnelInfo.localPort,     // 2376 (EC2) or 2377 (EC3)
+      port: tunnelInfo.localPort,     // 2376 (EC2)
       protocol: 'http',               // Local connection, encrypted by SSH
     });
   }

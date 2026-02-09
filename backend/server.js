@@ -226,11 +226,22 @@ async function initializeSSHTunnels() {
   }
 
   if (process.env.EC3_SERVER_IP) {
-    console.log(`   Creating EC3 tunnel: localhost:2377 → ${process.env.EC3_SERVER_IP}:2376`);
-    const result = await sshTunnelManager.createTunnel('EC3', process.env.EC3_SERVER_IP, 2377, 2376);
-    tunnels.push({ server: 'EC3', success: result.success });
-    if (result.success) console.log('   ✅ EC3 tunnel active');
-    else console.error(`   ❌ EC3 failed: ${result.error}`);
+    // Check if EC3 is the same as EC1 (same server)
+    const localIP = process.env.EC1_SERVER_IP;
+    const isSameServer = process.env.EC3_SERVER_IP === localIP || 
+                         process.env.EC3_SERVER_IP === process.env.EC2_SERVER_IP ||
+                         !process.env.EC1_SERVER_IP; // If no EC1_SERVER_IP, assume EC3 is local
+    
+    if (isSameServer) {
+      console.log(`   Skipping EC3 tunnel (same server as EC1) - using local Docker directly`);
+      tunnels.push({ server: 'EC3', success: true, local: true });
+    } else {
+      console.log(`   Creating EC3 tunnel: localhost:2377 → ${process.env.EC3_SERVER_IP}:2376`);
+      const result = await sshTunnelManager.createTunnel('EC3', process.env.EC3_SERVER_IP, 2377, 2376);
+      tunnels.push({ server: 'EC3', success: result.success });
+      if (result.success) console.log('   ✅ EC3 tunnel active');
+      else console.error(`   ❌ EC3 failed: ${result.error}`);
+    }
   }
 
   const successCount = tunnels.filter(t => t.success).length;

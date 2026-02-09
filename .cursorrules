@@ -69,6 +69,20 @@
 
 ---
 
+## Server Architecture
+
+**EC1 and EC3 are the SAME SERVER** (129.154.255.90) - runs backend API + hosts containers
+**EC2** is a separate server (140.238.229.147) - hosts containers
+
+**SSH Tunnels (for security):**
+- Backend creates 2 tunnels on startup:
+  - `localhost:2376` → EC2:2376 (remote)
+  - `localhost:2377` → EC3:2376 (loopback to same machine via public IP)
+- All Docker API calls go through encrypted SSH tunnels
+- Docker APIs are NOT exposed to internet (localhost only on EC2/EC3)
+
+---
+
 ## Important Files
 
 - `backend/services/buildExecutor.js` – Build flow, Prisma fix, server.js generation
@@ -76,6 +90,8 @@
 - `backend/services/freeTierContainer.js` – PM2 deployment, container creation
 - `backend/services/containerOrchestrator.js` – Plan resources, RAM limits
 - `backend/services/remoteBuild.js` – Upload to EC2
+- `backend/services/sshTunnelManager.js` – SSH tunnel creation, auto-reconnect
+- `backend/services/docker.js` – Docker client via SSH tunnels
 - `platform-templates/` – nextjs-portfolio, nextjs-commerce (Prisma); nextjs-blog-smart, nextjs-starter (no Prisma, free-tier friendly)
 
 ---
