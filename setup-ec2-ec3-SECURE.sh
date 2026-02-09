@@ -42,20 +42,20 @@ systemctl enable docker
 echo -e "${GREEN}[OK] Docker installed${NC}"
 
 echo ""
-echo -e "${GREEN}Step 3: Configuring Docker for LOCAL-ONLY access...${NC}"
+echo -e "${GREEN}Step 3: Configuring Docker for SSH tunnel access...${NC}"
 
 # Create override directory
 mkdir -p /etc/systemd/system/docker.service.d
 
-# Create override file - Docker listens ONLY on localhost
+# Create override file - Docker listens on unix socket + localhost:2376 (for SSH tunnels)
 cat > /etc/systemd/system/docker.service.d/override.conf <<EOF
 [Service]
 ExecStart=
-ExecStart=/usr/bin/dockerd -H fd:// -H unix:///var/run/docker.sock
+ExecStart=/usr/bin/dockerd -H fd:// -H unix:///var/run/docker.sock -H tcp://127.0.0.1:2376
 EOF
 
-echo -e "${GREEN}[OK] Docker configured for local access only${NC}"
-echo -e "${YELLOW}Note: Docker API is NOT exposed to the internet (secure!)${NC}"
+echo -e "${GREEN}[OK] Docker configured for SSH tunnel access${NC}"
+echo -e "${YELLOW}Note: Docker listens on localhost:2376 (SSH tunnels OK, internet blocked!)${NC}"
 
 echo ""
 echo -e "${GREEN}Step 4: Installing security tools...${NC}"
@@ -126,11 +126,16 @@ PUBLIC_IP=$(curl -s ifconfig.me)
 echo ""
 echo -e "${GREEN}Step 9: Security verification...${NC}"
 
-if ss -tulpn | grep -q ":2376"; then
-    echo -e "${RED}[ERROR] Docker API is exposed on port 2376!${NC}"
+# Check if Docker is listening on localhost:2376 (good for tunnels)
+if ss -tulpn | grep ":2376" | grep -q "127.0.0.1:2376"; then
+    echo -e "${GREEN}[OK] Docker listening on localhost:2376 (SSH tunnels supported)${NC}"
+elif ss -tulpn | grep ":2376" | grep -q "0.0.0.0:2376"; then
+    echo -e "${RED}[ERROR] Docker API is EXPOSED on 0.0.0.0:2376!${NC}"
+    echo -e "${RED}This is a SECURITY RISK! Fix the configuration.${NC}"
     exit 1
 else
-    echo -e "${GREEN}[OK] Docker API is NOT exposed to internet${NC}"
+    echo -e "${YELLOW}[WARNING] Docker not listening on port 2376${NC}"
+    echo -e "${YELLOW}SSH tunnels will not work. Check Docker configuration.${NC}"
 fi
 
 if ufw status | grep -q "Status: active"; then
