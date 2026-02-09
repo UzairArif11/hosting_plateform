@@ -19,18 +19,25 @@ async function checkAndSuspendExpiredTrials() {
 
         const now = new Date();
 
-        // Find users with expired trials
+        // Find users with expired trials (EXCLUDE ADMINS)
         const expiredUsers = await User.find({
             status: 'active',
+            role: { $ne: 'admin' }, // ← CRITICAL: Never suspend admins
             plan: 'free',
             trialExpiry: { $lt: now },
             isTrialActive: true
         });
 
-        logger.info(`Found ${expiredUsers.length} expired trial users`);
+        logger.info(`Found ${expiredUsers.length} expired trial users (admins excluded)`);
 
         for (const user of expiredUsers) {
             try {
+                // DOUBLE-CHECK: Never suspend admins
+                if (user.role === 'admin') {
+                    logger.warn(`Skipping admin user ${user.email} - admins cannot be suspended`);
+                    continue;
+                }
+
                 // Update user status
                 user.status = 'suspended';
                 user.isTrialActive = false;
@@ -73,17 +80,24 @@ async function checkAndSuspendExpiredSubscriptions() {
 
         const now = new Date();
 
-        // Find users with expired subscriptions
+        // Find users with expired subscriptions (EXCLUDE ADMINS)
         const expiredUsers = await User.find({
             status: 'active',
+            role: { $ne: 'admin' }, // ← CRITICAL: Never suspend admins
             plan: { $in: ['pro', 'enterprise'] },
             subscriptionExpiry: { $lt: now }
         });
 
-        logger.info(`Found ${expiredUsers.length} expired subscription users`);
+        logger.info(`Found ${expiredUsers.length} expired subscription users (admins excluded)`);
 
         for (const user of expiredUsers) {
             try {
+                // DOUBLE-CHECK: Never suspend admins
+                if (user.role === 'admin') {
+                    logger.warn(`Skipping admin user ${user.email} - admins cannot be suspended`);
+                    continue;
+                }
+
                 // Update user status
                 user.status = 'suspended';
                 user.suspendedAt = new Date();

@@ -7,6 +7,7 @@ import { getCurrentUser } from '@/lib/slices/authSlice';
 import { AppDispatch, RootState } from '@/lib/store';
 import Sidebar from '@/components/Sidebar';
 import NotificationBell from '@/components/NotificationBell';
+import SuspendedAccountBanner from '@/components/SuspendedAccountBanner';
 import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline';
 
 export default function DashboardLayout({
@@ -166,6 +167,11 @@ export default function DashboardLayout({
 
                 {/* Page Content */}
                 <main className="flex-1 overflow-y-auto bg-gray-950 p-4 sm:p-6">
+                    {/* Suspension Banner */}
+                    {user?.status === 'suspended' && user?.role !== 'admin' && (
+                        <SuspendedAccountBanner />
+                    )}
+                    
                     {children}
                 </main>
             </div>

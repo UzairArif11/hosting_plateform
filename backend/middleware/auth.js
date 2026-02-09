@@ -76,11 +76,18 @@ const createForbiddenResponse = (res, message = 'Insufficient permissions') => {
 };
 
 const checkTrialExpiry = async (user) => {
+  // CRITICAL: Never suspend admin accounts
+  if (user.role === 'admin') {
+    return user;
+  }
+
   if (user.isTrialActive && new Date() > user.trialExpiry) {
     user.isTrialActive = false;
     if (user.subscriptionStatus === 'trial') {
       user.subscriptionStatus = 'expired';
       user.status = 'suspended';
+      user.suspensionReason = 'Free trial expired';
+      user.suspendedAt = new Date();
     }
     await user.save();
   }
@@ -147,7 +154,25 @@ const requireAuth = async (req, res, next) => {
 
     if (user.status === 'suspended') {
       logAuthEvent('Suspended user access attempt', user._id);
-      return createForbiddenResponse(res, 'Account is suspended');
+      
+      // CRITICAL: Allow admins even if suspended (should never happen)
+      if (user.role === 'admin') {
+        logger.warn(`Admin account ${user.email} is marked as suspended - allowing access anyway`);
+        // Continue to next() below
+      } else {
+        // Block suspended non-admin users with detailed response
+        return res.status(403).json({
+          success: false,
+          error: 'Account suspended',
+          code: 'ACCOUNT_SUSPENDED',
+          suspended: true,
+          suspensionReason: user.suspensionReason || 'Account suspended',
+          suspendedAt: user.suspendedAt,
+          planType: user.planType,
+          upgradeUrl: '/dashboard/billing',
+          contactSupport: 'support@foodpanda.site'
+        });
+      }
     }
 
     // Check trial expiry
