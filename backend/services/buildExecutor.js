@@ -900,12 +900,24 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
         }
 
         // Write environment variables
-        if (project.environmentVariables && project.environmentVariables.length > 0) {
-            const envContent = project.environmentVariables
+        const envVars = [...(project.environmentVariables || [])];
+        
+        // For USER deployments (not admin demos), inject SHOW_SETUP_PAGE to allow seeding
+        const isAdminDemo = deployment.metadata?.isAdminDemo === true;
+        if (!isAdminDemo) {
+            envVars.push({ key: 'NEXT_PUBLIC_SHOW_SETUP_PAGE', value: 'true' });
+            envVars.push({ key: 'SEED_SECRET', value: `seed_${deployment._id.toString()}` });
+            await onLog('info', '✅ Enabled setup/seed pages for owner deployment');
+        } else {
+            await onLog('info', '🔒 Setup/seed pages disabled for public demo');
+        }
+        
+        if (envVars.length > 0) {
+            const envContent = envVars
                 .map(env => `${env.key}=${env.value}`)
                 .join('\n');
             await fs.writeFile(path.join(buildPath, '.env'), envContent);
-            await onLog('info', `✓ Environment variables written (${project.environmentVariables.length} vars)`);
+            await onLog('info', `✓ Environment variables written (${envVars.length} vars)`);
         }
 
         // Determine Node.js version for Docker build
