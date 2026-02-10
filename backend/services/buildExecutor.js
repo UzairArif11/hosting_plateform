@@ -1172,25 +1172,37 @@ const mimeTypes = {
 };
 
 http.createServer((request, response) => {
-  let filePath = path.join(buildDir, request.url === '/' ? 'index.html' : request.url);
+  // Parse URL to remove query params and hash
+  const cleanUrl = request.url.split('?')[0].split('#')[0];
+  
+  let filePath = path.join(buildDir, cleanUrl === '/' ? 'index.html' : cleanUrl);
   const extname = String(path.extname(filePath)).toLowerCase();
   
-  // If no extension, try .html
-  if (!extname && !filePath.endsWith('.html')) {
+  // For routes without extension, try .html (Next.js static export pattern)
+  if (!extname) {
     filePath = filePath + '.html';
   }
   
   fs.readFile(filePath, (error, content) => {
     if (error) {
       if (error.code == 'ENOENT') {
-        // Try index.html for SPA fallback
-        fs.readFile(path.join(buildDir, 'index.html'), (error, content) => {
-          if (error) {
-            response.writeHead(404);
-            response.end('404 Not Found');
-          } else {
+        // For /about route, try /about/index.html (Next.js nested structure)
+        const indexPath = path.join(filePath.replace('.html', ''), 'index.html');
+        fs.readFile(indexPath, (err, indexContent) => {
+          if (!err) {
             response.writeHead(200, { 'Content-Type': 'text/html' });
-            response.end(content, 'utf-8');
+            response.end(indexContent, 'utf-8');
+          } else {
+            // Fallback to root index.html for client-side routing
+            fs.readFile(path.join(buildDir, 'index.html'), (err, rootContent) => {
+              if (err) {
+                response.writeHead(404);
+                response.end('404 Not Found');
+              } else {
+                response.writeHead(200, { 'Content-Type': 'text/html' });
+                response.end(rootContent, 'utf-8');
+              }
+            });
           }
         });
       } else {
