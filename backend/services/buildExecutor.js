@@ -1228,8 +1228,9 @@ app.prepare()
   });
 `;
 
-            await fs.writeFile(path.join(buildPath, 'server.js'), nextServerScript);
-            await onLog('info', '✓ Next.js starter script generated (uses next start)');
+                await fs.writeFile(path.join(buildPath, 'server.js'), nextServerScript);
+                await onLog('info', '✓ Next.js starter script generated (uses next start)');
+            }
         }
 
         // Get build size
