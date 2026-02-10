@@ -1001,6 +1001,10 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
             // Build locally (not in Docker) for Next.js to avoid path alias issues
             await onLog('info', `Building locally (outside Docker) to support TypeScript paths...`);
             
+            // Set basePath for Next.js so it knows it's deployed on a subpath
+            const basePath = deploymentUrlPath ? `/${deploymentUrlPath}` : '';
+            await onLog('info', `Setting Next.js basePath: ${basePath || '(root)'}`);
+            
             try {
                 const { stdout, stderr } = await execAsync(buildCommand, {
                     cwd: buildPath,
@@ -1009,7 +1013,9 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
                     env: {
                         ...process.env,
                         NODE_ENV: 'production',
-                        CI: 'false'
+                        CI: 'false',
+                        NEXT_PUBLIC_BASE_PATH: basePath,  // For Next.js runtime
+                        __NEXT_ROUTER_BASEPATH: basePath  // For Next.js build
                     }
                 });
 
