@@ -934,7 +934,10 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
         }
 
         // Execute build inside Docker container with specific Node.js version
-        if (framework !== 'static' && framework !== 'nodejs') {
+        // SKIP Docker for Next.js to avoid TypeScript path alias issues
+        const skipDockerBuild = framework === 'nextjs';
+        
+        if (!skipDockerBuild && framework !== 'static' && framework !== 'nodejs') {
             await onLog('info', `Building inside Docker container with Node.js ${nodeVersion} and ${dockerPackageManager}...`);
 
             // Ensure build command uses the correct package manager
@@ -992,6 +995,33 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
                 }
             } catch (error) {
                 await onLog('error', `Docker build failed: ${error.message}`);
+                throw error;
+            }
+        } else if (skipDockerBuild) {
+            // Build locally (not in Docker) for Next.js to avoid path alias issues
+            await onLog('info', `Building locally (outside Docker) to support TypeScript paths...`);
+            
+            try {
+                const { stdout, stderr } = await execAsync(buildCommand, {
+                    cwd: buildPath,
+                    timeout: MAX_BUILD_TIME,
+                    maxBuffer: 20 * 1024 * 1024,
+                    env: {
+                        ...process.env,
+                        NODE_ENV: 'production',
+                        CI: 'false'
+                    }
+                });
+
+                if (stdout) {
+                    const logs = stdout.split('\n').slice(-20).join('\n');
+                    await onLog('info', logs);
+                }
+                if (stderr && !stderr.includes('warning')) {
+                    await onLog('warn', stderr.substring(0, 500));
+                }
+            } catch (error) {
+                await onLog('error', `Local build failed: ${error.message}`);
                 throw error;
             }
         }
