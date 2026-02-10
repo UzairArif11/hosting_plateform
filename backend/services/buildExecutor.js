@@ -1,5 +1,6 @@
 const fs = require('fs').promises;
 const path = require('path');
+const crypto = require('crypto');
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
@@ -902,14 +903,18 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
         // Write environment variables
         const envVars = [...(project.environmentVariables || [])];
         
-        // For USER deployments (not admin demos), inject SHOW_SETUP_PAGE to allow seeding
+        // For USER deployments (not admin demos): setup/seed only for owner; public URL shows template only
         const isAdminDemo = deployment.metadata?.isAdminDemo === true;
         if (!isAdminDemo) {
             envVars.push({ key: 'NEXT_PUBLIC_SHOW_SETUP_PAGE', value: 'true' });
             envVars.push({ key: 'SEED_SECRET', value: `seed_${deployment._id.toString()}` });
-            await onLog('info', '✅ Enabled setup/seed pages for owner deployment');
+            const ownerKey = crypto.randomBytes(24).toString('hex');
+            deployment.metadata = { ...(deployment.metadata || {}), ownerKey };
+            await deployment.save();
+            envVars.push({ key: 'NEXT_PUBLIC_OWNER_KEY', value: ownerKey });
+            await onLog('info', '✅ Setup/seed enabled for owner only (admin link in dashboard)');
         } else {
-            await onLog('info', '🔒 Setup/seed pages disabled for public demo');
+            await onLog('info', '🔒 Setup/seed disabled for public demo');
         }
         
         if (envVars.length > 0) {
@@ -1151,22 +1156,21 @@ console.log('Server running at http://localhost:' + port);
             if (hasStaticExport) {
                 await onLog('info', 'Detected static export - generating lightweight static server...');
 
+                // basePath to strip from request URL if present (Nginx usually strips it; this handles edge cases)
+                const serverBasePath = deploymentUrlPath ? `/${deploymentUrlPath}` : '';
+
                 // Simple static file server for exported Next.js sites (NO app.prepare()!)
                 const staticServerScript = `
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-// Get port from args
 const args = process.argv.slice(2);
 const portIdx = args.indexOf('--port');
 const port = portIdx !== -1 ? parseInt(args[portIdx + 1]) : (process.env.PORT || 3000);
 
-// Serve from out/ directory (Next.js static export)
 const buildDir = path.join(__dirname, 'out');
-
-console.log('Starting static file server on port', port);
-console.log('Serving from:', buildDir);
+const BASE_PATH = '${serverBasePath}';
 
 const mimeTypes = {
   '.html': 'text/html',
@@ -1183,54 +1187,51 @@ const mimeTypes = {
   '.ttf': 'font/ttf'
 };
 
+function trySend(paths, cb) {
+  if (paths.length === 0) return cb();
+  const p = paths[0];
+  fs.readFile(p, (err, content) => {
+    if (!err && content) {
+      const ext = path.extname(p).toLowerCase();
+      return cb(null, content, mimeTypes[ext] || 'text/html');
+    }
+    trySend(paths.slice(1), cb);
+  });
+}
+
 http.createServer((request, response) => {
-  // Parse URL to remove query params and hash
-  const cleanUrl = request.url.split('?')[0].split('#')[0];
-  
-  let filePath = path.join(buildDir, cleanUrl === '/' ? 'index.html' : cleanUrl);
-  const extname = String(path.extname(filePath)).toLowerCase();
-  
-  // For routes without extension, try .html (Next.js static export pattern)
-  if (!extname) {
-    filePath = filePath + '.html';
+  let cleanUrl = request.url.split('?')[0].split('#')[0];
+  if (BASE_PATH && cleanUrl.startsWith(BASE_PATH)) {
+    cleanUrl = cleanUrl.slice(BASE_PATH.length) || '/';
   }
-  
-  fs.readFile(filePath, (error, content) => {
-    if (error) {
-      if (error.code == 'ENOENT') {
-        // For /about route, try /about/index.html (Next.js nested structure)
-        const indexPath = path.join(filePath.replace('.html', ''), 'index.html');
-        fs.readFile(indexPath, (err, indexContent) => {
-          if (!err) {
-            response.writeHead(200, { 'Content-Type': 'text/html' });
-            response.end(indexContent, 'utf-8');
-          } else {
-            // Fallback to root index.html for client-side routing
-            fs.readFile(path.join(buildDir, 'index.html'), (err, rootContent) => {
-              if (err) {
-                response.writeHead(404);
-                response.end('404 Not Found');
-              } else {
-                response.writeHead(200, { 'Content-Type': 'text/html' });
-                response.end(rootContent, 'utf-8');
-              }
-            });
-          }
-        });
-      } else {
-        response.writeHead(500);
-        response.end('Server Error: ' + error.code);
-      }
+  cleanUrl = cleanUrl.replace(/\\/$/, '') || '/';
+  const relPath = cleanUrl === '/' ? '' : cleanUrl.replace(/^\\//, '');
+  const hasExt = path.extname(relPath).length > 0;
+  const candidates = hasExt
+    ? [path.join(buildDir, relPath)]
+    : [
+        path.join(buildDir, relPath + '.html'),
+        path.join(buildDir, relPath, 'index.html')
+      ];
+  trySend(candidates, (err, content, contentType) => {
+    if (err || !content) {
+      fs.readFile(path.join(buildDir, 'index.html'), (e, rootContent) => {
+        if (e || !rootContent) {
+          response.writeHead(404);
+          response.end('404 Not Found');
+        } else {
+          response.writeHead(200, { 'Content-Type': 'text/html' });
+          response.end(rootContent, 'utf-8');
+        }
+      });
     } else {
-      const contentType = mimeTypes[extname] || 'application/octet-stream';
-      response.writeHead(200, { 'Content-Type': contentType });
+      response.writeHead(200, { 'Content-Type': contentType || 'text/html' });
       response.end(content, 'utf-8');
     }
   });
 }).listen(port);
 
-console.log('Static server running at http://localhost:' + port);
-console.log('Memory usage: ~50-100MB (static export - no app.prepare())');
+console.log('Static server on port', port, 'basePath:', BASE_PATH || '(root)');
 `;
 
                 await fs.writeFile(path.join(buildPath, 'server.js'), staticServerScript);

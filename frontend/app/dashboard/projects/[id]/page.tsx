@@ -170,19 +170,39 @@ export default function ProjectDetailPage() {
                 <div className="flex items-center space-x-3">
                     {/* Visit Site Button */}
                     {(currentProject.deploymentUrl || currentProject.latestDeployment?.deploymentUrl) && (
-                        <a
-                            href={
-                                (currentProject.deploymentUrl || currentProject.latestDeployment?.deploymentUrl)?.startsWith('http')
-                                    ? (currentProject.deploymentUrl || currentProject.latestDeployment?.deploymentUrl)
-                                    : `https://${currentProject.deploymentUrl || currentProject.latestDeployment?.deploymentUrl}`
-                            }
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center space-x-2 bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-lg transition-colors border border-gray-700 text-white"
-                        >
-                            <GlobeAltIcon className="h-5 w-5" />
-                            <span>Visit</span>
-                        </a>
+                        <>
+                            <a
+                                href={
+                                    (currentProject.deploymentUrl || currentProject.latestDeployment?.deploymentUrl)?.startsWith('http')
+                                        ? (currentProject.deploymentUrl || currentProject.latestDeployment?.deploymentUrl)
+                                        : `https://${currentProject.deploymentUrl || currentProject.latestDeployment?.deploymentUrl}`
+                                }
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center space-x-2 bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-lg transition-colors border border-gray-700 text-white"
+                            >
+                                <GlobeAltIcon className="h-5 w-5" />
+                                <span>Visit</span>
+                            </a>
+                            {(currentProject.latestDeployment as any)?.metadata?.ownerKey && (
+                                <a
+                                    href={(() => {
+                                        const url = (currentProject.deploymentUrl || currentProject.latestDeployment?.deploymentUrl)?.startsWith('http')
+                                            ? (currentProject.deploymentUrl || currentProject.latestDeployment?.deploymentUrl)
+                                            : `https://${currentProject.deploymentUrl || currentProject.latestDeployment?.deploymentUrl}`;
+                                        const base = (url || '').replace(/\/?$/, '');
+                                        return `${base}${base.includes('?') ? '&' : '?'}owner=${(currentProject.latestDeployment as any).metadata.ownerKey}`;
+                                    })()}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-lg transition-colors border border-indigo-500 text-white"
+                                    title="Setup / admin (sample data, config)"
+                                >
+                                    <Cog6ToothIcon className="h-5 w-5" />
+                                    <span>Setup</span>
+                                </a>
+                            )}
+                        </>
                     )}
 
                     {/* Branch Selector Dropdown */}
