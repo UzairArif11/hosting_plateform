@@ -1095,9 +1095,90 @@ console.log('Server running at http://localhost:' + port);
 
         // Generate Next.js starter script that uses Next's Node API
         if (framework === 'nextjs') {
-            await onLog('info', 'Generating Next.js starter script...');
+            // Check if this is a static export build (has out/ folder instead of .next/)
+            const hasStaticExport = await fs.access(path.join(buildPath, 'out'))
+                .then(() => true)
+                .catch(() => false);
 
-            const nextServerScript = `
+            if (hasStaticExport) {
+                await onLog('info', 'Detected static export - generating lightweight static server...');
+
+                // Simple static file server for exported Next.js sites (NO app.prepare()!)
+                const staticServerScript = `
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+
+// Get port from args
+const args = process.argv.slice(2);
+const portIdx = args.indexOf('--port');
+const port = portIdx !== -1 ? parseInt(args[portIdx + 1]) : (process.env.PORT || 3000);
+
+// Serve from out/ directory (Next.js static export)
+const buildDir = path.join(__dirname, 'out');
+
+console.log('Starting static file server on port', port);
+console.log('Serving from:', buildDir);
+
+const mimeTypes = {
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.css': 'text/css',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf'
+};
+
+http.createServer((request, response) => {
+  let filePath = path.join(buildDir, request.url === '/' ? 'index.html' : request.url);
+  const extname = String(path.extname(filePath)).toLowerCase();
+  
+  // If no extension, try .html
+  if (!extname && !filePath.endsWith('.html')) {
+    filePath = filePath + '.html';
+  }
+  
+  fs.readFile(filePath, (error, content) => {
+    if (error) {
+      if (error.code == 'ENOENT') {
+        // Try index.html for SPA fallback
+        fs.readFile(path.join(buildDir, 'index.html'), (error, content) => {
+          if (error) {
+            response.writeHead(404);
+            response.end('404 Not Found');
+          } else {
+            response.writeHead(200, { 'Content-Type': 'text/html' });
+            response.end(content, 'utf-8');
+          }
+        });
+      } else {
+        response.writeHead(500);
+        response.end('Server Error: ' + error.code);
+      }
+    } else {
+      const contentType = mimeTypes[extname] || 'application/octet-stream';
+      response.writeHead(200, { 'Content-Type': contentType });
+      response.end(content, 'utf-8');
+    }
+  });
+}).listen(port);
+
+console.log('Static server running at http://localhost:' + port);
+console.log('Memory usage: ~50-100MB (static export - no app.prepare())');
+`;
+
+                await fs.writeFile(path.join(buildPath, 'server.js'), staticServerScript);
+                await onLog('info', '✓ Lightweight static server generated (no app.prepare(), ~50-100MB RAM)');
+            } else {
+                await onLog('info', 'Generating Next.js starter script...');
+
+                const nextServerScript = `
 const http = require('http');
 const next = require('next');
 
