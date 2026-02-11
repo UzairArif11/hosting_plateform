@@ -1538,6 +1538,19 @@ function generateDockerfile(framework, outputDir) {
     const dockerfiles = {
         nextjs: `
 FROM node:18-slim
+
+# Accept build-time arguments for Next.js environment variables
+ARG NEXT_PUBLIC_BASE_PATH
+ARG NEXT_PUBLIC_SHOW_SETUP_PAGE
+ARG NEXT_PUBLIC_OWNER_KEY
+ARG SEED_SECRET
+
+# Expose as environment variables so Next.js can embed them in client bundles
+ENV NEXT_PUBLIC_BASE_PATH=$NEXT_PUBLIC_BASE_PATH
+ENV NEXT_PUBLIC_SHOW_SETUP_PAGE=$NEXT_PUBLIC_SHOW_SETUP_PAGE
+ENV NEXT_PUBLIC_OWNER_KEY=$NEXT_PUBLIC_OWNER_KEY
+ENV SEED_SECRET=$SEED_SECRET
+
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --only=production
