@@ -103,7 +103,7 @@ export default function TemplateManagement() {
     useEffect(() => {
         // Reset deploying state on mount to prevent stuck loading after page refresh
         setDemoDeploying(false);
-        
+
         fetchTemplates();
 
         // Connect to Socket.IO for real-time updates with reconnection
@@ -218,7 +218,7 @@ export default function TemplateManagement() {
                     console.log('🔄 Polling for template updates (fallback)...');
                     // Refetch templates to get latest status
                     fetchTemplates();
-                    
+
                     // Check for deployments stuck for more than 10 minutes (timeout)
                     prev.forEach(async (t) => {
                         if (t.demoStatus === 'deploying') {
@@ -277,7 +277,7 @@ export default function TemplateManagement() {
             // Need to support ?includeUnpublished=true
             const res = await api.get('/templates?includeUnpublished=true');
             const templates = res.data.templates || [];
-            
+
             // Detect stuck deployments (deploying for more than 10 minutes indicates failure)
             const stuckTemplates = templates.filter((t: Template) => {
                 if (t.demoStatus === 'deploying') {
@@ -286,11 +286,11 @@ export default function TemplateManagement() {
                 }
                 return false;
             });
-            
+
             if (stuckTemplates.length > 0) {
                 console.log(`⚠️ Found ${stuckTemplates.length} templates in deploying state - will auto-refresh`);
             }
-            
+
             setTemplates(templates);
             setLoading(false);
         } catch (error) {
@@ -444,7 +444,7 @@ export default function TemplateManagement() {
         } catch (err) {
             console.error('Failed to clear error state:', err);
         }
-        
+
         // Clear previous logs and deploy again
         setDeploymentLogs([]);
         handleDeployDemo(template);
@@ -452,7 +452,7 @@ export default function TemplateManagement() {
 
     const handleDeleteDemo = async (template: Template) => {
         if (!confirm(`Delete demo deployment for "${template.displayName}"? This will remove the live demo.`)) return;
-        
+
         try {
             toast.loading('Deleting demo deployment...');
             await api.delete(`/templates/${template._id}/remove-demo`);
@@ -504,7 +504,7 @@ export default function TemplateManagement() {
                 // Open logs modal automatically
                 setLogsTemplate(demoTemplate);
                 setShowLogsModal(true);
-                
+
                 // Keep demoDeploying true - Socket.IO will set it to false on success/failure
             }
         } catch (error: any) {
@@ -555,13 +555,25 @@ export default function TemplateManagement() {
                     <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white">Template Manager</h1>
                     <p className="text-gray-400 mt-1 sm:mt-2 text-sm sm:text-base">Manage deployment templates and starter kits</p>
                 </div>
-                <button
-                    onClick={handleCreateNew}
-                    className="flex items-center justify-center space-x-2 bg-purple-600 hover:bg-purple-700 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl transition shadow-lg w-full sm:w-auto text-sm sm:text-base"
-                >
-                    <PlusIcon className="h-4 w-4 sm:h-5 sm:w-5" />
-                    <span>Add Template</span>
-                </button>
+                <div className="flex gap-2 w-full sm:w-auto">
+                    <button
+                        onClick={fetchTemplates}
+                        className="flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl transition shadow-lg flex-1 sm:flex-initial text-sm sm:text-base"
+                        title="Refresh to see all deployment URLs from database"
+                    >
+                        <svg className="h-4 w-4 sm:h-5 sm:w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        <span>Refresh URLs</span>
+                    </button>
+                    <button
+                        onClick={handleCreateNew}
+                        className="flex items-center justify-center space-x-2 bg-purple-600 hover:bg-purple-700 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl transition shadow-lg flex-1 sm:flex-initial text-sm sm:text-base"
+                    >
+                        <PlusIcon className="h-4 w-4 sm:h-5 sm:w-5" />
+                        <span>Add Template</span>
+                    </button>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -648,6 +660,22 @@ export default function TemplateManagement() {
                                                 </svg>
                                                 View Live Demo
                                             </a>
+                                            {(template as any).demoDeploymentId?.metadata?.ownerKey && (
+                                                <a
+                                                    href={`${template.demoDeploymentUrl}/setup?owner=${(template as any).demoDeploymentId.metadata.ownerKey}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium py-2 px-3 rounded-lg transition flex items-center justify-center gap-1.5"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    title="Access setup page with owner authentication"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                    </svg>
+                                                    Setup Page
+                                                </a>
+                                            )}
                                             <button
                                                 onClick={() => handleDeleteDemo(template)}
                                                 className="bg-red-600/30 hover:bg-red-600/50 text-red-300 text-xs py-2 px-3 rounded-lg transition flex items-center gap-1"
@@ -731,8 +759,8 @@ export default function TemplateManagement() {
                                             : 'bg-blue-600/20 hover:bg-blue-600/40 text-blue-400'
                                         }`}
                                     title={
-                                        template.demoStatus === 'deploying' 
-                                            ? 'Deployment in progress...' 
+                                        template.demoStatus === 'deploying'
+                                            ? 'Deployment in progress...'
                                             : template.demoStatus === 'failed'
                                                 ? 'Retry deployment'
                                                 : 'Deploy as live demo'

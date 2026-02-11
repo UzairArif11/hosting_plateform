@@ -14,7 +14,9 @@ const DEPLOYMENT_TIMEOUT_MS = 10 * 60 * 1000;
 // Admin: Get all templates
 router.get('/', requireAuth, requireAdmin, async (req, res) => {
     try {
-        const templates = await Template.find().sort({ createdAt: -1 });
+        const templates = await Template.find()
+            .populate('demoDeploymentId', 'metadata deploymentUrl status') // Include deployment info with ownerKey
+            .sort({ createdAt: -1 });
         res.json({ success: true, templates });
     } catch (error) {
         logger.error('Failed to fetch templates:', error);
@@ -138,15 +140,15 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
 
         // Deploy template using the proper build queue system
         // This will handle Socket.IO events at the RIGHT time (after deployment completes)
-        
+
         // CRITICAL FIX: Add DATABASE_URL for Prisma templates
         const envVars = req.body.environmentVariables || [];
-        
+
         // Check if template needs DATABASE_URL (has Prisma)
-        const needsDatabase = template.environmentVariables?.some(v => 
+        const needsDatabase = template.environmentVariables?.some(v =>
             v.key === 'DATABASE_URL' || v.key.includes('DATABASE')
         );
-        
+
         // If DATABASE_URL not provided, add default SQLite file path
         if (needsDatabase && !envVars.some(v => v.key === 'DATABASE_URL')) {
             envVars.push({
@@ -155,7 +157,7 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
             });
             logger.info(`✅ Added DATABASE_URL for Prisma template`);
         }
-        
+
         const result = await templateDeployer.deployTemplate({
             template,
             user: req.user,
@@ -202,7 +204,7 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
         }
     } catch (error) {
         logger.error('Failed to start template demo deployment:', error);
-        
+
         // Update template with error
         try {
             const template = await Template.findById(req.params.id);
@@ -214,7 +216,7 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
         } catch (updateError) {
             logger.error('Failed to update template with error:', updateError);
         }
-        
+
         res.status(500).json({ success: false, error: 'Failed to start template demo deployment' });
     }
 });
@@ -223,7 +225,7 @@ router.post('/:id/deploy-demo', requireAuth, requireAdmin, async (req, res) => {
 router.post('/:id/check-demo-timeout', requireAuth, requireAdmin, async (req, res) => {
     try {
         const template = await Template.findById(req.params.id);
-        
+
         if (!template) {
             return res.status(404).json({ success: false, error: 'Template not found' });
         }
@@ -236,10 +238,10 @@ router.post('/:id/check-demo-timeout', requireAuth, requireAdmin, async (req, re
         // Check if deployment exists and how long it's been running
         if (template.demoDeploymentId) {
             const deployment = await Deployment.findById(template.demoDeploymentId);
-            
+
             if (deployment) {
                 const deploymentAge = Date.now() - new Date(deployment.createdAt).getTime();
-                
+
                 if (deploymentAge > DEPLOYMENT_TIMEOUT_MS) {
                     // Deployment timed out - mark as failed
                     logger.warn(`⏱️ Demo deployment timed out for template ${template.name}`, {
@@ -274,8 +276,8 @@ router.post('/:id/check-demo-timeout', requireAuth, requireAdmin, async (req, re
                         });
                     }
 
-                    return res.json({ 
-                        success: true, 
+                    return res.json({
+                        success: true,
                         message: 'Deployment marked as failed due to timeout',
                         timedOut: true
                     });
@@ -299,8 +301,8 @@ router.post('/:id/check-demo-timeout', requireAuth, requireAdmin, async (req, re
                     });
                 }
 
-                return res.json({ 
-                    success: true, 
+                return res.json({
+                    success: true,
                     message: 'Template status reset due to missing deployment',
                     reset: true
                 });
@@ -313,8 +315,8 @@ router.post('/:id/check-demo-timeout', requireAuth, requireAdmin, async (req, re
             template.demoProgress = 0;
             await template.save();
 
-            return res.json({ 
-                success: true, 
+            return res.json({
+                success: true,
                 message: 'Template status reset',
                 reset: true
             });
@@ -473,8 +475,8 @@ router.post('/:id/deploy', requireAuth, async (req, res) => {
         }
     } catch (error) {
         logger.error('Failed to deploy template:', error);
-        res.status(500).json({ 
-            success: false, 
+        res.status(500).json({
+            success: false,
             error: error.message || 'Failed to deploy template'
         });
     }

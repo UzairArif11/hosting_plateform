@@ -66,26 +66,26 @@ async function executeBuild(deploymentId, callbacks = {}) {
         try {
             // Check if prisma schema exists
             await fs.access(prismaSchemaPath);
-            
+
             // File exists, proceed with fix
             await onLog('info', '🔧 Checking Prisma schema for invalid syntax...');
-            
+
             let schemaContent = await fs.readFile(prismaSchemaPath, 'utf8');
-            
+
             // Check for invalid conditional syntax in url field
-            if (schemaContent.includes('env("DATABASE_URL") != ""') || 
+            if (schemaContent.includes('env("DATABASE_URL") != ""') ||
                 schemaContent.includes('env("DATABASE_URL")!=""') ||
                 schemaContent.includes('? env("DATABASE_URL") :')) {
-                
+
                 await onLog('info', '⚠️  Invalid Prisma syntax detected - auto-fixing...');
-                
+
                 // Fix: Replace the invalid conditional with simple env variable
                 // This regex matches the exact pattern we saw in the template
                 schemaContent = schemaContent.replace(
                     /url\s*=\s*env\("DATABASE_URL"\)\s*!=\s*""\s*\?\s*env\("DATABASE_URL"\)\s*:\s*"[^"]+"/g,
                     'url = env("DATABASE_URL")'
                 );
-                
+
                 // Write fixed schema back
                 await fs.writeFile(prismaSchemaPath, schemaContent, 'utf8');
                 await onLog('info', '✅ Prisma schema auto-fixed - conditional syntax removed');
@@ -171,7 +171,7 @@ async function executeBuild(deploymentId, callbacks = {}) {
                         logger.info(`📡 Emitting template-demo-status (success) for ${template._id}: ${deploymentInfo.url}`);
                         io.emit('template-demo-status', payload);
                     }
-                    
+
                     logger.info(`Admin ${deployment.userId} deployed demo for template ${template.name} at ${deploymentInfo.url}`);
                 }
             } catch (err) {
@@ -241,22 +241,22 @@ async function executeBuild(deploymentId, callbacks = {}) {
         try {
             const Template = require('../models/Template');
             const Project = require('../models/Project');
-            
+
             if (deployment && deployment.projectId) {
                 const project = await Project.findById(deployment.projectId);
-                
+
                 // Check if this is a demo deployment by finding template with matching demoDeploymentId
                 const template = await Template.findOne({ demoDeploymentId: deploymentId });
-                
+
                 if (template) {
                     logger.error(`🔧 FOUND template via demoDeploymentId lookup: ${template.displayName}`);
-                    
+
                     // Update template status
                     template.demoStatus = 'failed';
                     template.demoError = error.message || 'Deployment failed';
                     template.demoProgress = 0;
                     await template.save();
-                    
+
                     // Emit socket event
                     const io = websocketService.getIO();
                     if (io) {
@@ -271,7 +271,7 @@ async function executeBuild(deploymentId, callbacks = {}) {
                         io.emit('template-demo-status', payload);
                         io.sockets.emit('template-demo-status', payload);
                     }
-                    
+
                     logger.error(`✅ Template status updated via direct lookup`);
                 } else {
                     logger.warn(`No template found with demoDeploymentId: ${deploymentId}`);
@@ -320,16 +320,16 @@ async function executeBuild(deploymentId, callbacks = {}) {
                         };
                         logger.error(`📡 EMITTING template-demo-status (failed) for ${template._id}: ${error.message}`);
                         io.emit('template-demo-status', payload);
-                        
+
                         // Also emit to specific room if exists
                         io.to(`template-${template._id}`).emit('template-demo-status', payload);
-                        
+
                         // Emit globally to ensure frontend receives it
                         io.sockets.emit('template-demo-status', payload);
                     } else {
                         logger.error(`❌ Socket.IO not available to emit template-demo-status`);
                     }
-                    
+
                     logger.error(`❌ Admin demo deployment failed for template: ${template.name}`, {
                         templateId: template._id,
                         error: error.message
@@ -353,14 +353,14 @@ async function executeBuild(deploymentId, callbacks = {}) {
                 try {
                     const Project = require('../models/Project');
                     const project = await Project.findById(deployment.projectId);
-                    
+
                     if (project?.metadata?.deployedFromTemplate) {
                         const Template = require('../models/Template');
                         const template = await Template.findById(project.metadata.deployedFromTemplate);
-                        
+
                         if (template && template.demoDeploymentId?.toString() === deployment._id.toString()) {
                             logger.info(`📡 Found template via project metadata - updating status`);
-                            
+
                             template.demoStatus = 'failed';
                             template.demoError = error.message || 'Deployment failed';
                             template.demoProgress = 0;
@@ -902,21 +902,26 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
 
         // Write environment variables
         const envVars = [...(project.environmentVariables || [])];
-        
-        // For USER deployments (not admin demos): setup/seed only for owner; public URL shows template only
+
+        // Enable setup/seed for ALL deployments (both user and admin demos)
+        // Users access via owner key - admin demos show CRUD functionality
         const isAdminDemo = deployment.metadata?.isAdminDemo === true;
-        if (!isAdminDemo) {
-            envVars.push({ key: 'NEXT_PUBLIC_SHOW_SETUP_PAGE', value: 'true' });
-            envVars.push({ key: 'SEED_SECRET', value: `seed_${deployment._id.toString()}` });
-            const ownerKey = crypto.randomBytes(24).toString('hex');
-            deployment.metadata = { ...(deployment.metadata || {}), ownerKey };
-            await deployment.save();
-            envVars.push({ key: 'NEXT_PUBLIC_OWNER_KEY', value: ownerKey });
-            await onLog('info', '✅ Setup/seed enabled for owner only (admin link in dashboard)');
+
+        envVars.push({ key: 'NEXT_PUBLIC_SHOW_SETUP_PAGE', value: 'true' });
+        envVars.push({ key: 'SEED_SECRET', value: `seed_${deployment._id.toString()}` });
+
+        const ownerKey = crypto.randomBytes(24).toString('hex');
+        deployment.metadata = { ...(deployment.metadata || {}), ownerKey };
+        await deployment.save();
+        envVars.push({ key: 'NEXT_PUBLIC_OWNER_KEY', value: ownerKey });
+
+        if (isAdminDemo) {
+            await onLog('info', '✅ Setup/seed enabled for admin demo (CRUD features accessible)');
         } else {
-            await onLog('info', '🔒 Setup/seed disabled for public demo');
+            await onLog('info', '✅ Setup/seed enabled for owner only (admin link in dashboard)');
         }
-        
+
+
         if (envVars.length > 0) {
             const envContent = envVars
                 .map(env => `${env.key}=${env.value}`)
@@ -953,7 +958,7 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
         // Execute build inside Docker container with specific Node.js version
         // SKIP Docker for Next.js to avoid TypeScript path alias issues
         const skipDockerBuild = framework === 'nextjs';
-        
+
         if (!skipDockerBuild && framework !== 'static' && framework !== 'nodejs') {
             await onLog('info', `Building inside Docker container with Node.js ${nodeVersion} and ${dockerPackageManager}...`);
 
@@ -1017,11 +1022,11 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
         } else if (skipDockerBuild) {
             // Build locally (not in Docker) for Next.js to avoid path alias issues
             await onLog('info', `Building locally (outside Docker) to support TypeScript paths...`);
-            
+
             // Set basePath for Next.js so it knows it's deployed on a subpath
             const basePath = deploymentUrlPath ? `/${deploymentUrlPath}` : '';
             await onLog('info', `Setting Next.js basePath: ${basePath || '(root)'}`);
-            
+
             try {
                 const { stdout, stderr } = await execAsync(buildCommand, {
                     cwd: buildPath,
