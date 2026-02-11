@@ -23,10 +23,10 @@ async function ensureDeploymentConfigFile(ssh, serverKey, domain) {
 
     // Check if config file exists
     const checkResult = await ssh.execCommand(`sudo test -f ${configPath} && echo "exists" || echo "missing"`);
-    
+
     if (checkResult.stdout.trim() === 'missing') {
         logger.info(`Creating deployment config file: ${configFileName}`);
-        
+
         // Create the deployment config file
         const configContent = '# User Deployments Configuration for ' + domain + '\n' +
             '# This file is managed by nginxRouter.js - DO NOT manually edit\n' +
@@ -75,11 +75,11 @@ async function ensureDeploymentConfigFile(ssh, serverKey, domain) {
         // Write config file
         const tempFile = path.join(os.tmpdir(), `nginx-${configFileName}-${Date.now()}`);
         fs.writeFileSync(tempFile, configContent);
-        
+
         await ssh.putFile(tempFile, `/tmp/${configFileName}`);
         await ssh.execCommand(`sudo mv /tmp/${configFileName} ${configPath}`);
         try { fs.unlinkSync(tempFile); } catch (e) { }
-        
+
         logger.info(`✅ Created deployment config file: ${configFileName}`);
     }
 
@@ -158,20 +158,17 @@ async function updateNginxRouting(projectName, port, serverHost, serverKey, depl
         let config = readResult.stdout;
 
         // Create location block
-        // IMPORTANT: We serve all apps from a sub-path like /demosmartpor-xxxx/.
-        // To keep Next.js simple (no hard basePath assumptions), we strip the
-        // prefix before proxying so the app always sees requests starting at `/`.
+        // IMPORTANT: Next.js templates have basePath configured in next.config.js.
+        // We do NOT strip the prefix - Next.js handles basePath internally.
         //
         // Example:
-        //   https://ec2.foodpanda.site/demosmartpor-1234/       → http://localhost:PORT/
-        //   https://ec2.foodpanda.site/demosmartpor-1234/_next → http://localhost:PORT/_next
+        //   https://ec2.foodpanda.site/demosmartpor-1234/       → http://localhost:PORT/demosmartpor-1234/
+        //   https://ec2.foodpanda.site/demosmartpor-1234/_next → http://localhost:PORT/demosmartpor-1234/_next
         //
-        // This avoids 404s and missing CSS/JS when templates are not configured
-        // with a basePath, and works for both pages and static assets.
+        // Next.js basePath config makes the app serve all assets and pages from the subpath.
         const locationBlock = `    # ${projectName} - Port ${port} - ${deploymentId}
     location /${urlPath}/ {
-        # Strip the deployment prefix so the app sees root-relative paths
-        rewrite ^\\/${urlPath}(.*)$ $1 break;
+        # Proxy directly - Next.js basePath handles the sub-path
 
         proxy_pass http://localhost:${port};
         proxy_http_version 1.1;
