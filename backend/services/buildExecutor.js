@@ -903,6 +903,11 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
         // Write environment variables
         const envVars = [...(project.environmentVariables || [])];
 
+        // Set BASE_PATH for templates to work with path-based routing (Nginx strips this prefix)
+        if (deploymentUrlPath) {
+            envVars.push({ key: 'NEXT_PUBLIC_BASE_PATH', value: `/${deploymentUrlPath}` });
+        }
+
         // Enable setup/seed for ALL deployments (both user and admin demos)
         // Users access via owner key - admin demos show CRUD functionality
         const isAdminDemo = deployment.metadata?.isAdminDemo === true;
