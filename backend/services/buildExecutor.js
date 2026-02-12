@@ -943,71 +943,69 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
             await onLog('info', `✓ Environment variables written (${envVars.length} vars to .env + .env.production.local)`);
         }
 
-    }
-
         // Determine Node.js version for Docker build
         const nodeVersion = project.buildConfig?.nodeVersion || template?.buildConfig?.nodeVersion || '20';
-    await onLog('info', `Using Node.js version: ${nodeVersion} (in Docker)`);
+        await onLog('info', `Using Node.js version: ${nodeVersion} (in Docker)`);
 
-    // Use slim instead of alpine for better compatibility (Next.js SWC on ARM64, OpenSSL)
-    const dockerImage = `node:${nodeVersion}-slim`;
+        // Use slim instead of alpine for better compatibility (Next.js SWC on ARM64, OpenSSL)
+        const dockerImage = `node:${nodeVersion}-slim`;
 
-    // Detect package manager from lock files
-    let dockerPackageManager = 'npm';
-    let dockerInstallCmd = 'npm install --legacy-peer-deps';
+        // Detect package manager from lock files
+        let dockerPackageManager = 'npm';
+        let dockerInstallCmd = 'npm install --legacy-peer-deps';
 
-    try {
-        if (await fs.access(path.join(buildPath, 'pnpm-lock.yaml')).then(() => true).catch(() => false)) {
-            dockerPackageManager = 'pnpm';
-            dockerInstallCmd = 'corepack enable && pnpm install --frozen-lockfile';
-            await onLog('info', 'Detected pnpm-lock.yaml, will use pnpm in Docker');
-        } else if (await fs.access(path.join(buildPath, 'yarn.lock')).then(() => true).catch(() => false)) {
-            dockerPackageManager = 'yarn';
-            dockerInstallCmd = 'corepack enable && yarn install --frozen-lockfile';
-            await onLog('info', 'Detected yarn.lock, will use yarn in Docker');
-        }
-    } catch (err) {
-        // Ignore errors, default to npm
-    }
-
-    // Execute build inside Docker container with specific Node.js version
-    // SKIP Docker for Next.js to avoid TypeScript path alias issues
-    const skipDockerBuild = framework === 'nextjs';
-
-    if (!skipDockerBuild && framework !== 'static' && framework !== 'nodejs') {
-        await onLog('info', `Building inside Docker container with Node.js ${nodeVersion} and ${dockerPackageManager}...`);
-
-        // Ensure build command uses the correct package manager
-        let dockerBuildCmd = buildCommand;
-
-        // If using pnpm but build command starts with npm/npx, replace it
-        if (dockerPackageManager === 'pnpm' && dockerBuildCmd.startsWith('npx ')) {
-            dockerBuildCmd = dockerBuildCmd.replace(/^npx /, 'pnpm exec ');
-            await onLog('info', `Converted build command for pnpm: ${dockerBuildCmd}`);
-        } else if (dockerPackageManager === 'pnpm' && dockerBuildCmd.startsWith('npm run ')) {
-            dockerBuildCmd = dockerBuildCmd.replace(/^npm run /, 'pnpm ');
-            await onLog('info', `Converted build command for pnpm: ${dockerBuildCmd}`);
-        }
-
-        // Check if Prisma is used (schema.prisma exists)
-        let hasPrisma = false;
         try {
-            await fs.access(path.join(buildPath, 'prisma', 'schema.prisma'));
-            hasPrisma = true;
-            await onLog('info', '✓ Prisma detected - client already generated locally');
+            if (await fs.access(path.join(buildPath, 'pnpm-lock.yaml')).then(() => true).catch(() => false)) {
+                dockerPackageManager = 'pnpm';
+                dockerInstallCmd = 'corepack enable && pnpm install --frozen-lockfile';
+                await onLog('info', 'Detected pnpm-lock.yaml, will use pnpm in Docker');
+            } else if (await fs.access(path.join(buildPath, 'yarn.lock')).then(() => true).catch(() => false)) {
+                dockerPackageManager = 'yarn';
+                dockerInstallCmd = 'corepack enable && yarn install --frozen-lockfile';
+                await onLog('info', 'Detected yarn.lock, will use yarn in Docker');
+            }
         } catch (err) {
-            // No Prisma schema found
+            // Ignore errors, default to npm
         }
 
-        // Build command sequence
-        // Note: Prisma client already generated locally during install phase
-        // Docker build just runs the build command with pre-generated Prisma client
-        const buildSequence = dockerBuildCmd;
+        // Execute build inside Docker container with specific Node.js version
+        // SKIP Docker for Next.js to avoid TypeScript path alias issues
+        const skipDockerBuild = framework === 'nextjs';
 
-        // Build command to run inside Docker with corepack for pnpm/yarn
-        // We no longer set any basePath env here; Next.js builds for root
-        // and Nginx handles sub-path routing via rewrite rules.
-        const dockerBuildCommand = `docker run --rm \
+        if (!skipDockerBuild && framework !== 'static' && framework !== 'nodejs') {
+            await onLog('info', `Building inside Docker container with Node.js ${nodeVersion} and ${dockerPackageManager}...`);
+
+            // Ensure build command uses the correct package manager
+            let dockerBuildCmd = buildCommand;
+
+            // If using pnpm but build command starts with npm/npx, replace it
+            if (dockerPackageManager === 'pnpm' && dockerBuildCmd.startsWith('npx ')) {
+                dockerBuildCmd = dockerBuildCmd.replace(/^npx /, 'pnpm exec ');
+                await onLog('info', `Converted build command for pnpm: ${dockerBuildCmd}`);
+            } else if (dockerPackageManager === 'pnpm' && dockerBuildCmd.startsWith('npm run ')) {
+                dockerBuildCmd = dockerBuildCmd.replace(/^npm run /, 'pnpm ');
+                await onLog('info', `Converted build command for pnpm: ${dockerBuildCmd}`);
+            }
+
+            // Check if Prisma is used (schema.prisma exists)
+            let hasPrisma = false;
+            try {
+                await fs.access(path.join(buildPath, 'prisma', 'schema.prisma'));
+                hasPrisma = true;
+                await onLog('info', '✓ Prisma detected - client already generated locally');
+            } catch (err) {
+                // No Prisma schema found
+            }
+
+            // Build command sequence
+            // Note: Prisma client already generated locally during install phase
+            // Docker build just runs the build command with pre-generated Prisma client
+            const buildSequence = dockerBuildCmd;
+
+            // Build command to run inside Docker with corepack for pnpm/yarn
+            // We no longer set any basePath env here; Next.js builds for root
+            // and Nginx handles sub-path routing via rewrite rules.
+            const dockerBuildCommand = `docker run --rm \
                 -v "${buildPath}:/app" \
                 -w /app \
                 -e NODE_ENV=production \
@@ -1016,70 +1014,70 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
                 ${dockerImage} \
                 sh -c "${buildSequence}"`;
 
-        try {
-            const { stdout, stderr } = await execAsync(dockerBuildCommand, {
-                timeout: MAX_BUILD_TIME,
-                maxBuffer: 20 * 1024 * 1024, // 20MB
-                shell: '/bin/bash'
-            });
+            try {
+                const { stdout, stderr } = await execAsync(dockerBuildCommand, {
+                    timeout: MAX_BUILD_TIME,
+                    maxBuffer: 20 * 1024 * 1024, // 20MB
+                    shell: '/bin/bash'
+                });
 
-            if (stdout) {
-                const logs = stdout.split('\n').slice(-20).join('\n'); // Last 20 lines
-                await onLog('info', logs);
-            }
-            if (stderr && !stderr.includes('warning')) {
-                await onLog('warn', stderr.substring(0, 500));
-            }
-        } catch (error) {
-            await onLog('error', `Docker build failed: ${error.message}`);
-            throw error;
-        }
-    } else if (skipDockerBuild) {
-        // Build locally (not in Docker) for Next.js to avoid path alias issues
-        await onLog('info', `Building locally (outside Docker) to support TypeScript paths...`);
-
-        // Set basePath for Next.js so it knows it's deployed on a subpath
-        const basePath = deploymentUrlPath ? `/${deploymentUrlPath}` : '';
-        await onLog('info', `Setting Next.js basePath: ${basePath || '(root)'}`);
-
-        try {
-            const { stdout, stderr } = await execAsync(buildCommand, {
-                cwd: buildPath,
-                timeout: MAX_BUILD_TIME,
-                maxBuffer: 20 * 1024 * 1024,
-                env: {
-                    ...process.env,
-                    NODE_ENV: 'production',
-                    CI: 'false',
-                    NEXT_PUBLIC_BASE_PATH: basePath,  // For Next.js runtime
-                    __NEXT_ROUTER_BASEPATH: basePath  // For Next.js build
+                if (stdout) {
+                    const logs = stdout.split('\n').slice(-20).join('\n'); // Last 20 lines
+                    await onLog('info', logs);
                 }
-            });
+                if (stderr && !stderr.includes('warning')) {
+                    await onLog('warn', stderr.substring(0, 500));
+                }
+            } catch (error) {
+                await onLog('error', `Docker build failed: ${error.message}`);
+                throw error;
+            }
+        } else if (skipDockerBuild) {
+            // Build locally (not in Docker) for Next.js to avoid path alias issues
+            await onLog('info', `Building locally (outside Docker) to support TypeScript paths...`);
 
-            if (stdout) {
-                const logs = stdout.split('\n').slice(-20).join('\n');
-                await onLog('info', logs);
+            // Set basePath for Next.js so it knows it's deployed on a subpath
+            const basePath = deploymentUrlPath ? `/${deploymentUrlPath}` : '';
+            await onLog('info', `Setting Next.js basePath: ${basePath || '(root)'}`);
+
+            try {
+                const { stdout, stderr } = await execAsync(buildCommand, {
+                    cwd: buildPath,
+                    timeout: MAX_BUILD_TIME,
+                    maxBuffer: 20 * 1024 * 1024,
+                    env: {
+                        ...process.env,
+                        NODE_ENV: 'production',
+                        CI: 'false',
+                        NEXT_PUBLIC_BASE_PATH: basePath,  // For Next.js runtime
+                        __NEXT_ROUTER_BASEPATH: basePath  // For Next.js build
+                    }
+                });
+
+                if (stdout) {
+                    const logs = stdout.split('\n').slice(-20).join('\n');
+                    await onLog('info', logs);
+                }
+                if (stderr && !stderr.includes('warning')) {
+                    await onLog('warn', stderr.substring(0, 500));
+                }
+            } catch (error) {
+                await onLog('error', `Local build failed: ${error.message}`);
+                throw error;
             }
-            if (stderr && !stderr.includes('warning')) {
-                await onLog('warn', stderr.substring(0, 500));
-            }
-        } catch (error) {
-            await onLog('error', `Local build failed: ${error.message}`);
-            throw error;
         }
-    }
 
-    const buildTime = Date.now() - startTime;
-    deployment.buildDuration = buildTime;
-    await deployment.save();
+        const buildTime = Date.now() - startTime;
+        deployment.buildDuration = buildTime;
+        await deployment.save();
 
-    await onLog('info', `✓ Build completed in ${(buildTime / 1000).toFixed(2)}s`);
+        await onLog('info', `✓ Build completed in ${(buildTime / 1000).toFixed(2)}s`);
 
-    // Generate server.js for static sites (React, Vue, etc.) - NOT for Next.js
-    if (['react', 'vue', 'angular', 'static', 'vite', 'cra'].includes(framework)) {
-        await onLog('info', 'Generating zero-dependency server.js for static serving...');
+        // Generate server.js for static sites (React, Vue, etc.) - NOT for Next.js
+        if (['react', 'vue', 'angular', 'static', 'vite', 'cra'].includes(framework)) {
+            await onLog('info', 'Generating zero-dependency server.js for static serving...');
 
-        const serverScript = `
+            const serverScript = `
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -1152,35 +1150,35 @@ http.createServer(function (request, response) {
 }).listen(port);
 console.log('Server running at http://localhost:' + port);
 `;
-        // Write server.js to the ROOT directory for remote build compatibility
-        // This ensures it gets copied to the container and can find the future outputDir
-        // const actualOutputDir = path.join(buildPath, outputDir);
+            // Write server.js to the ROOT directory for remote build compatibility
+            // This ensures it gets copied to the container and can find the future outputDir
+            // const actualOutputDir = path.join(buildPath, outputDir);
 
-        // Ensure output dir exists (it should after build)
-        try {
-            // await fs.access(actualOutputDir);
-            await fs.writeFile(path.join(buildPath, 'server.js'), serverScript);
-            await onLog('info', `✓ server.js generated in root serving ./${outputDir}`);
-        } catch (err) {
-            await onLog('warn', `Error generating server.js: ${err.message}`);
+            // Ensure output dir exists (it should after build)
+            try {
+                // await fs.access(actualOutputDir);
+                await fs.writeFile(path.join(buildPath, 'server.js'), serverScript);
+                await onLog('info', `✓ server.js generated in root serving ./${outputDir}`);
+            } catch (err) {
+                await onLog('warn', `Error generating server.js: ${err.message}`);
+            }
         }
-    }
 
-    // Generate Next.js starter script that uses Next's Node API
-    if (framework === 'nextjs') {
-        // Check if this is a static export build (has out/ folder instead of .next/)
-        const hasStaticExport = await fs.access(path.join(buildPath, 'out'))
-            .then(() => true)
-            .catch(() => false);
+        // Generate Next.js starter script that uses Next's Node API
+        if (framework === 'nextjs') {
+            // Check if this is a static export build (has out/ folder instead of .next/)
+            const hasStaticExport = await fs.access(path.join(buildPath, 'out'))
+                .then(() => true)
+                .catch(() => false);
 
-        if (hasStaticExport) {
-            await onLog('info', 'Detected static export - generating lightweight static server...');
+            if (hasStaticExport) {
+                await onLog('info', 'Detected static export - generating lightweight static server...');
 
-            // basePath to strip from request URL if present (Nginx usually strips it; this handles edge cases)
-            const serverBasePath = deploymentUrlPath ? `/${deploymentUrlPath}` : '';
+                // basePath to strip from request URL if present (Nginx usually strips it; this handles edge cases)
+                const serverBasePath = deploymentUrlPath ? `/${deploymentUrlPath}` : '';
 
-            // Simple static file server for exported Next.js sites (NO app.prepare()!)
-            const staticServerScript = `
+                // Simple static file server for exported Next.js sites (NO app.prepare()!)
+                const staticServerScript = `
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -1254,12 +1252,12 @@ http.createServer((request, response) => {
 console.log('Static server on port', port, 'basePath:', BASE_PATH || '(root)');
 `;
 
-            await fs.writeFile(path.join(buildPath, 'server.js'), staticServerScript);
-            await onLog('info', '✓ Lightweight static server generated (no app.prepare(), ~50-100MB RAM)');
-        } else {
-            await onLog('info', 'Generating Next.js starter script...');
+                await fs.writeFile(path.join(buildPath, 'server.js'), staticServerScript);
+                await onLog('info', '✓ Lightweight static server generated (no app.prepare(), ~50-100MB RAM)');
+            } else {
+                await onLog('info', 'Generating Next.js starter script...');
 
-            const nextServerScript = `
+                const nextServerScript = `
 const http = require('http');
 const next = require('next');
 
@@ -1309,59 +1307,59 @@ app.prepare()
   });
 `;
 
-            await fs.writeFile(path.join(buildPath, 'server.js'), nextServerScript);
-            await onLog('info', '✓ Next.js starter script generated (uses next start)');
-        }
-    }
-
-    // Get build size
-    const buildOutputPath = path.join(buildPath, outputDir);
-    // Calculate build size (cross-platform)
-    let buildSize = 0; // Initialize buildSize
-    try {
-        // Calculate build size - ONLY measure the output directory, not entire buildPath
-        const getDirectorySize = async (dirPath) => {
-            let size = 0;
-            const files = await fs.readdir(dirPath);
-            for (const file of files) {
-                const filePath = path.join(dirPath, file);
-                const stats = await fs.stat(filePath);
-                if (stats.isDirectory()) {
-                    size += await getDirectorySize(filePath);
-                } else {
-                    size += stats.size;
-                }
+                await fs.writeFile(path.join(buildPath, 'server.js'), nextServerScript);
+                await onLog('info', '✓ Next.js starter script generated (uses next start)');
             }
-            return size;
+        }
+
+        // Get build size
+        const buildOutputPath = path.join(buildPath, outputDir);
+        // Calculate build size (cross-platform)
+        let buildSize = 0; // Initialize buildSize
+        try {
+            // Calculate build size - ONLY measure the output directory, not entire buildPath
+            const getDirectorySize = async (dirPath) => {
+                let size = 0;
+                const files = await fs.readdir(dirPath);
+                for (const file of files) {
+                    const filePath = path.join(dirPath, file);
+                    const stats = await fs.stat(filePath);
+                    if (stats.isDirectory()) {
+                        size += await getDirectorySize(filePath);
+                    } else {
+                        size += stats.size;
+                    }
+                }
+                return size;
+            };
+
+            // Measure ONLY the output directory (e.g., build/) not the entire repo
+            // Ensure output directory exists before trying to measure it
+            await fs.access(buildOutputPath);
+            buildSize = await getDirectorySize(buildOutputPath);
+        } catch (sizeError) {
+            await onLog('warn', `Failed to calculate build size: ${sizeError.message}`);
+        }
+
+        deployment.metadata = {
+            ...deployment.metadata,
+            buildSize,
+            buildCache: false
+        };
+        await deployment.save();
+
+        await onLog('info', `✓ Build size: ${(buildSize / 1024 / 1024).toFixed(2)} MB (${outputDir}/ folder only)`);
+
+        return {
+            outputDir,
+            buildSize,
+            buildPath
         };
 
-        // Measure ONLY the output directory (e.g., build/) not the entire repo
-        // Ensure output directory exists before trying to measure it
-        await fs.access(buildOutputPath);
-        buildSize = await getDirectorySize(buildOutputPath);
-    } catch (sizeError) {
-        await onLog('warn', `Failed to calculate build size: ${sizeError.message}`);
+    } catch (error) {
+        error.phase = 'build';
+        throw new Error(`Build failed: ${error.message}`);
     }
-
-    deployment.metadata = {
-        ...deployment.metadata,
-        buildSize,
-        buildCache: false
-    };
-    await deployment.save();
-
-    await onLog('info', `✓ Build size: ${(buildSize / 1024 / 1024).toFixed(2)} MB (${outputDir}/ folder only)`);
-
-    return {
-        outputDir,
-        buildSize,
-        buildPath
-    };
-
-} catch (error) {
-    error.phase = 'build';
-    throw new Error(`Build failed: ${error.message}`);
-}
 }
 
 /**
