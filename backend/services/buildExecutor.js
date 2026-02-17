@@ -1040,6 +1040,38 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
             const basePath = deploymentUrlPath ? `/${deploymentUrlPath}` : '';
             await onLog('info', `Setting Next.js basePath: ${basePath || '(root)'}`);
 
+            // CRITICAL FIX: Inject basePath directly into next.config.js BEFORE building
+            // This solves the timing issue where next.config.js loads before .env files
+            try {
+                const nextConfigPath = path.join(buildPath, 'next.config.js');
+                if (await fs.access(nextConfigPath).then(() => true).catch(() => false)) {
+                    let configContent = await fs.readFile(nextConfigPath, 'utf8');
+
+                    // Replace process.env.NEXT_PUBLIC_BASE_PATH with actual value
+                    // This ensures basePath is set at module load time, not build time
+                    const basePathValue = basePath ? `'${basePath}'` : "''";
+
+                    // Pattern 1: const deploymentBasePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
+                    configContent = configContent.replace(
+                        /const\s+deploymentBasePath\s*=\s*process\.env\.NEXT_PUBLIC_BASE_PATH\s*\|\|\s*['"]['"];?/g,
+                        `const deploymentBasePath = ${basePathValue};`
+                    );
+
+                    // Pattern 2: basePath: process.env.NEXT_PUBLIC_BASE_PATH || '',
+                    configContent = configContent.replace(
+                        /basePath:\s*process\.env\.NEXT_PUBLIC_BASE_PATH\s*\|\|\s*['"]['"],?/g,
+                        `basePath: ${basePathValue},`
+                    );
+
+                    await fs.writeFile(nextConfigPath, configContent);
+                    await onLog('info', `✓ Injected basePath (${basePath || '/'}) into next.config.js`);
+                }
+            } catch (error) {
+                await onLog('warn', `Could not inject basePath into next.config.js: ${error.message}`);
+            }
+
+
+
             try {
                 const { stdout, stderr } = await execAsync(buildCommand, {
                     cwd: buildPath,
