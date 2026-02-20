@@ -158,19 +158,19 @@ async function updateNginxRouting(projectName, port, serverHost, serverKey, depl
         let config = readResult.stdout;
 
         // Create location block
-        // IMPORTANT: We strip the deployment prefix before proxying to Next.js.
-        // Next.js templates use assetPrefix (not basePath) for static assets only.
+        // IMPORTANT: Do NOT strip the deployment prefix before proxying.
+        // Next.js is built with basePath=/${urlPath} (via NEXT_PUBLIC_BASE_PATH env var)
+        // and handles the prefix internally. Nginx just needs to forward the full URL path.
         //
         // Example:
-        //   https://ec2.foodpanda.site/demosmartpor-1234/       → http://localhost:PORT/
-        //   https://ec2.foodpanda.site/demosmartpor-1234/_next → http://localhost:PORT/_next
+        //   Browser: https://ec2.foodpanda.site/demosmartpor-1234/setup?owner=KEY
+        //   Nginx: proxies full path /demosmartpor-1234/setup?owner=KEY to localhost:PORT
+        //   Next.js: strips its basePath /demosmartpor-1234, routes to /setup ✅
         //
-        // Next.js assetPrefix will prepend the path to asset URLs in the HTML output.
+        // If we also strip in Nginx, Next.js never sees its basePath and routing breaks.
         const locationBlock = `    # ${projectName} - Port ${port} - ${deploymentId}
     location /${urlPath}/ {
-        # Strip the deployment prefix so the app sees root-relative paths
-        rewrite ^\\/${urlPath}(.*)$ $1 break;
-
+        # Pass full path to Next.js - it handles basePath stripping via next.config.js
         proxy_pass http://localhost:${port};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
