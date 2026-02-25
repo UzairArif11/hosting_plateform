@@ -234,6 +234,20 @@ async function deployProjectToUserContainer(user, project, buildPath, containerI
 
         // PM2 is pre-installed in custom image, no wait needed
 
+        // Ensure openssl is installed in the Alpine container.
+        // Alpine 3.17+ only ships libssl.so.3 (OpenSSL 3.x). The openssl CLI binary is NOT
+        // installed by default, so Prisma's runtime detection fails and falls back to 1.1.x.
+        // Installing openssl gives Prisma both the CLI for version detection and libssl.so.3.
+        logger.info(`📦 Ensuring openssl is available in container (required for Prisma runtime detection)...`);
+        const installSslResult = await ssh.execCommand(
+            `docker exec ${containerName} sh -c "apk add --no-cache openssl 2>/dev/null || true"`
+        );
+        if (installSslResult.code === 0) {
+            logger.info(`✅ openssl ready in container`);
+        } else {
+            logger.warn(`⚠️ openssl install skipped: ${installSslResult.stderr}`);
+        }
+
         // Check if PM2 process already exists and delete it
         const pm2ListCommand = `docker exec ${containerName} pm2 list`;
         const listResult = await ssh.execCommand(pm2ListCommand);
