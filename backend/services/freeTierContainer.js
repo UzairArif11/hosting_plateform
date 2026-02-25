@@ -39,21 +39,22 @@ async function createUserContainer(user, serverKey, server, resources) {
             const sshConfig = remoteBuild.getSSHConfig(serverKey, server.host);
             await ssh.connect(sshConfig);
 
-            // Check if image exists
-            const checkImage = await ssh.execCommand('docker images node-pm2-alpine:latest -q');
+            // Check if image exists (v2 includes openssl baked in for Prisma compatibility)
+            const checkImage = await ssh.execCommand('docker images node-pm2-alpine:v2 -q');
 
             if (!checkImage.stdout || checkImage.stdout.trim() === '') {
                 logger.info('📦 [CREATE_CONTAINER] PM2 image not found on ' + serverKey + ', building it now...');
                 logger.info('⏱️  [CREATE_CONTAINER] This is a one-time build (~30s). Image will be cached for future users.');
 
                 // Create Dockerfile content
-                const dockerfile = `FROM node:18-alpine\nRUN npm install -g pm2@latest --no-audit --no-fund --silent --prefer-offline --no-optional\nRUN pm2 --version\nWORKDIR /app\nENV NODE_ENV=production\nEXPOSE 3000\nCMD ["pm2-runtime", "start", "ecosystem.config.js"]`;
+                // openssl is baked in so Prisma can detect the runtime version on any server
+                const dockerfile = `FROM node:18-alpine\\nRUN apk add --no-cache openssl\\nRUN npm install -g pm2@latest --no-audit --no-fund --silent --prefer-offline --no-optional\\nRUN pm2 --version\\nWORKDIR /app\\nENV NODE_ENV=production\\nEXPOSE 3000\\nCMD [\"pm2-runtime\", \"start\", \"ecosystem.config.js\"]`;
 
                 // Write Dockerfile to remote server
                 await ssh.execCommand(`mkdir -p /tmp/pm2-image && echo '${dockerfile}' > /tmp/pm2-image/Dockerfile`);
 
                 // Build image (tagged and persisted in Docker on this server)
-                const buildResult = await ssh.execCommand('cd /tmp/pm2-image && docker build -t node-pm2-alpine:latest .');
+                const buildResult = await ssh.execCommand('cd /tmp/pm2-image && docker build -t node-pm2-alpine:v2 .');
 
                 if (buildResult.code !== 0) {
                     logger.error('❌ Failed to build PM2 image:', buildResult.stderr);
@@ -76,7 +77,7 @@ async function createUserContainer(user, serverKey, server, resources) {
             ssh.dispose();
         }
 
-        const result = await docker.runContainer('node-pm2-alpine:latest', containerName, {
+        const result = await docker.runContainer('node-pm2-alpine:v2', containerName, {
             host: server.host,
             port: port,
             memory: resources.ram * 1024,
