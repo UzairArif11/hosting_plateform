@@ -128,13 +128,21 @@ const checkUserResources = async (user) => {
 
         // --- RAM ENFORCEMENT ---
         // Sum total RAM used by all PM2 processes
+        // Grace period: skip killing processes that started less than 5 minutes ago
+        // (Next.js startup spike is temporary and should not trigger enforcement)
+        const STARTUP_GRACE_MS = 5 * 60 * 1000; // 5 minutes
+        const now = Date.now();
+
         let totalRamUsage = 0;
         const processUsage = [];
 
         processes.forEach(p => {
             const mem = p.monit ? p.monit.memory : 0;
             totalRamUsage += mem;
-            processUsage.push({ name: p.name, mem, pm_id: p.pm_id });
+            const startedAt = p.pm2_env?.created_at || 0;
+            const ageMs = now - startedAt;
+            const inGracePeriod = ageMs < STARTUP_GRACE_MS;
+            processUsage.push({ name: p.name, mem, pm_id: p.pm_id, inGracePeriod, ageMs });
         });
 
         // Determine Thresholds (Admin Configurable)
@@ -153,16 +161,18 @@ const checkUserResources = async (user) => {
 
         const ramRatio = totalRamUsage / maxRamBytes;
 
-        // Check 1: Total Usage > Threshold (Kill Highest)
-        // Check 2: Single Process > Threshold (Kill Specific) -> Covered by Total if Single.
-        // If Multi and ONE process is 90% -> Total is at least 90% -> Kill Highest.
-        // So Logic "Remove High One" covers both.
-
         if (ramRatio > stopThreshold) {
-            // STOP HIGHEST CONSUMER
-            const highest = processUsage.sort((a, b) => b.mem - a.mem)[0];
-            if (highest) {
-                await killProcess(ssh, containerName, highest, user, 'RAM', totalRamUsage, maxRamBytes);
+            // Only kill from processes that have passed the startup grace period
+            const matureProcesses = processUsage.filter(p => !p.inGracePeriod);
+            if (matureProcesses.length === 0) {
+                // All processes are in grace period - log and skip enforcement this cycle
+                logger.info(`RAM overload for ${user.email} but all processes in startup grace period - skipping kill`);
+            } else {
+                // STOP HIGHEST CONSUMER (from mature processes only)
+                const highest = matureProcesses.sort((a, b) => b.mem - a.mem)[0];
+                if (highest) {
+                    await killProcess(ssh, containerName, highest, user, 'RAM', totalRamUsage, maxRamBytes);
+                }
             }
         } else if (ramRatio > warnThreshold) {
             // WARN
