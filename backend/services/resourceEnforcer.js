@@ -49,6 +49,14 @@ const runEnforcementCycle = async () => {
 };
 
 const checkUserResources = async (user) => {
+    // Admin accounts and override users are exempt from resource enforcement
+    // Admins run demo deployments across all templates and must not be killed
+    if (user.role === 'admin') {
+        return;
+    }
+    if (user.adminOverride && user.adminOverride.enabled) {
+        return;
+    }
     const ssh = new NodeSSH();
     try {
 
