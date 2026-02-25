@@ -169,6 +169,9 @@ async function updateNginxRouting(projectName, port, serverHost, serverKey, depl
         //
         // If we also strip in Nginx, Next.js never sees its basePath and routing breaks.
         const locationBlock = `    # ${projectName} - Port ${port} - ${deploymentId}
+    location = /${urlPath} {
+        return 301 /${urlPath}/;
+    }
     location /${urlPath}/ {
         # Pass full path to Next.js - it handles basePath stripping via next.config.js
         proxy_pass http://localhost:${port};
