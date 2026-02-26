@@ -209,7 +209,7 @@ export default function ProjectDetailPage() {
                                 <GlobeAltIcon className="h-5 w-5" />
                                 <span>Visit</span>
                             </a>
-                            {(currentProject.latestDeployment as any)?.metadata?.jwtSigningSecret && (
+                            {((currentProject.latestDeployment as any)?.metadata?.jwtSigningSecret || (currentProject.latestDeployment as any)?.metadata?.ownerKey) && (
                                 <button
                                     onClick={openSetupPage}
                                     disabled={openingSetup}

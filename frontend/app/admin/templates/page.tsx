@@ -660,22 +660,42 @@ export default function TemplateManagement() {
                                                 </svg>
                                                 View Live Demo
                                             </a>
-                                            {(template as any).demoDeploymentId?.metadata?.ownerKey && (template.demoDeploymentUrl || (template as any).demoDeploymentId?.deploymentUrl) && (
+                                            {/* Setup button: works with both old (ownerKey) and new (jwtSigningSecret) deployments */}
+                                            {((template as any).demoDeploymentId?.metadata?.ownerKey || (template as any).demoDeploymentId?.metadata?.jwtSigningSecret) && (template.demoDeploymentUrl || (template as any).demoDeploymentId?.deploymentUrl) && (
                                                 (() => {
-                                                    // Prefer deployment's own URL (has full path); fallback to template.demoDeploymentUrl
+                                                    const demoMeta = (template as any).demoDeploymentId?.metadata;
+                                                    const demoDeployId = (template as any).demoDeploymentId?._id;
+                                                    const hasJwt = !!demoMeta?.jwtSigningSecret;
                                                     const rawUrl = (template as any).demoDeploymentId?.deploymentUrl || template.demoDeploymentUrl || '';
                                                     const baseUrl = String(rawUrl || '').replace(/\/$/, '');
-                                                    const setupUrl = baseUrl ? `${baseUrl}/setup?owner=${(template as any).demoDeploymentId.metadata.ownerKey}` : '#';
+                                                    // Legacy fallback: direct ?owner= URL
+                                                    const legacySetupUrl = baseUrl && demoMeta?.ownerKey ? `${baseUrl}/setup?owner=${demoMeta.ownerKey}` : '#';
                                                     return (
                                                         <>
-                                                            <a
-                                                                href={setupUrl}
-                                                                target="_blank"
-                                                                rel="noopener noreferrer"
+                                                            <button
                                                                 className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium py-2 px-3 rounded-lg transition flex items-center justify-center gap-1.5"
-                                                                onClick={(e) => {
+                                                                onClick={async (e) => {
                                                                     e.stopPropagation();
-                                                                    if (setupUrl === '#') e.preventDefault();
+                                                                    if (hasJwt && demoDeployId) {
+                                                                        // New JWT flow: call setup-token API
+                                                                        try {
+                                                                            const token = localStorage.getItem('token');
+                                                                            const res = await fetch(`/api/deployments/${demoDeployId}/setup-token`, {
+                                                                                headers: { 'Authorization': `Bearer ${token}` }
+                                                                            });
+                                                                            const data = await res.json();
+                                                                            if (res.ok && data.setupUrl) {
+                                                                                window.open(data.setupUrl, '_blank', 'noopener,noreferrer');
+                                                                            } else {
+                                                                                toast.error(data.error || 'Failed to get setup URL');
+                                                                            }
+                                                                        } catch (err) {
+                                                                            toast.error('Could not open setup page');
+                                                                        }
+                                                                    } else if (legacySetupUrl !== '#') {
+                                                                        // Fallback: old ownerKey flow
+                                                                        window.open(legacySetupUrl, '_blank', 'noopener,noreferrer');
+                                                                    }
                                                                 }}
                                                             >
                                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -683,29 +703,7 @@ export default function TemplateManagement() {
                                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                                                                 </svg>
                                                                 Setup Page
-                                                            </a>
-                                                            {/* Selectable URL for copy-paste */}
-                                                            {setupUrl !== '#' && (
-                                                                <div className="w-full mt-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                                                                    <input
-                                                                        readOnly
-                                                                        value={setupUrl}
-                                                                        className="flex-1 text-[10px] bg-gray-900 text-gray-300 border border-gray-700 rounded px-2 py-1 font-mono truncate cursor-text select-all"
-                                                                        onFocus={(e) => e.target.select()}
-                                                                        onClick={(e) => { e.stopPropagation(); (e.target as HTMLInputElement).select(); }}
-                                                                        title={setupUrl}
-                                                                    />
-                                                                    <button
-                                                                        className="text-gray-400 hover:text-white shrink-0"
-                                                                        title="Copy setup URL"
-                                                                        onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(setupUrl); }}
-                                                                    >
-                                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                                                        </svg>
-                                                                    </button>
-                                                                </div>
-                                                            )}
+                                                            </button>
                                                         </>
                                                     );
                                                 })()

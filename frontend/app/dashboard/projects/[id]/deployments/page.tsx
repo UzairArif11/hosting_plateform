@@ -262,7 +262,7 @@ export default function DeploymentsPage({ params }: { params: { id: string } }) 
                                                 </svg>
                                                 Visit
                                             </a>
-                                            {deployment.metadata?.jwtSigningSecret && (
+                                            {(deployment.metadata?.jwtSigningSecret || (deployment.metadata as any)?.ownerKey) && (
                                                 <button
                                                     onClick={() => openSetupPage(deployment._id)}
                                                     disabled={openingSetup === deployment._id}
