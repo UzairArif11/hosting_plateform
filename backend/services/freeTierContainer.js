@@ -260,15 +260,59 @@ async function deployProjectToUserContainer(user, project, buildPath, containerI
             logger.info(`🗑️  Deleted old PM2 process: ${project._id}`);
         }
 
-        // Start project with PM2
+        // Start project with PM2 — with port collision retry
         logger.info(`🚀 Starting PM2 process for project: ${project._id}`);
-        const startCommand = `docker exec ${containerName} pm2 start ${projectPath}/server.js --name ${project._id} -- --port ${port}`;
-        const startResult = await ssh.execCommand(startCommand);
 
-        if (startResult.code !== 0) {
-            const errorMsg = (startResult.stderr || startResult.stdout || 'Unknown error').trim();
+        let startSuccess = false;
+        const maxRetries = 3;
+
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            // Verify the port is actually free on the host (DB check alone is not sufficient)
+            const portCheck = await ssh.execCommand(`ss -tln | grep -q ':${port} ' && echo "IN_USE" || echo "FREE"`);
+            if (portCheck.stdout && portCheck.stdout.trim() === 'IN_USE') {
+                logger.warn(`⚠️ Port ${port} is already in use on host (attempt ${attempt + 1}). Picking new port...`);
+                // Pick a new random port
+                const Deployment = require('../models/Deployment');
+                for (let j = 0; j < 50; j++) {
+                    const candidate = Math.floor(Math.random() * (20000 - 4000 + 1)) + 4000;
+                    const existing = await Deployment.findOne({ port: candidate, status: { $ne: 'failed' } });
+                    if (!existing) {
+                        const recheck = await ssh.execCommand(`ss -tln | grep -q ':${candidate} ' && echo "IN_USE" || echo "FREE"`);
+                        if (!recheck.stdout || recheck.stdout.trim() === 'FREE') {
+                            port = candidate;
+                            break;
+                        }
+                    }
+                }
+                logger.info(`🔄 Retrying with port ${port}`);
+            }
+
+            const startCommand = `docker exec ${containerName} pm2 start ${projectPath}/server.js --name ${project._id} -- --port ${port}`;
+            const startResult = await ssh.execCommand(startCommand);
+
+            if (startResult.code === 0) {
+                startSuccess = true;
+                break;
+            }
+
+            const errorMsg = (startResult.stderr || startResult.stdout || '').trim();
+
+            // If EADDRINUSE, delete the failed PM2 process and retry with a new port
+            if (errorMsg.includes('EADDRINUSE') || errorMsg.includes('address already in use')) {
+                logger.warn(`⚠️ EADDRINUSE on port ${port} (attempt ${attempt + 1}/${maxRetries}). Retrying...`);
+                await ssh.execCommand(`docker exec ${containerName} pm2 delete ${project._id} 2>/dev/null || true`);
+                // Get a new random port for next attempt
+                port = Math.floor(Math.random() * (20000 - 4000 + 1)) + 4000;
+                continue;
+            }
+
+            // Non-port error — fail immediately
             logger.error(`Failed to start PM2 process: ${errorMsg}`);
             throw new Error(`Failed to start PM2 process: ${errorMsg}`);
+        }
+
+        if (!startSuccess) {
+            throw new Error(`Failed to start PM2 process after ${maxRetries} retries due to port collisions`);
         }
 
         // Save PM2 process list
