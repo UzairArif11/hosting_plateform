@@ -17,7 +17,7 @@ interface Deployment {
         email: string;
     };
     deploymentUrl?: string;
-    metadata?: { ownerKey?: string };
+    metadata?: { jwtSigningSecret?: string };
     trigger: 'manual' | 'webhook' | 'retry' | 'rollback';
     rollbackFrom?: string;
     createdAt: string;
@@ -31,6 +31,7 @@ export default function DeploymentsPage({ params }: { params: { id: string } }) 
     const [loading, setLoading] = useState(true);
     const [rollbackTarget, setRollbackTarget] = useState<Deployment | null>(null);
     const [isRollingBack, setIsRollingBack] = useState(false);
+    const [openingSetup, setOpeningSetup] = useState<string | null>(null);
     const hasRollbackFeature = useHasFeature('rollback');
 
     useEffect(() => {
@@ -91,6 +92,26 @@ export default function DeploymentsPage({ params }: { params: { id: string } }) 
             setIsRollingBack(false);
         }
     };
+
+    // Opens secure setup page via short-lived JWT (never exposes ownerKey in URL)
+    const openSetupPage = async (deploymentId: string) => {
+        if (openingSetup) return;
+        setOpeningSetup(deploymentId);
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`/api/deployments/${deploymentId}/setup-token`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (!res.ok || !data.setupUrl) throw new Error(data.error || 'Failed to get setup URL');
+            window.open(data.setupUrl, '_blank', 'noopener,noreferrer');
+        } catch (err: any) {
+            toast.error(err.message || 'Could not open setup page');
+        } finally {
+            setOpeningSetup(null);
+        }
+    };
+
 
     const getStatusColor = (status: string) => {
         switch (status) {
@@ -241,20 +262,22 @@ export default function DeploymentsPage({ params }: { params: { id: string } }) 
                                                 </svg>
                                                 Visit
                                             </a>
-                                            {deployment.metadata?.ownerKey && (
-                                                <a
-                                                    href={`${deployment.deploymentUrl.replace(/\/?$/, '')}${deployment.deploymentUrl.includes('?') ? '&' : '?'}owner=${deployment.metadata.ownerKey}`}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm transition flex items-center gap-2"
-                                                    title="Open setup / admin (sample data, config)"
+                                            {deployment.metadata?.jwtSigningSecret && (
+                                                <button
+                                                    onClick={() => openSetupPage(deployment._id)}
+                                                    disabled={openingSetup === deployment._id}
+                                                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-sm transition flex items-center gap-2"
+                                                    title="Open secure setup / admin panel (JWT link, valid 10 min)"
                                                 >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                    </svg>
-                                                    Setup
-                                                </a>
+                                                    {openingSetup === deployment._id ? (
+                                                        <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Opening...</>
+                                                    ) : (
+                                                        <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                        </svg>Setup</>
+                                                    )}
+                                                </button>
                                             )}
                                         </>
                                     )}

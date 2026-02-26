@@ -1,6 +1,18 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import api from '../api';
 
+interface Domain {
+    _id: string;
+    domain: string;
+    isCustom: boolean;
+    isPrimary: boolean;
+    sslEnabled: boolean;
+    verified: boolean;
+    verificationToken?: string;
+    verifiedAt?: string;
+    addedAt: string;
+}
+
 interface Project {
     _id: string;
     name: string;
@@ -12,6 +24,7 @@ interface Project {
     stats: any;
     deploymentCount: number;
     environmentVariables?: Record<string, string>;
+    domains?: Domain[];
     latestDeployment?: {
         _id: string;
         status: string;

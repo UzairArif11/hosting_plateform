@@ -915,15 +915,17 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
         envVars.push({ key: 'NEXT_PUBLIC_SHOW_SETUP_PAGE', value: 'true' });
         envVars.push({ key: 'SEED_SECRET', value: `seed_${deployment._id.toString()}` });
 
-        const ownerKey = crypto.randomBytes(24).toString('hex');
-        deployment.metadata = { ...(deployment.metadata || {}), ownerKey };
+        // Generate a server-side signing secret for JWT-based owner auth.
+        // IMPORTANT: Do NOT use NEXT_PUBLIC_ prefix — this must never reach the client bundle.
+        const jwtSigningSecret = crypto.randomBytes(32).toString('hex');
+        deployment.metadata = { ...(deployment.metadata || {}), jwtSigningSecret };
         await deployment.save();
-        envVars.push({ key: 'NEXT_PUBLIC_OWNER_KEY', value: ownerKey });
+        envVars.push({ key: 'JWT_SIGNING_SECRET', value: jwtSigningSecret });
 
         if (isAdminDemo) {
             await onLog('info', '✅ Setup/seed enabled for admin demo (CRUD features accessible)');
         } else {
-            await onLog('info', '✅ Setup/seed enabled for owner only (admin link in dashboard)');
+            await onLog('info', '✅ Setup/seed enabled for owner only (JWT-secured link in dashboard)');
         }
 
 

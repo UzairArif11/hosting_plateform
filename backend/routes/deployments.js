@@ -174,6 +174,53 @@ router.get('/:id/status', async (req, res) => {
   }
 });
 
+// Generate a short-lived signed setup token for a deployment
+// Dashboard calls this when user clicks "Setup Site" — returns a one-time URL
+// Token is signed with the deployment's JWT_SIGNING_SECRET (stored in DB, never exposed to browser)
+router.get('/:id/setup-token', async (req, res) => {
+  try {
+    const { createHmac } = require('crypto');
+    const { id } = req.params;
+
+    const deployment = await Deployment.findById(id).select('_id projectId deploymentUrl metadata');
+    if (!deployment) {
+      return res.status(404).json({ success: false, error: 'Deployment not found' });
+    }
+
+    // Verify user owns this project
+    const project = await Project.findById(deployment.projectId);
+    if (!project || !project.hasAccess(req.user._id, 'developer')) {
+      return res.status(403).json({ success: false, error: 'Insufficient permissions' });
+    }
+
+    const secret = deployment.metadata?.jwtSigningSecret;
+    if (!secret) {
+      return res.status(400).json({ success: false, error: 'Setup not available for this deployment' });
+    }
+
+    // Build token payload: { deploymentId, exp: 10 minutes from now }
+    const payload = Buffer.from(JSON.stringify({
+      deploymentId: deployment._id.toString(),
+      exp: Math.floor(Date.now() / 1000) + 600  // 10 minutes
+    })).toString('base64url');
+
+    // Sign with HMAC-SHA256 using the deployment's secret
+    const signature = createHmac('sha256', secret).update(payload).digest('base64url');
+    const token = `${payload}.${signature}`;
+
+    // Build the full setup URL
+    const baseUrl = (deployment.deploymentUrl || '').replace(/\/?$/, '');
+    const setupUrl = `${baseUrl}/api/auth?token=${token}`;
+
+    logger.info('Setup token generated', { deploymentId: id, userId: req.user._id });
+
+    res.json({ success: true, setupUrl });
+  } catch (error) {
+    logger.error('Generate setup token error:', error);
+    res.status(500).json({ success: false, error: 'Failed to generate setup token' });
+  }
+});
+
 // Get specific deployment
 router.get('/:id', async (req, res) => {
   try {
@@ -822,12 +869,12 @@ router.delete('/:id', async (req, res) => {
     // Optional: Clean user's database if requested
     // Note: User's database is their responsibility, but we can optionally clean it
     const { cleanUserDatabase = false } = req.body;
-    
+
     if (cleanUserDatabase && project.environmentVariables) {
-      const dbUrl = project.environmentVariables.find(env => 
+      const dbUrl = project.environmentVariables.find(env =>
         env.key === 'DATABASE_URL' || env.key === 'MONGODB_URI'
       );
-      
+
       if (dbUrl?.value) {
         try {
           // Note: This is optional - user's database cleanup
@@ -867,7 +914,7 @@ router.delete('/:id', async (req, res) => {
     res.json({
       success: true,
       message: 'Deployment deleted successfully',
-      note: cleanUserDatabase 
+      note: cleanUserDatabase
         ? 'Platform data cleaned. User database cleanup attempted (user manages their own database).'
         : 'Platform data cleaned. User database unchanged (user manages their own database).'
     });
@@ -922,11 +969,11 @@ router.post('/:id/rollback', async (req, res) => {
         upgradeRequired: true
       });
     }
-    
+
     // Get feature config for retention limits
-    const rollbackFeature = owner.plan.features?.find(f => 
-        (typeof f === 'string' && f === 'rollback') || 
-        (f.name === 'rollback')
+    const rollbackFeature = owner.plan.features?.find(f =>
+      (typeof f === 'string' && f === 'rollback') ||
+      (f.name === 'rollback')
     );
 
     // Check rollback retention (how far back can we go?)

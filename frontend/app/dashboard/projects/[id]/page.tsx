@@ -31,6 +31,10 @@ export default function ProjectDetailPage() {
     const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>([]);
     const [activeDeploymentId, setActiveDeploymentId] = useState<string | null>(null);
     const [isDeploying, setIsDeploying] = useState(false);
+    const [openingSetup, setOpeningSetup] = useState(false);
+    const [newDomain, setNewDomain] = useState('');
+    const [domainLoading, setDomainLoading] = useState<string | null>(null);
+    const [addingDomain, setAddingDomain] = useState(false);
     const [selectedBranch, setSelectedBranch] = useState<string>('main');
     const [showBranchDropdown, setShowBranchDropdown] = useState(false);
 
@@ -119,6 +123,27 @@ export default function ProjectDetailPage() {
         }
     };
 
+    // Opens secure setup page via short-lived JWT token (never exposes the signing secret)
+    const openSetupPage = async () => {
+        const latestDeployment = currentProject?.latestDeployment as any;
+        if (!latestDeployment?._id) return;
+        if (openingSetup) return;
+        setOpeningSetup(true);
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`/api/deployments/${latestDeployment._id}/setup-token`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (!res.ok || !data.setupUrl) throw new Error(data.error || 'Failed to get setup URL');
+            window.open(data.setupUrl, '_blank', 'noopener,noreferrer');
+        } catch (err: any) {
+            toast.error(err.message || 'Could not open setup page');
+        } finally {
+            setOpeningSetup(false);
+        }
+    };
+
     const getStatusIcon = (status: string) => {
         switch (status) {
             case 'success':
@@ -184,23 +209,19 @@ export default function ProjectDetailPage() {
                                 <GlobeAltIcon className="h-5 w-5" />
                                 <span>Visit</span>
                             </a>
-                            {(currentProject.latestDeployment as any)?.metadata?.ownerKey && (
-                                <a
-                                    href={(() => {
-                                        const url = (currentProject.deploymentUrl || currentProject.latestDeployment?.deploymentUrl)?.startsWith('http')
-                                            ? (currentProject.deploymentUrl || currentProject.latestDeployment?.deploymentUrl)
-                                            : `https://${currentProject.deploymentUrl || currentProject.latestDeployment?.deploymentUrl}`;
-                                        const base = (url || '').replace(/\/?$/, '');
-                                        return `${base}${base.includes('?') ? '&' : '?'}owner=${(currentProject.latestDeployment as any).metadata.ownerKey}`;
-                                    })()}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-lg transition-colors border border-indigo-500 text-white"
-                                    title="Setup / admin (sample data, config)"
+                            {(currentProject.latestDeployment as any)?.metadata?.jwtSigningSecret && (
+                                <button
+                                    onClick={openSetupPage}
+                                    disabled={openingSetup}
+                                    className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 px-4 py-2 rounded-lg transition-colors border border-indigo-500 text-white"
+                                    title="Setup / admin — secure JWT link (valid 10 min)"
                                 >
-                                    <Cog6ToothIcon className="h-5 w-5" />
-                                    <span>Setup</span>
-                                </a>
+                                    {openingSetup ? (
+                                        <><div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin" /><span>Opening...</span></>
+                                    ) : (
+                                        <><Cog6ToothIcon className="h-5 w-5" /><span>Setup</span></>
+                                    )}
+                                </button>
                             )}
                         </>
                     )}
@@ -338,6 +359,15 @@ export default function ProjectDetailPage() {
                             }`}
                     >
                         Environment Variables
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('domains')}
+                        className={`pb-4 px-1 border-b-2 transition-colors ${activeTab === 'domains'
+                            ? 'border-purple-500 text-white'
+                            : 'border-transparent text-gray-400 hover:text-white'
+                            }`}
+                    >
+                        Domains
                     </button>
                     <button
                         onClick={() => setActiveTab('deployment_settings')}
@@ -516,6 +546,147 @@ export default function ProjectDetailPage() {
                                     </div>
                                 ))
                             )}
+                        </div>
+                    </div>
+                )}
+
+                {activeTab === 'domains' && (
+                    <div className="space-y-4">
+                        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                            <h3 className="text-lg font-semibold text-white mb-1">Domains</h3>
+                            <p className="text-gray-400 text-sm mb-6">Add a custom domain to your deployment. Point your DNS A record to the server IP, then verify here.</p>
+
+                            {/* Server IP info */}
+                            <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-4 mb-6 flex items-start gap-3">
+                                <svg className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <div>
+                                    <p className="text-blue-300 font-medium text-sm">DNS Setup Instructions</p>
+                                    <p className="text-blue-200/70 text-xs mt-1">Point your domain's <code className="bg-blue-900/50 px-1 rounded">A record</code> to your server IP, then click Verify below.</p>
+                                </div>
+                            </div>
+
+                            {/* Existing domains */}
+                            <div className="space-y-3 mb-6">
+                                {(currentProject.domains || []).map((d: any) => (
+                                    <div key={d._id} className="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-3">
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-2 h-2 rounded-full ${d.verified ? 'bg-green-400' : 'bg-yellow-400'}`} />
+                                            <div>
+                                                <p className="text-white font-medium text-sm">{d.domain}</p>
+                                                <div className="flex items-center gap-2 mt-0.5">
+                                                    <span className={`text-xs px-1.5 py-0.5 rounded ${d.isCustom ? 'bg-indigo-900/40 text-indigo-300' : 'bg-gray-700 text-gray-400'}`}>
+                                                        {d.isCustom ? 'Custom' : 'Platform'}
+                                                    </span>
+                                                    <span className={`text-xs px-1.5 py-0.5 rounded ${d.sslEnabled && d.verified ? 'bg-green-900/40 text-green-300' : 'bg-gray-700 text-gray-400'}`}>
+                                                        {d.sslEnabled && d.verified ? '🔒 SSL Active' : d.verified ? 'No SSL yet' : 'Not Verified'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            {d.isCustom && !d.verified && (
+                                                <button
+                                                    onClick={async () => {
+                                                        setDomainLoading(d._id);
+                                                        try {
+                                                            const token = localStorage.getItem('token');
+                                                            const res = await fetch(`/api/projects/${params.id}/domains/${d._id}/verify`, {
+                                                                method: 'POST',
+                                                                headers: { 'Authorization': `Bearer ${token}` }
+                                                            });
+                                                            const data = await res.json();
+                                                            if (data.verified) {
+                                                                toast.success('Domain verified! SSL provisioning...');
+                                                                dispatch(fetchProject(params.id as string));
+                                                            } else {
+                                                                toast.error(data.error || 'DNS not yet propagated');
+                                                            }
+                                                        } catch { toast.error('Verification failed'); }
+                                                        finally { setDomainLoading(null); }
+                                                    }}
+                                                    disabled={domainLoading === d._id}
+                                                    className="px-3 py-1.5 text-xs bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded transition"
+                                                >
+                                                    {domainLoading === d._id ? 'Verifying...' : 'Verify DNS'}
+                                                </button>
+                                            )}
+                                            {d.verified && (
+                                                <a href={`https://${d.domain}`} target="_blank" rel="noopener noreferrer"
+                                                    className="px-3 py-1.5 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded transition">
+                                                    Visit →
+                                                </a>
+                                            )}
+                                            {d.isCustom && (
+                                                <button
+                                                    onClick={async () => {
+                                                        if (!confirm(`Remove ${d.domain}?`)) return;
+                                                        setDomainLoading(d._id);
+                                                        try {
+                                                            const token = localStorage.getItem('token');
+                                                            await fetch(`/api/projects/${params.id}/domains/${d._id}`, {
+                                                                method: 'DELETE',
+                                                                headers: { 'Authorization': `Bearer ${token}` }
+                                                            });
+                                                            toast.success('Domain removed');
+                                                            dispatch(fetchProject(params.id as string));
+                                                        } catch { toast.error('Remove failed'); }
+                                                        finally { setDomainLoading(null); }
+                                                    }}
+                                                    disabled={domainLoading === d._id}
+                                                    className="px-3 py-1.5 text-xs bg-red-900/40 hover:bg-red-900/70 disabled:opacity-50 text-red-300 rounded transition"
+                                                >
+                                                    Remove
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Add custom domain */}
+                            <div className="border-t border-gray-700 pt-4">
+                                <p className="text-sm font-medium text-gray-300 mb-3">Add Custom Domain</p>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={newDomain}
+                                        onChange={e => setNewDomain(e.target.value)}
+                                        placeholder="myblog.com"
+                                        className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500"
+                                        onKeyDown={e => e.key === 'Enter' && !addingDomain && (() => {
+                                            // submit
+                                        })()}
+                                    />
+                                    <button
+                                        disabled={addingDomain || !newDomain.trim()}
+                                        onClick={async () => {
+                                            setAddingDomain(true);
+                                            try {
+                                                const token = localStorage.getItem('token');
+                                                const res = await fetch(`/api/projects/${params.id}/domains`, {
+                                                    method: 'POST',
+                                                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ domain: newDomain.trim().toLowerCase() })
+                                                });
+                                                const data = await res.json();
+                                                if (res.ok) {
+                                                    toast.success('Domain added — verify DNS next');
+                                                    setNewDomain('');
+                                                    dispatch(fetchProject(params.id as string));
+                                                } else {
+                                                    toast.error(data.error || 'Failed to add domain');
+                                                }
+                                            } catch { toast.error('Request failed'); }
+                                            finally { setAddingDomain(false); }
+                                        }}
+                                        className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-lg text-sm transition"
+                                    >
+                                        {addingDomain ? 'Adding...' : 'Add Domain'}
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 )}

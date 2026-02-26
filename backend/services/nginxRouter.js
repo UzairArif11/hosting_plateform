@@ -364,4 +364,141 @@ async function removeNginxRouting(deploymentId, serverHost, serverKey) {
     }
 }
 
-module.exports = { updateNginxRouting, removeNginxRouting };
+/**
+ * Add a custom domain server block to Nginx on the container server.
+ * Creates /etc/nginx/sites-available/custom-{domain}.conf with:
+ *   - HTTP → HTTPS redirect
+ *   - HTTPS server block proxying to the same app port (no basePath prefix needed)
+ *
+ * Call this AFTER the domain is DNS-verified and SSL certificate is provisioned.
+ *
+ * @param {string} customDomain  e.g. "myblog.com"
+ * @param {number} port          The PM2 app port (e.g. 3456)
+ * @param {string} serverHost    The EC server IP
+ * @param {string} serverKey     'EC2', 'EC3', etc.
+ */
+async function provisionCustomDomainNginx(customDomain, port, serverHost, serverKey) {
+    const ssh = new NodeSSH();
+
+    try {
+        logger.info(`Provisioning custom domain Nginx for ${customDomain} → localhost:${port}`);
+
+        const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
+            : serverKey === 'EC3' ? process.env.SSH_EC3_KEY
+                : serverKey === 'EC4' ? process.env.SSH_EC4_KEY
+                    : serverKey === 'EC5' ? process.env.SSH_EC5_KEY
+                        : process.env.SSH_EC3_KEY;
+
+        const keyContent = fs.readFileSync(keyPath, 'utf8');
+        await ssh.connect({ host: serverHost, username: process.env.SSH_USERNAME || 'ubuntu', privateKey: keyContent });
+
+        // Check if SSL cert exists (provisioned by certbot / sslManager)
+        const certCheck = await ssh.execCommand(
+            `sudo test -f /etc/letsencrypt/live/${customDomain}/fullchain.pem && echo "exists" || echo "missing"`
+        );
+        const hasSsl = certCheck.stdout.trim() === 'exists';
+
+        const safeDomain = customDomain.replace(/[^a-z0-9.-]/gi, '');
+        const configPath = `/etc/nginx/sites-available/custom-${safeDomain}.conf`;
+        const enabledPath = `/etc/nginx/sites-enabled/custom-${safeDomain}.conf`;
+
+        // Build the Nginx config
+        // For custom domains there is NO basePath — the domain IS the root, app serves from /
+        const sslBlock = hasSsl
+            ? `    ssl_certificate /etc/letsencrypt/live/${customDomain}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/${customDomain}/privkey.pem;`
+            : `    # SSL cert not yet provisioned — run: sudo certbot --nginx -d ${customDomain}`;
+
+        const configContent = [
+            `# Custom domain: ${customDomain} → localhost:${port}`,
+            `# Managed by nginxRouter.js provisionCustomDomainNginx — DO NOT manually edit`,
+            ``,
+            `server {`,
+            `    listen 80;`,
+            `    listen [::]:80;`,
+            `    server_name ${customDomain} www.${customDomain};`,
+            `    return 301 https://$server_name$request_uri;`,
+            `}`,
+            ``,
+            `server {`,
+            `    listen 443 ssl http2;`,
+            `    listen [::]:443 ssl http2;`,
+            `    server_name ${customDomain} www.${customDomain};`,
+            ``,
+            sslBlock,
+            `    ssl_protocols TLSv1.2 TLSv1.3;`,
+            `    ssl_prefer_server_ciphers on;`,
+            ``,
+            `    add_header X-Frame-Options "SAMEORIGIN" always;`,
+            `    add_header X-Content-Type-Options "nosniff" always;`,
+            `    add_header Referrer-Policy "strict-origin-when-cross-origin" always;`,
+            ``,
+            `    client_max_body_size 100M;`,
+            ``,
+            `    location / {`,
+            `        proxy_pass http://localhost:${port};`,
+            `        proxy_http_version 1.1;`,
+            `        proxy_set_header Upgrade $http_upgrade;`,
+            `        proxy_set_header Connection 'upgrade';`,
+            `        proxy_set_header Host $host;`,
+            `        proxy_set_header X-Real-IP $remote_addr;`,
+            `        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`,
+            `        proxy_set_header X-Forwarded-Proto $scheme;`,
+            `        proxy_cache_bypass $http_upgrade;`,
+            `    }`,
+            `}`,
+        ].join('\n');
+
+        // Write config
+        const tempFile = path.join(os.tmpdir(), `nginx-custom-${safeDomain}-${Date.now()}.conf`);
+        fs.writeFileSync(tempFile, configContent);
+        await ssh.putFile(tempFile, `/tmp/custom-${safeDomain}.conf`);
+        await ssh.execCommand(`sudo mv /tmp/custom-${safeDomain}.conf ${configPath}`);
+        try { fs.unlinkSync(tempFile); } catch (e) { }
+
+        // Enable config
+        const enabledCheck = await ssh.execCommand(`sudo test -f ${enabledPath} && echo "exists" || echo "missing"`);
+        if (enabledCheck.stdout.trim() === 'missing') {
+            await ssh.execCommand(`sudo ln -s ${configPath} ${enabledPath}`);
+        }
+
+        // Test and reload Nginx
+        const testResult = await ssh.execCommand('sudo nginx -t 2>&1');
+        if (!testResult.stdout.includes('successful') && !testResult.stdout.includes('syntax is ok')) {
+            throw new Error(`Nginx config test failed: ${testResult.stdout}`);
+        }
+        await ssh.execCommand('sudo systemctl reload nginx');
+
+        logger.info(`✅ Custom domain Nginx config active: https://${customDomain}/ → localhost:${port}`);
+        ssh.dispose();
+        return { success: true, url: `https://${customDomain}/`, hasSsl };
+
+    } catch (error) {
+        logger.error(`Failed to provision custom domain Nginx: ${error.message}`);
+        try { ssh.dispose(); } catch (e) { }
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Remove custom domain Nginx config
+ */
+async function removeCustomDomainNginx(customDomain, serverHost, serverKey) {
+    const ssh = new NodeSSH();
+    try {
+        const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY : process.env.SSH_EC3_KEY;
+        await ssh.connect({ host: serverHost, username: process.env.SSH_USERNAME || 'ubuntu', privateKey: fs.readFileSync(keyPath, 'utf8') });
+
+        const safeDomain = customDomain.replace(/[^a-z0-9.-]/gi, '');
+        await ssh.execCommand(`sudo rm -f /etc/nginx/sites-enabled/custom-${safeDomain}.conf /etc/nginx/sites-available/custom-${safeDomain}.conf`);
+        await ssh.execCommand('sudo systemctl reload nginx');
+        ssh.dispose();
+        logger.info(`✅ Removed custom domain Nginx config for ${customDomain}`);
+        return { success: true };
+    } catch (error) {
+        logger.error(`Failed to remove custom domain Nginx: ${error.message}`);
+        try { ssh.dispose(); } catch (e) { }
+        return { success: false, error: error.message };
+    }
+}
+
+module.exports = { updateNginxRouting, removeNginxRouting, provisionCustomDomainNginx, removeCustomDomainNginx };
