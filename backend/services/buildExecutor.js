@@ -1294,6 +1294,34 @@ console.log('Static server on port', port, 'basePath:', BASE_PATH || '(root)');
                 const nextServerScript = `
 const http = require('http');
 const next = require('next');
+const fs = require('fs');
+const path = require('path');
+
+// Next.js custom server doesn't auto-load .env files. Load them manually.
+function loadEnv() {
+  try {
+    const envPath = path.join(__dirname, '.env');
+    if (fs.existsSync(envPath)) {
+      const envContent = fs.readFileSync(envPath, 'utf8');
+      envContent.split('\\n').forEach(line => {
+        const match = line.match(/^([^=]+)=(.*)$/);
+        if (match) {
+          const key = match[1].trim();
+          let val = match[2].trim();
+          // Remove optional quotes
+          if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
+          if (val.startsWith("'") && val.endsWith("'")) val = val.slice(1, -1);
+          if (!process.env[key]) {
+            process.env[key] = val;
+          }
+        }
+      });
+    }
+  } catch (e) {
+    console.error('Failed to load .env:', e);
+  }
+}
+loadEnv();
 
 // Ensure we run Next.js from the project directory where
 // the .next production build lives (same folder as server.js).
@@ -1306,7 +1334,7 @@ const args = process.argv.slice(2);
 const portIdx = args.indexOf('--port');
 const port = portIdx !== -1 ? args[portIdx + 1] : (process.env.PORT || '3000');
 
-console.log('Preparing Next.js app on port', port, 'with basePath (root)');
+console.log('Preparing Next.js app on port', port, 'with basePath', process.env.NEXT_PUBLIC_BASE_PATH || '(root)');
 
 const app = next({
   dev: false,
