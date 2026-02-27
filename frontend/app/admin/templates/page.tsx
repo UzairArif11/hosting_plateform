@@ -679,18 +679,15 @@ export default function TemplateManagement() {
                                                                     if (hasJwt && demoDeployId) {
                                                                         // New JWT flow: call setup-token API
                                                                         try {
-                                                                            const token = localStorage.getItem('token');
-                                                                            const res = await fetch(`/api/deployments/${demoDeployId}/setup-token`, {
-                                                                                headers: { 'Authorization': `Bearer ${token}` }
-                                                                            });
-                                                                            const data = await res.json();
-                                                                            if (res.ok && data.setupUrl) {
+                                                                            const res = await api.get(`/deployments/${demoDeployId}/setup-token`);
+                                                                            const data = res.data;
+                                                                            if (data.setupUrl) {
                                                                                 window.open(data.setupUrl, '_blank', 'noopener,noreferrer');
                                                                             } else {
                                                                                 toast.error(data.error || 'Failed to get setup URL');
                                                                             }
-                                                                        } catch (err) {
-                                                                            toast.error('Could not open setup page');
+                                                                        } catch (err: any) {
+                                                                            toast.error(err.response?.data?.error || 'Could not open setup page');
                                                                         }
                                                                     } else if (legacySetupUrl !== '#') {
                                                                         // Fallback: old ownerKey flow

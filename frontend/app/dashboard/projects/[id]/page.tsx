@@ -8,6 +8,7 @@ import { fetchProject, deleteProject } from '@/lib/slices/projectsSlice';
 import { fetchDeployments, createDeployment } from '@/lib/slices/deploymentsSlice';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
+import api from '@/lib/api';
 import DeploymentStatus from '@/components/DeploymentStatus';
 import DeploymentSettings from '@/components/DeploymentSettings';
 import {
@@ -130,15 +131,12 @@ export default function ProjectDetailPage() {
         if (openingSetup) return;
         setOpeningSetup(true);
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`/api/deployments/${latestDeployment._id}/setup-token`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            const data = await res.json();
-            if (!res.ok || !data.setupUrl) throw new Error(data.error || 'Failed to get setup URL');
+            const res = await api.get(`/deployments/${latestDeployment._id}/setup-token`);
+            const data = res.data;
+            if (!data.setupUrl) throw new Error(data.error || 'Failed to get setup URL');
             window.open(data.setupUrl, '_blank', 'noopener,noreferrer');
         } catch (err: any) {
-            toast.error(err.message || 'Could not open setup page');
+            toast.error(err.response?.data?.error || err.message || 'Could not open setup page');
         } finally {
             setOpeningSetup(false);
         }

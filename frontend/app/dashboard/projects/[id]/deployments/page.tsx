@@ -6,6 +6,7 @@ import { useSelector } from 'react-redux';
 import { RootState } from '@/lib/store';
 import { useHasFeature } from '@/lib/features';
 import toast from 'react-hot-toast';
+import api from '@/lib/api';
 
 interface Deployment {
     _id: string;
@@ -98,15 +99,12 @@ export default function DeploymentsPage({ params }: { params: { id: string } }) 
         if (openingSetup) return;
         setOpeningSetup(deploymentId);
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`/api/deployments/${deploymentId}/setup-token`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            const data = await res.json();
-            if (!res.ok || !data.setupUrl) throw new Error(data.error || 'Failed to get setup URL');
+            const res = await api.get(`/deployments/${deploymentId}/setup-token`);
+            const data = res.data;
+            if (!data.setupUrl) throw new Error(data.error || 'Failed to get setup URL');
             window.open(data.setupUrl, '_blank', 'noopener,noreferrer');
         } catch (err: any) {
-            toast.error(err.message || 'Could not open setup page');
+            toast.error(err.response?.data?.error || err.message || 'Could not open setup page');
         } finally {
             setOpeningSetup(null);
         }
