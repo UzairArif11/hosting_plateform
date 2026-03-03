@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
 const Plan = require('../models/Plan');
+const Payment = require('../models/Payment');
 const payoneerService = require('../services/payoneer');
 const logger = require('../utils/logger');
 
@@ -182,6 +183,24 @@ router.post('/create-session', [
       });
     }
 
+    // Record pending payment in database
+    try {
+      await Payment.createFromSession({
+        userId: user._id,
+        sessionId: sessionResult.sessionId,
+        amount: amount,
+        currency: currency,
+        type: 'subscription',
+        planId: plan._id,
+        planName: plan.displayName,
+        billingCycle: plan.billingCycle || 'monthly',
+        description: `${plan.displayName} Plan - Monthly Subscription`
+      });
+    } catch (paymentDbError) {
+      logger.error('Failed to record pending payment:', paymentDbError.message);
+      // Don't fail the session creation if DB record fails
+    }
+
     logger.billing('Payment session created', {
       userId: user._id,
       planId: plan._id,
@@ -253,27 +272,37 @@ router.get('/payments', async (req, res) => {
     const { page = 1, limit = 20 } = req.query;
     const user = req.user;
 
-    // This would normally query a payments collection
-    // For now, return mock data
-    const payments = [
-      {
-        id: 'pay_example_1',
-        amount: 29.00,
-        currency: 'USD',
-        status: 'completed',
-        description: 'Growth Plan - Monthly Subscription',
-        createdAt: new Date(),
-        paymentMethod: 'card'
-      }
-    ];
+    const result = await Payment.findUserPayments(user._id, {
+      page: parseInt(page),
+      limit: parseInt(limit)
+    });
+
+    const payments = result.payments.map(p => ({
+      id: p._id,
+      payoneerPaymentId: p.payoneerPaymentId,
+      amount: p.amount,
+      currency: p.currency,
+      formattedAmount: p.formattedAmount,
+      status: p.status,
+      type: p.type,
+      description: p.description || p.planName,
+      planName: p.planName,
+      paymentMethod: p.paymentMethod,
+      invoiceNumber: p.invoiceNumber,
+      createdAt: p.createdAt,
+      completedAt: p.completedAt,
+      failedAt: p.failedAt,
+      failureReason: p.failureReason
+    }));
 
     res.json({
       success: true,
       payments,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: payments.length
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
+        totalPages: result.totalPages
       }
     });
   } catch (error) {
@@ -288,29 +317,33 @@ router.get('/invoices', async (req, res) => {
     const { page = 1, limit = 20 } = req.query;
     const user = req.user;
 
-    // This would normally query an invoices collection
-    // For now, return mock data
-    const invoices = [
-      {
-        id: 'inv_example_1',
-        number: 'INV-2024-001',
-        amount: 29.00,
-        currency: 'USD',
-        status: 'paid',
-        description: 'Growth Plan - January 2024',
-        issuedAt: new Date(),
-        paidAt: new Date(),
-        downloadUrl: null
-      }
-    ];
+    const result = await Payment.findUserInvoices(user._id, {
+      page: parseInt(page),
+      limit: parseInt(limit)
+    });
+
+    const invoices = result.invoices.map(p => ({
+      id: p._id,
+      number: p.invoiceNumber,
+      amount: p.amount,
+      currency: p.currency,
+      formattedAmount: p.formattedAmount,
+      status: 'paid',
+      description: p.description || `${p.planName} - ${p.billingCycle} subscription`,
+      planName: p.planName,
+      issuedAt: p.createdAt,
+      paidAt: p.completedAt,
+      downloadUrl: null // Can be implemented later for PDF invoices
+    }));
 
     res.json({
       success: true,
       invoices,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: invoices.length
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
+        totalPages: result.totalPages
       }
     });
   } catch (error) {

@@ -4,6 +4,8 @@ const crypto = require('crypto');
 const logger = require('../utils/logger');
 const Project = require('../models/Project');
 const Deployment = require('../models/Deployment');
+const Payment = require('../models/Payment');
+const payoneerService = require('../services/payoneer');
 const { hasFeature } = require('../utils/featureCheck');
 
 /**
@@ -329,5 +331,78 @@ async function handlePush(payload) {
     // Trigger build...
   }
 }
+
+/**
+ * POST /api/webhooks/payoneer - Handle Payoneer payment webhooks
+ */
+router.post('/payoneer', express.json(), async (req, res) => {
+  try {
+    const signature = req.headers['x-payoneer-signature'] || req.headers['x-webhook-signature'];
+    const payload = JSON.stringify(req.body);
+
+    // Verify webhook signature
+    if (signature) {
+      const isValid = payoneerService.verifyWebhookSignature(payload, signature);
+      if (!isValid) {
+        logger.error('Payoneer webhook: Invalid signature');
+        return res.status(401).json({ error: 'Invalid webhook signature' });
+      }
+    }
+
+    // Quick acknowledgment (Payoneer expects fast response)
+    res.status(200).json({ received: true });
+
+    const event = req.body;
+
+    logger.info('Payoneer webhook received', {
+      type: event.type,
+      id: event.id,
+      resourceId: event.data?.id
+    });
+
+    // Record payment in database based on event type
+    if (event.type === 'payment.completed' && event.data) {
+      try {
+        await Payment.markCompleted(event.data.id, {
+          sessionId: event.data.reference_id,
+          userId: event.data.metadata?.user_id,
+          planId: event.data.metadata?.plan_id,
+          planName: event.data.metadata?.plan_name,
+          amount: event.data.amount,
+          currency: event.data.currency,
+          description: event.data.description,
+          paymentMethod: event.data.payment_method || 'card',
+          metadata: event.data.metadata
+        });
+        logger.info('Payment recorded in database', { paymentId: event.data.id });
+      } catch (dbError) {
+        logger.error('Failed to record payment in database:', dbError.message);
+      }
+    } else if (event.type === 'payment.failed' && event.data) {
+      try {
+        await Payment.markFailed(event.data.id, event.data.failure_reason || 'Payment failed');
+        logger.info('Payment failure recorded', { paymentId: event.data.id });
+      } catch (dbError) {
+        logger.error('Failed to record payment failure:', dbError.message);
+      }
+    }
+
+    // Delegate to payoneer service for plan upgrades, status changes, etc.
+    const result = await payoneerService.handleWebhook(event);
+
+    if (!result.success) {
+      logger.error('Payoneer webhook handler returned error:', result.error);
+    } else {
+      logger.info('Payoneer webhook processed successfully', {
+        type: event.type,
+        handled: result.handled
+      });
+    }
+
+  } catch (error) {
+    logger.error('Payoneer webhook error:', error.message);
+    // Don't fail — Payoneer will retry on 5xx
+  }
+});
 
 module.exports = router;
