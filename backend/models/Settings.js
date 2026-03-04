@@ -116,6 +116,26 @@ const settingsSchema = new mongoose.Schema({
         }
     },
 
+    // Payment Methods Configuration (Admin toggles)
+    paymentConfig: {
+        payoneer: {
+            enabled: { type: Boolean, default: false }
+        },
+        jazzcashEasypaisa: {
+            enabled: { type: Boolean, default: false }
+        },
+        manualBank: {
+            enabled: { type: Boolean, default: false },
+            accounts: [{
+                bankName: { type: String, required: true },
+                accountTitle: { type: String, required: true },
+                accountNumber: { type: String, required: true },
+                iban: { type: String, default: '' },
+                isActive: { type: Boolean, default: true }
+            }]
+        }
+    },
+
     // Metadata
     updatedBy: {
         type: mongoose.Schema.Types.ObjectId,

@@ -74,6 +74,7 @@ websocketService.initializeWebSocket(server);
 app.use(helmet());
 app.use(compression());
 app.use(express.static('public')); // Serve static files (e.g. tracker.js)
+app.use('/uploads', express.static('uploads')); // Serve payment screenshot uploads
 app.use(cors({
   origin: process.env.FRONTEND_URL || "http://localhost:3000",
   credentials: true
@@ -228,10 +229,10 @@ async function initializeSSHTunnels() {
   if (process.env.EC3_SERVER_IP) {
     // Check if EC3 is the same as EC1 (same server)
     const localIP = process.env.EC1_SERVER_IP;
-    const isSameServer = process.env.EC3_SERVER_IP === localIP || 
-                         process.env.EC3_SERVER_IP === process.env.EC2_SERVER_IP ||
-                         !process.env.EC1_SERVER_IP; // If no EC1_SERVER_IP, assume EC3 is local
-    
+    const isSameServer = process.env.EC3_SERVER_IP === localIP ||
+      process.env.EC3_SERVER_IP === process.env.EC2_SERVER_IP ||
+      !process.env.EC1_SERVER_IP; // If no EC1_SERVER_IP, assume EC3 is local
+
     if (isSameServer) {
       console.log(`   Skipping EC3 tunnel (same server as EC1) - using local Docker directly`);
       tunnels.push({ server: 'EC3', success: true, local: true });
@@ -259,7 +260,7 @@ const PORT = process.env.PORT || 5000;
 (async () => {
   try {
     await connectDB();
-    
+
     // Run migrations with error handling (non-fatal)
     try {
       logger.info('Running database migrations...');
@@ -269,7 +270,7 @@ const PORT = process.env.PORT || 5000;
       logger.error('⚠️  Migration failed (non-fatal):', migrationError?.message || String(migrationError));
       // Continue server startup even if migration fails
     }
-    
+
     // Initialize SSH tunnels with error handling (non-fatal)
     try {
       await initializeSSHTunnels();

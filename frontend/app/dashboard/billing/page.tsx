@@ -10,16 +10,58 @@ import {
     StarIcon,
     ServerIcon,
     CpuChipIcon,
+    CloudArrowUpIcon,
+    BanknotesIcon,
+    DevicePhoneMobileIcon,
+    ClockIcon,
+    XMarkIcon,
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+
+interface PaymentConfig {
+    payoneer: { enabled: boolean };
+    jazzcashEasypaisa: { enabled: boolean };
+    manualBank: {
+        enabled: boolean;
+        accounts: Array<{
+            id: string;
+            bankName: string;
+            accountTitle: string;
+            accountNumber: string;
+            iban: string;
+        }>;
+    };
+}
 
 export default function BillingPage() {
     const { user } = useSelector((state: RootState) => state.auth);
     const [availablePlans, setAvailablePlans] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    const [paymentConfig, setPaymentConfig] = useState<PaymentConfig | null>(null);
+
+    // Payment modal state
+    const [showPaymentModal, setShowPaymentModal] = useState(false);
+    const [selectedPlan, setSelectedPlan] = useState<any>(null);
+    const [paymentMethod, setPaymentMethod] = useState('');
+    const [paymentLoading, setPaymentLoading] = useState(false);
+
+    // Manual payment state
+    const [selectedBankAccount, setSelectedBankAccount] = useState('');
+    const [senderName, setSenderName] = useState('');
+    const [senderAccount, setSenderAccount] = useState('');
+    const [transactionId, setTransactionId] = useState('');
+    const [screenshot, setScreenshot] = useState<File | null>(null);
+
+    // JazzCash/EasyPaisa
+    const [mobileNumber, setMobileNumber] = useState('');
+
+    // Manual payment history
+    const [manualPayments, setManualPayments] = useState<any[]>([]);
 
     useEffect(() => {
         fetchPlans();
+        fetchPaymentConfig();
+        fetchManualPayments();
     }, []);
 
     const fetchPlans = async () => {
@@ -28,14 +70,155 @@ export default function BillingPage() {
             setAvailablePlans(res.data.plans || []);
         } catch (error) {
             console.error('Failed to fetch plans', error);
-            // Fallback or toast
         } finally {
             setLoading(false);
         }
     };
 
-    const handleUpgrade = async (planId: string) => {
-        toast.error('Payment integration is not configured in this demo.');
+    const fetchPaymentConfig = async () => {
+        try {
+            const res = await api.get('/billing/payment-config');
+            setPaymentConfig(res.data.paymentConfig);
+        } catch (error) {
+            console.error('Failed to fetch payment config', error);
+        }
+    };
+
+    const fetchManualPayments = async () => {
+        try {
+            const res = await api.get('/billing/manual-payments');
+            setManualPayments(res.data.payments || []);
+        } catch (error) {
+            console.error('Failed to fetch manual payments', error);
+        }
+    };
+
+    const handleUpgrade = (plan: any) => {
+        if (!paymentConfig) {
+            toast.error('Payment methods are not configured. Contact admin.');
+            return;
+        }
+        const hasAnyMethod = paymentConfig.payoneer.enabled ||
+            paymentConfig.jazzcashEasypaisa.enabled ||
+            paymentConfig.manualBank.enabled;
+
+        if (!hasAnyMethod) {
+            toast.error('No payment methods are currently available. Contact admin.');
+            return;
+        }
+
+        setSelectedPlan(plan);
+        setPaymentMethod('');
+        setShowPaymentModal(true);
+    };
+
+    const handlePayoneerCheckout = async () => {
+        setPaymentLoading(true);
+        try {
+            const res = await api.post('/billing/create-session', { planId: selectedPlan.id });
+            if (res.data.success && res.data.session?.checkoutUrl) {
+                window.location.href = res.data.session.checkoutUrl;
+            } else {
+                toast.error('Failed to create payment session');
+            }
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'Payment session creation failed');
+        } finally {
+            setPaymentLoading(false);
+        }
+    };
+
+    const handleJazzCashCheckout = async () => {
+        if (!mobileNumber.trim()) {
+            toast.error('Please enter your JazzCash mobile number');
+            return;
+        }
+        setPaymentLoading(true);
+        try {
+            const res = await api.post('/billing/create-session-jazzcash', {
+                planId: selectedPlan.id,
+                mobileNumber
+            });
+            if (res.data.success && res.data.session?.checkoutUrl) {
+                window.location.href = res.data.session.checkoutUrl;
+            } else {
+                toast.success('Payment initiated! Complete payment on your JazzCash app.');
+            }
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'JazzCash session creation failed');
+        } finally {
+            setPaymentLoading(false);
+        }
+    };
+
+    const handleEasyPaisaCheckout = async () => {
+        setPaymentLoading(true);
+        try {
+            const res = await api.post('/billing/create-session-easypaisa', {
+                planId: selectedPlan.id,
+                mobileNumber: mobileNumber || ''
+            });
+            if (res.data.success && res.data.session?.checkoutUrl) {
+                window.location.href = res.data.session.checkoutUrl;
+            } else {
+                toast.success('Payment initiated! Complete payment on your EasyPaisa app.');
+            }
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'EasyPaisa session creation failed');
+        } finally {
+            setPaymentLoading(false);
+        }
+    };
+
+    const handleManualPayment = async () => {
+        if (!selectedBankAccount || !senderName || !screenshot) {
+            toast.error('Please fill all required fields and attach screenshot');
+            return;
+        }
+        setPaymentLoading(true);
+        try {
+            const formData = new FormData();
+            formData.append('planId', selectedPlan.id);
+            formData.append('bankAccountId', selectedBankAccount);
+            formData.append('senderName', senderName);
+            formData.append('senderAccount', senderAccount);
+            formData.append('transactionId', transactionId);
+            formData.append('screenshot', screenshot);
+
+            const res = await api.post('/billing/manual-payment', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+
+            if (res.data.success) {
+                toast.success(res.data.message || 'Payment submitted! Admin will verify shortly.');
+                setShowPaymentModal(false);
+                resetForm();
+                fetchManualPayments();
+            }
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'Failed to submit payment');
+        } finally {
+            setPaymentLoading(false);
+        }
+    };
+
+    const resetForm = () => {
+        setSelectedBankAccount('');
+        setSenderName('');
+        setSenderAccount('');
+        setTransactionId('');
+        setScreenshot(null);
+        setMobileNumber('');
+        setPaymentMethod('');
+    };
+
+    const statusBadge = (status: string) => {
+        switch (status) {
+            case 'pending': return <span className="px-2 py-0.5 bg-yellow-500/10 text-yellow-400 rounded-full text-xs font-medium">⏳ Pending Verification</span>;
+            case 'verified': return <span className="px-2 py-0.5 bg-green-500/10 text-green-400 rounded-full text-xs font-medium">✅ Verified & Upgraded</span>;
+            case 'rejected': return <span className="px-2 py-0.5 bg-red-500/10 text-red-400 rounded-full text-xs font-medium">❌ Rejected</span>;
+            default: return null;
+        }
     };
 
     return (
@@ -75,7 +258,7 @@ export default function BillingPage() {
                     {/* Dynamic User Resource Display */}
                     <div className="bg-black/30 backdrop-blur-md rounded-2xl p-6 border border-white/10">
                         <h3 className="text-xs font-bold uppercase tracking-wider text-purple-200 mb-4 flex items-center gap-2">
-                            <ServerIcon className="h-4 w-4" /> Your Plan Limits (Marketing)
+                            <ServerIcon className="h-4 w-4" /> Your Plan Limits
                         </h3>
 
                         <div className="grid grid-cols-2 gap-4">
@@ -112,7 +295,6 @@ export default function BillingPage() {
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                         {availablePlans.map((plan) => {
                             const isCurrent = user?.plan?._id === plan.id || user?.plan === plan.id;
-                            // Use resources (which are now Display resources from backend)
                             const displayResources = plan.resources || {};
 
                             return (
@@ -151,13 +333,11 @@ export default function BillingPage() {
 
                                     <div className="flex-1">
                                         <ul className="space-y-3 mb-6">
-                                            {/* Auto-generated features based on resources if features list is empty or generic */}
                                             {plan.features && plan.features.length > 0 ? (
                                                 plan.features
                                                     .filter((feature: any) => {
-                                                        // Only show enabled features
                                                         if (typeof feature === 'string') return true;
-                                                        return feature.enabled !== false; // Default to enabled if not specified
+                                                        return feature.enabled !== false;
                                                     })
                                                     .map((feature: any, index: number) => (
                                                         <li key={index} className="flex items-start space-x-2">
@@ -173,7 +353,7 @@ export default function BillingPage() {
                                                 <>
                                                     <li className="flex items-start space-x-2">
                                                         <CheckIcon className="h-5 w-5 text-green-500 flex-shrink-0 mt-0.5" />
-                                                        <span className="text-gray-300 text-sm">{displayResources.ram} GB RAM (Display)</span>
+                                                        <span className="text-gray-300 text-sm">{displayResources.ram} GB RAM</span>
                                                     </li>
                                                     <li className="flex items-start space-x-2">
                                                         <CheckIcon className="h-5 w-5 text-green-500 flex-shrink-0 mt-0.5" />
@@ -190,7 +370,7 @@ export default function BillingPage() {
 
                                     <button
                                         disabled={isCurrent}
-                                        onClick={() => handleUpgrade(plan.id)}
+                                        onClick={() => handleUpgrade(plan)}
                                         className={`w-full py-3 rounded-xl font-bold transition-all ${isCurrent
                                             ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
                                             : 'bg-white text-black hover:bg-gray-200'
@@ -205,17 +385,305 @@ export default function BillingPage() {
                 )}
             </div>
 
-            {/* Payment Methods */}
-            <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-                <h3 className="text-lg font-semibold text-white mb-4">Payment Methods</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 text-center hover:border-purple-500 transition cursor-pointer">
-                        <CreditCardIcon className="h-8 w-8 text-white mx-auto mb-2" />
-                        <p className="text-white text-sm">Credit Card</p>
+            {/* Payment Methods - Dynamic based on admin config */}
+            {paymentConfig && (
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                    <h3 className="text-lg font-semibold text-white mb-4">Available Payment Methods</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {paymentConfig.payoneer.enabled && (
+                            <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 text-center hover:border-purple-500 transition">
+                                <CreditCardIcon className="h-8 w-8 text-blue-400 mx-auto mb-2" />
+                                <p className="text-white text-sm font-medium">Payoneer</p>
+                                <p className="text-gray-500 text-xs">Automatic</p>
+                            </div>
+                        )}
+                        {paymentConfig.jazzcashEasypaisa.enabled && (
+                            <>
+                                <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 text-center hover:border-purple-500 transition">
+                                    <DevicePhoneMobileIcon className="h-8 w-8 text-red-400 mx-auto mb-2" />
+                                    <p className="text-white text-sm font-medium">JazzCash</p>
+                                    <p className="text-gray-500 text-xs">Automatic</p>
+                                </div>
+                                <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 text-center hover:border-purple-500 transition">
+                                    <DevicePhoneMobileIcon className="h-8 w-8 text-green-400 mx-auto mb-2" />
+                                    <p className="text-white text-sm font-medium">EasyPaisa</p>
+                                    <p className="text-gray-500 text-xs">Automatic</p>
+                                </div>
+                            </>
+                        )}
+                        {paymentConfig.manualBank.enabled && (
+                            <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 text-center hover:border-purple-500 transition">
+                                <BanknotesIcon className="h-8 w-8 text-yellow-400 mx-auto mb-2" />
+                                <p className="text-white text-sm font-medium">Bank Transfer</p>
+                                <p className="text-gray-500 text-xs">Manual Verification</p>
+                            </div>
+                        )}
                     </div>
-                    {/* Add other dynamic methods here if needed */}
                 </div>
-            </div>
+            )}
+
+            {/* Manual Payment History */}
+            {manualPayments.length > 0 && (
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                    <h3 className="text-lg font-semibold text-white mb-4">Payment History</h3>
+                    <div className="space-y-3">
+                        {manualPayments.map((payment: any) => (
+                            <div key={payment._id} className="flex items-center justify-between bg-gray-800 p-4 rounded-lg">
+                                <div>
+                                    <p className="text-white font-medium">{payment.planName}</p>
+                                    <p className="text-sm text-gray-400">
+                                        {payment.currency === 'PKR' ? '₨' : '$'}{payment.amount} — {new Date(payment.createdAt).toLocaleDateString()}
+                                    </p>
+                                </div>
+                                {statusBadge(payment.status)}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Payment Method Selection Modal */}
+            {showPaymentModal && selectedPlan && paymentConfig && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+                    <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-xl w-full space-y-5 my-8">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h2 className="text-xl font-bold text-white">Upgrade to {selectedPlan.displayName}</h2>
+                                <p className="text-gray-400 text-sm">${selectedPlan.price}/month</p>
+                            </div>
+                            <button onClick={() => { setShowPaymentModal(false); resetForm(); }} className="text-gray-400 hover:text-white">
+                                <XMarkIcon className="h-6 w-6" />
+                            </button>
+                        </div>
+
+                        {/* Payment Method Selection */}
+                        {!paymentMethod && (
+                            <div className="space-y-3">
+                                <p className="text-gray-300 text-sm font-medium">Choose payment method:</p>
+
+                                {paymentConfig.payoneer.enabled && (
+                                    <button
+                                        onClick={() => setPaymentMethod('payoneer')}
+                                        className="w-full flex items-center gap-4 p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-purple-500 transition text-left"
+                                    >
+                                        <CreditCardIcon className="h-8 w-8 text-blue-400" />
+                                        <div>
+                                            <p className="text-white font-medium">Payoneer</p>
+                                            <p className="text-gray-400 text-sm">Pay with card via Payoneer. Auto-upgrade.</p>
+                                        </div>
+                                    </button>
+                                )}
+
+                                {paymentConfig.jazzcashEasypaisa.enabled && (
+                                    <>
+                                        <button
+                                            onClick={() => setPaymentMethod('jazzcash')}
+                                            className="w-full flex items-center gap-4 p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-red-500 transition text-left"
+                                        >
+                                            <DevicePhoneMobileIcon className="h-8 w-8 text-red-400" />
+                                            <div>
+                                                <p className="text-white font-medium">JazzCash</p>
+                                                <p className="text-gray-400 text-sm">Pay via JazzCash mobile wallet. Auto-upgrade.</p>
+                                            </div>
+                                        </button>
+                                        <button
+                                            onClick={() => setPaymentMethod('easypaisa')}
+                                            className="w-full flex items-center gap-4 p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-green-500 transition text-left"
+                                        >
+                                            <DevicePhoneMobileIcon className="h-8 w-8 text-green-400" />
+                                            <div>
+                                                <p className="text-white font-medium">EasyPaisa</p>
+                                                <p className="text-gray-400 text-sm">Pay via EasyPaisa mobile wallet. Auto-upgrade.</p>
+                                            </div>
+                                        </button>
+                                    </>
+                                )}
+
+                                {paymentConfig.manualBank.enabled && (
+                                    <button
+                                        onClick={() => setPaymentMethod('manual')}
+                                        className="w-full flex items-center gap-4 p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-yellow-500 transition text-left"
+                                    >
+                                        <BanknotesIcon className="h-8 w-8 text-yellow-400" />
+                                        <div>
+                                            <p className="text-white font-medium">Bank Transfer (Manual)</p>
+                                            <p className="text-gray-400 text-sm">Transfer to our bank account and upload screenshot. Admin verifies.</p>
+                                        </div>
+                                    </button>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Payoneer Checkout */}
+                        {paymentMethod === 'payoneer' && (
+                            <div className="space-y-4">
+                                <button onClick={() => setPaymentMethod('')} className="text-sm text-purple-400 hover:text-purple-300">← Back to methods</button>
+                                <p className="text-gray-300 text-sm">You will be redirected to Payoneer's secure checkout to complete your payment.</p>
+                                <button
+                                    onClick={handlePayoneerCheckout}
+                                    disabled={paymentLoading}
+                                    className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold transition disabled:opacity-50"
+                                >
+                                    {paymentLoading ? 'Redirecting...' : `Pay $${selectedPlan.price} with Payoneer`}
+                                </button>
+                            </div>
+                        )}
+
+                        {/* JazzCash Checkout */}
+                        {paymentMethod === 'jazzcash' && (
+                            <div className="space-y-4">
+                                <button onClick={() => setPaymentMethod('')} className="text-sm text-purple-400 hover:text-purple-300">← Back to methods</button>
+                                <div>
+                                    <label className="block text-sm text-gray-400 mb-1">JazzCash Mobile Number *</label>
+                                    <input
+                                        type="tel"
+                                        value={mobileNumber}
+                                        onChange={(e) => setMobileNumber(e.target.value)}
+                                        placeholder="03XX-XXXXXXX"
+                                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                                    />
+                                </div>
+                                <button
+                                    onClick={handleJazzCashCheckout}
+                                    disabled={paymentLoading}
+                                    className="w-full bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl font-bold transition disabled:opacity-50"
+                                >
+                                    {paymentLoading ? 'Processing...' : 'Pay with JazzCash'}
+                                </button>
+                            </div>
+                        )}
+
+                        {/* EasyPaisa Checkout */}
+                        {paymentMethod === 'easypaisa' && (
+                            <div className="space-y-4">
+                                <button onClick={() => setPaymentMethod('')} className="text-sm text-purple-400 hover:text-purple-300">← Back to methods</button>
+                                <div>
+                                    <label className="block text-sm text-gray-400 mb-1">EasyPaisa Mobile Number (optional)</label>
+                                    <input
+                                        type="tel"
+                                        value={mobileNumber}
+                                        onChange={(e) => setMobileNumber(e.target.value)}
+                                        placeholder="03XX-XXXXXXX"
+                                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-green-500"
+                                    />
+                                </div>
+                                <button
+                                    onClick={handleEasyPaisaCheckout}
+                                    disabled={paymentLoading}
+                                    className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-bold transition disabled:opacity-50"
+                                >
+                                    {paymentLoading ? 'Processing...' : 'Pay with EasyPaisa'}
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Manual Bank Transfer */}
+                        {paymentMethod === 'manual' && paymentConfig.manualBank.accounts.length > 0 && (
+                            <div className="space-y-4">
+                                <button onClick={() => setPaymentMethod('')} className="text-sm text-purple-400 hover:text-purple-300">← Back to methods</button>
+
+                                {/* Bank Accounts to transfer to */}
+                                <div>
+                                    <label className="block text-sm text-gray-400 mb-2">Select account to send money to: *</label>
+                                    <div className="space-y-2">
+                                        {paymentConfig.manualBank.accounts.map((acc) => (
+                                            <label
+                                                key={acc.id}
+                                                className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition ${selectedBankAccount === acc.id
+                                                        ? 'border-purple-500 bg-purple-500/10'
+                                                        : 'border-gray-700 bg-gray-800 hover:border-gray-600'
+                                                    }`}
+                                            >
+                                                <input
+                                                    type="radio"
+                                                    name="bank"
+                                                    value={acc.id}
+                                                    checked={selectedBankAccount === acc.id}
+                                                    onChange={(e) => setSelectedBankAccount(e.target.value)}
+                                                    className="accent-purple-500"
+                                                />
+                                                <div>
+                                                    <p className="text-white font-medium">{acc.bankName}</p>
+                                                    <p className="text-sm text-gray-400">{acc.accountTitle} — {acc.accountNumber}</p>
+                                                    {acc.iban && <p className="text-xs text-gray-500">IBAN: {acc.iban}</p>}
+                                                </div>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-sm text-gray-400 mb-1">Your Name (Sender) *</label>
+                                        <input
+                                            type="text"
+                                            value={senderName}
+                                            onChange={(e) => setSenderName(e.target.value)}
+                                            placeholder="Your full name"
+                                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm text-gray-400 mb-1">Your Account/IBAN</label>
+                                        <input
+                                            type="text"
+                                            value={senderAccount}
+                                            onChange={(e) => setSenderAccount(e.target.value)}
+                                            placeholder="Your account/IBAN number"
+                                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm text-gray-400 mb-1">Transaction ID (from receipt)</label>
+                                    <input
+                                        type="text"
+                                        value={transactionId}
+                                        onChange={(e) => setTransactionId(e.target.value)}
+                                        placeholder="Transaction reference number"
+                                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                    />
+                                </div>
+
+                                {/* Screenshot Upload */}
+                                <div>
+                                    <label className="block text-sm text-gray-400 mb-1">Payment Screenshot *</label>
+                                    <div className="border-2 border-dashed border-gray-700 rounded-xl p-6 text-center hover:border-purple-500 transition cursor-pointer"
+                                        onClick={() => document.getElementById('screenshot-input')?.click()}
+                                    >
+                                        <CloudArrowUpIcon className="h-10 w-10 text-gray-500 mx-auto mb-2" />
+                                        {screenshot ? (
+                                            <p className="text-green-400 text-sm">✅ {screenshot.name}</p>
+                                        ) : (
+                                            <p className="text-gray-400 text-sm">Click to upload payment screenshot (JPG, PNG, PDF — max 5MB)</p>
+                                        )}
+                                        <input
+                                            id="screenshot-input"
+                                            type="file"
+                                            accept="image/*,.pdf"
+                                            onChange={(e) => setScreenshot(e.target.files?.[0] || null)}
+                                            className="hidden"
+                                        />
+                                    </div>
+                                </div>
+
+                                <button
+                                    onClick={handleManualPayment}
+                                    disabled={paymentLoading}
+                                    className="w-full bg-yellow-600 hover:bg-yellow-700 text-white py-3 rounded-xl font-bold transition disabled:opacity-50"
+                                >
+                                    {paymentLoading ? 'Submitting...' : 'Submit Payment for Verification'}
+                                </button>
+
+                                <p className="text-xs text-gray-500 text-center">
+                                    After submission, admin will verify your payment and upgrade your account. This usually takes a few hours.
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

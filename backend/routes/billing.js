@@ -1,10 +1,45 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const User = require('../models/User');
 const Plan = require('../models/Plan');
 const Payment = require('../models/Payment');
+const ManualPayment = require('../models/ManualPayment');
+const Settings = require('../models/Settings');
 const payoneerService = require('../services/payoneer');
+const jazzcashService = require('../services/jazzcash');
+const easypaisaService = require('../services/easypaisa');
 const logger = require('../utils/logger');
+
+// Multer config for screenshot uploads
+const uploadsDir = path.join(__dirname, '..', 'uploads', 'payments');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadsDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `payment_${req.user._id}_${Date.now()}${ext}`);
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+  fileFilter: (req, file, cb) => {
+    const allowed = ['.jpg', '.jpeg', '.png', '.webp', '.pdf'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowed.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only images (jpg, png, webp) and PDF files are allowed'));
+    }
+  }
+});
 
 const router = express.Router();
 
@@ -451,6 +486,269 @@ router.get('/exchange-rates', async (req, res) => {
   } catch (error) {
     logger.error('Get exchange rates error:', error.message);
     res.status(500).json({ success: false, error: 'Failed to fetch exchange rates' });
+  }
+});
+
+// Get public payment configuration (which methods are enabled)
+router.get('/payment-config', async (req, res) => {
+  try {
+    const settings = await Settings.getSettings();
+    const config = settings.paymentConfig || {};
+
+    const response = {
+      payoneer: { enabled: config.payoneer?.enabled || false },
+      jazzcashEasypaisa: { enabled: config.jazzcashEasypaisa?.enabled || false },
+      manualBank: {
+        enabled: config.manualBank?.enabled || false,
+        accounts: (config.manualBank?.accounts || []).filter(a => a.isActive).map(a => ({
+          id: a._id,
+          bankName: a.bankName,
+          accountTitle: a.accountTitle,
+          accountNumber: a.accountNumber,
+          iban: a.iban
+        }))
+      }
+    };
+
+    res.json({ success: true, paymentConfig: response });
+  } catch (error) {
+    logger.error('Get payment config error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch payment configuration' });
+  }
+});
+
+// Submit manual bank transfer payment
+router.post('/manual-payment', upload.single('screenshot'), async (req, res) => {
+  try {
+    const { planId, bankAccountId, senderName, senderAccount, transactionId } = req.body;
+    const user = req.user;
+
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'Screenshot is required' });
+    }
+
+    if (!planId || !bankAccountId || !senderName) {
+      return res.status(400).json({ success: false, error: 'Plan, bank account, and sender name are required' });
+    }
+
+    // Get plan
+    const plan = await Plan.findById(planId);
+    if (!plan || !plan.isActive) {
+      return res.status(404).json({ success: false, error: 'Plan not found' });
+    }
+
+    // Get bank account details from settings
+    const settings = await Settings.getSettings();
+    const bankAccount = settings.paymentConfig?.manualBank?.accounts?.id(bankAccountId);
+    if (!bankAccount) {
+      return res.status(404).json({ success: false, error: 'Bank account not found' });
+    }
+
+    // Check if user already has a pending manual payment
+    const existingPending = await ManualPayment.findOne({ user: user._id, status: 'pending' });
+    if (existingPending) {
+      return res.status(400).json({
+        success: false,
+        error: 'You already have a pending payment verification. Please wait for admin approval.'
+      });
+    }
+
+    // Get plan price in PKR
+    const amount = plan.getPricingForCurrency('pkr') || plan.getPricingForCurrency('usd');
+
+    // Create manual payment record
+    const manualPayment = await ManualPayment.create({
+      user: user._id,
+      plan: plan._id,
+      planName: plan.displayName,
+      amount: amount,
+      currency: 'PKR',
+      bankAccount: {
+        bankName: bankAccount.bankName,
+        accountTitle: bankAccount.accountTitle,
+        accountNumber: bankAccount.accountNumber,
+        iban: bankAccount.iban
+      },
+      senderName,
+      senderAccount: senderAccount || '',
+      transactionId: transactionId || '',
+      screenshot: `/uploads/payments/${req.file.filename}`
+    });
+
+    logger.billing('Manual payment submitted', {
+      userId: user._id,
+      planId: plan._id,
+      amount,
+      manualPaymentId: manualPayment._id
+    });
+
+    res.json({
+      success: true,
+      message: 'Payment submitted successfully. Admin will verify your payment shortly.',
+      payment: {
+        id: manualPayment._id,
+        status: manualPayment.status,
+        amount: manualPayment.amount,
+        planName: manualPayment.planName,
+        createdAt: manualPayment.createdAt
+      }
+    });
+  } catch (error) {
+    logger.error('Manual payment submission error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to submit payment' });
+  }
+});
+
+// Get user's manual payment history
+router.get('/manual-payments', async (req, res) => {
+  try {
+    const { page = 1, limit = 20 } = req.query;
+    const result = await ManualPayment.getUserPayments(req.user._id, {
+      page: parseInt(page),
+      limit: parseInt(limit)
+    });
+
+    res.json({
+      success: true,
+      payments: result.payments,
+      pagination: {
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
+        totalPages: result.totalPages
+      }
+    });
+  } catch (error) {
+    logger.error('Get manual payments error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch manual payments' });
+  }
+});
+
+// Create JazzCash payment session
+router.post('/create-session-jazzcash', [
+  body('planId').isMongoId().withMessage('Valid plan ID is required'),
+  body('mobileNumber').isString().withMessage('Mobile number is required')
+], handleValidationErrors, async (req, res) => {
+  try {
+    const { planId, mobileNumber } = req.body;
+    const user = req.user;
+
+    const plan = await Plan.findById(planId);
+    if (!plan || !plan.isActive) {
+      return res.status(404).json({ success: false, error: 'Plan not found' });
+    }
+
+    const amount = plan.getPricingForCurrency('pkr');
+    if (!amount || amount === 0) {
+      return res.status(400).json({ success: false, error: 'PKR pricing not available for this plan' });
+    }
+
+    const sessionResult = await jazzcashService.createPaymentSession({
+      amount,
+      mobileNumber,
+      userId: user._id.toString(),
+      planId: plan._id.toString(),
+      planName: plan.displayName,
+      description: `${plan.displayName} Plan - Monthly`,
+      returnUrl: `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/webhooks/jazzcash`
+    });
+
+    if (!sessionResult.success) {
+      return res.status(500).json({ success: false, error: sessionResult.error });
+    }
+
+    // Record pending payment
+    try {
+      await Payment.createFromSession({
+        userId: user._id,
+        sessionId: sessionResult.sessionId,
+        amount,
+        currency: 'PKR',
+        type: 'subscription',
+        planId: plan._id,
+        planName: plan.displayName,
+        description: `${plan.displayName} Plan via JazzCash`
+      });
+    } catch (err) {
+      logger.error('Failed to record JazzCash pending payment:', err.message);
+    }
+
+    res.json({
+      success: true,
+      session: {
+        id: sessionResult.sessionId,
+        checkoutUrl: sessionResult.checkoutUrl
+      },
+      plan: { name: plan.displayName, price: amount, currency: 'PKR' }
+    });
+  } catch (error) {
+    logger.error('JazzCash session error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to create JazzCash payment session' });
+  }
+});
+
+// Create EasyPaisa payment session
+router.post('/create-session-easypaisa', [
+  body('planId').isMongoId().withMessage('Valid plan ID is required'),
+  body('mobileNumber').optional().isString()
+], handleValidationErrors, async (req, res) => {
+  try {
+    const { planId, mobileNumber } = req.body;
+    const user = req.user;
+
+    const plan = await Plan.findById(planId);
+    if (!plan || !plan.isActive) {
+      return res.status(404).json({ success: false, error: 'Plan not found' });
+    }
+
+    const amount = plan.getPricingForCurrency('pkr');
+    if (!amount || amount === 0) {
+      return res.status(400).json({ success: false, error: 'PKR pricing not available for this plan' });
+    }
+
+    const sessionResult = await easypaisaService.createPaymentSession({
+      amount,
+      mobileNumber: mobileNumber || '',
+      email: user.email,
+      userId: user._id.toString(),
+      planId: plan._id.toString(),
+      planName: plan.displayName,
+      returnUrl: `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/webhooks/easypaisa`
+    });
+
+    if (!sessionResult.success) {
+      return res.status(500).json({ success: false, error: sessionResult.error });
+    }
+
+    // Record pending payment
+    try {
+      await Payment.createFromSession({
+        userId: user._id,
+        sessionId: sessionResult.sessionId,
+        amount,
+        currency: 'PKR',
+        type: 'subscription',
+        planId: plan._id,
+        planName: plan.displayName,
+        description: `${plan.displayName} Plan via EasyPaisa`
+      });
+    } catch (err) {
+      logger.error('Failed to record EasyPaisa pending payment:', err.message);
+    }
+
+    res.json({
+      success: true,
+      session: {
+        id: sessionResult.sessionId,
+        checkoutUrl: sessionResult.checkoutUrl,
+        formData: sessionResult.formData,
+        method: sessionResult.method
+      },
+      plan: { name: plan.displayName, price: amount, currency: 'PKR' }
+    });
+  } catch (error) {
+    logger.error('EasyPaisa session error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to create EasyPaisa payment session' });
   }
 });
 

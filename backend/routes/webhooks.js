@@ -405,4 +405,148 @@ router.post('/payoneer', express.json(), async (req, res) => {
   }
 });
 
+/**
+ * POST /api/webhooks/jazzcash - Handle JazzCash payment callbacks
+ */
+router.post('/jazzcash', express.urlencoded({ extended: true }), async (req, res) => {
+  try {
+    const jazzcashService = require('../services/jazzcash');
+    const data = req.body;
+
+    logger.info('JazzCash webhook received', { txnRefNo: data.pp_TxnRefNo, responseCode: data.pp_ResponseCode });
+
+    // Quick acknowledgment
+    res.status(200).json({ received: true });
+
+    // Verify signature
+    if (!jazzcashService.verifySignature(data)) {
+      logger.error('JazzCash webhook: Invalid signature');
+      return;
+    }
+
+    // Handle callback
+    const result = await jazzcashService.handleCallback(data);
+
+    if (result.success && result.status === 'completed') {
+      // Record payment
+      try {
+        await Payment.markCompleted(result.txnRefNo, {
+          sessionId: result.txnRefNo,
+          userId: result.metadata?.user_id,
+          planId: result.metadata?.plan_id,
+          planName: result.metadata?.plan_name,
+          amount: result.amount,
+          currency: 'PKR',
+          paymentMethod: 'jazzcash',
+          metadata: result.metadata
+        });
+      } catch (dbErr) {
+        logger.error('Failed to record JazzCash payment:', dbErr.message);
+      }
+
+      // Upgrade user plan
+      if (result.metadata?.user_id && result.metadata?.plan_id) {
+        try {
+          const User = require('../models/User');
+          const Plan = require('../models/Plan');
+          const user = await User.findById(result.metadata.user_id);
+          const plan = await Plan.findById(result.metadata.plan_id);
+
+          if (user && plan) {
+            user.plan = plan._id;
+            user.subscriptionStatus = 'active';
+            user.status = 'active';
+            user.isTrialActive = false;
+            await user.save();
+
+            logger.info('User plan upgraded via JazzCash', {
+              userId: user._id,
+              planName: plan.displayName,
+              amount: result.amount
+            });
+          }
+        } catch (upgradeErr) {
+          logger.error('Failed to upgrade user after JazzCash payment:', upgradeErr.message);
+        }
+      }
+    } else if (result.success && result.status === 'failed') {
+      try {
+        await Payment.markFailed(result.txnRefNo, result.responseMessage || 'JazzCash payment failed');
+      } catch (dbErr) {
+        logger.error('Failed to record JazzCash failure:', dbErr.message);
+      }
+    }
+  } catch (error) {
+    logger.error('JazzCash webhook error:', error.message);
+  }
+});
+
+/**
+ * POST /api/webhooks/easypaisa - Handle EasyPaisa payment callbacks
+ */
+router.post('/easypaisa', express.urlencoded({ extended: true }), async (req, res) => {
+  try {
+    const easypaisaService = require('../services/easypaisa');
+    const data = req.body;
+
+    logger.info('EasyPaisa webhook received', { orderRefNum: data.orderRefNum, responseCode: data.responseCode });
+
+    // Quick acknowledgment
+    res.status(200).json({ received: true });
+
+    // Handle callback
+    const result = await easypaisaService.handleCallback(data);
+
+    if (result.success && result.status === 'completed') {
+      // Record payment — we need to find the pending payment by orderId
+      try {
+        await Payment.markCompleted(result.orderId, {
+          sessionId: result.orderId,
+          amount: result.amount,
+          currency: 'PKR',
+          paymentMethod: 'easypaisa',
+          metadata: { transactionId: result.transactionId }
+        });
+      } catch (dbErr) {
+        logger.error('Failed to record EasyPaisa payment:', dbErr.message);
+      }
+
+      // Look up pending payment to get userId and planId
+      const pendingPayment = await Payment.findOne({ payoneerSessionId: result.orderId });
+      if (pendingPayment) {
+        try {
+          const User = require('../models/User');
+          const Plan = require('../models/Plan');
+          const user = await User.findById(pendingPayment.user);
+          const plan = await Plan.findById(pendingPayment.plan);
+
+          if (user && plan) {
+            user.plan = plan._id;
+            user.subscriptionStatus = 'active';
+            user.status = 'active';
+            user.isTrialActive = false;
+            await user.save();
+
+            logger.info('User plan upgraded via EasyPaisa', {
+              userId: user._id,
+              planName: plan.displayName,
+              amount: result.amount
+            });
+          }
+        } catch (upgradeErr) {
+          logger.error('Failed to upgrade user after EasyPaisa payment:', upgradeErr.message);
+        }
+      }
+    } else if (result.success && result.status === 'failed') {
+      try {
+        await Payment.markFailed(result.orderId, result.responseMessage || 'EasyPaisa payment failed');
+      } catch (dbErr) {
+        logger.error('Failed to record EasyPaisa failure:', dbErr.message);
+      }
+    }
+  } catch (error) {
+    logger.error('EasyPaisa webhook error:', error.message);
+  }
+});
+
 module.exports = router;

@@ -176,6 +176,29 @@ You can see it at: payoneer.com → Activity → Balance
 
 ---
 
+## 🧪 How to Test on Your Computer (Localhost)
+
+When you are testing on your own computer (`http://localhost:3000`), Payoneer cannot send messages (webhooks) to your local server because your computer is not public. 
+
+**Steps to test locally:**
+1. Download and install **ngrok** (https://ngrok.com/)
+2. Open terminal and run: `ngrok http 5000` (assuming your backend runs on port 5000)
+3. Ngrok will give you a public URL like `https://a1b2c3d4.ngrok-free.app`
+4. Go to Payoneer Dashboard → Webhooks
+5. Set the Webhook URL to: `https://a1b2c3d4.ngrok-free.app/api/webhooks/payoneer`
+6. Now when you do a test payment, Payoneer will hit your ngrok URL, which forwards it to your local backend. The user's plan will upgrade automatically!
+
+---
+
+## 🏦 A Note on Manual Bank Transfers
+
+If you turn on "Manual Bank Transfers" in the Admin Panel (Settings -> Payment Methods), make sure you:
+1. Double-check your **Bank Name** and **Account Number** when typing them in.
+2. If the user sends money to a typo'd account, they will lose their money.
+3. Users will upload screenshots. You must view them in the **Admin -> Payments** tab to verify and approve the upgrade.
+
+---
+
 ## ❓ Common Issues & Fixes
 
 | Issue | Fix |

@@ -1,9 +1,18 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Cog6ToothIcon, EnvelopeIcon, CreditCardIcon, ShieldCheckIcon, BellIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
+import { Cog6ToothIcon, EnvelopeIcon, CreditCardIcon, ShieldCheckIcon, BellIcon, ExclamationTriangleIcon, BanknotesIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
+
+interface BankAccount {
+    _id?: string;
+    bankName: string;
+    accountTitle: string;
+    accountNumber: string;
+    iban: string;
+    isActive: boolean;
+}
 
 export default function AdminSettingsPage() {
     const [activeTab, setActiveTab] = useState('platform');
@@ -46,6 +55,24 @@ export default function AdminSettingsPage() {
         passwordMinLength: '8',
     });
 
+    // Payment Configuration
+    const [paymentConfig, setPaymentConfig] = useState({
+        payoneer: { enabled: false },
+        jazzcashEasypaisa: { enabled: false },
+        manualBank: {
+            enabled: false,
+            accounts: [] as BankAccount[]
+        }
+    });
+
+    const [newAccount, setNewAccount] = useState<BankAccount>({
+        bankName: '',
+        accountTitle: '',
+        accountNumber: '',
+        iban: '',
+        isActive: true
+    });
+
     useEffect(() => {
         fetchSettings();
     }, []);
@@ -55,19 +82,17 @@ export default function AdminSettingsPage() {
             const res = await api.get('/settings');
             const data = res.data;
             if (data) {
-                // Populate state (mapping backend fields to frontend state)
-                // Note: Most of these mock fields (smtp, security) don't exist in backend yet
-                // But we will map what we have
-                /* 
-                   Backend returns: 
-                   baseDomain, serverDomains, sslEmail, protocol, features, alertConfig
-                */
-
-                if (data.alertConfig) {
-                    setAlertSettings(data.alertConfig);
-                }
-                if (data.resourceLimits) {
-                    setResourceLimits(data.resourceLimits);
+                if (data.alertConfig) setAlertSettings(data.alertConfig);
+                if (data.resourceLimits) setResourceLimits(data.resourceLimits);
+                if (data.paymentConfig) {
+                    setPaymentConfig({
+                        payoneer: { enabled: data.paymentConfig.payoneer?.enabled || false },
+                        jazzcashEasypaisa: { enabled: data.paymentConfig.jazzcashEasypaisa?.enabled || false },
+                        manualBank: {
+                            enabled: data.paymentConfig.manualBank?.enabled || false,
+                            accounts: data.paymentConfig.manualBank?.accounts || []
+                        }
+                    });
                 }
             }
             setLoading(false);
@@ -81,11 +106,10 @@ export default function AdminSettingsPage() {
     const handleSave = async () => {
         setSaving(true);
         try {
-            // We only send back what the backend supports for now
-            // + the new alertConfig
             const payload = {
                 alertConfig: alertSettings,
-                resourceLimits
+                resourceLimits,
+                paymentConfig
             };
 
             await api.put('/settings', payload);
@@ -98,9 +122,36 @@ export default function AdminSettingsPage() {
         }
     };
 
+    const addBankAccount = () => {
+        if (!newAccount.bankName || !newAccount.accountTitle || !newAccount.accountNumber) {
+            toast.error('Bank name, account title, and account number are required');
+            return;
+        }
+        setPaymentConfig({
+            ...paymentConfig,
+            manualBank: {
+                ...paymentConfig.manualBank,
+                accounts: [...paymentConfig.manualBank.accounts, { ...newAccount }]
+            }
+        });
+        setNewAccount({ bankName: '', accountTitle: '', accountNumber: '', iban: '', isActive: true });
+        toast.success('Bank account added. Click Save to persist.');
+    };
+
+    const removeBankAccount = (index: number) => {
+        const updated = [...paymentConfig.manualBank.accounts];
+        updated.splice(index, 1);
+        setPaymentConfig({
+            ...paymentConfig,
+            manualBank: { ...paymentConfig.manualBank, accounts: updated }
+        });
+        toast.success('Account removed. Click Save to persist.');
+    };
+
     const tabs = [
         { id: 'platform', name: 'Platform', icon: Cog6ToothIcon },
         { id: 'alerts', name: 'Alerts', icon: ExclamationTriangleIcon },
+        { id: 'payments', name: 'Payment Methods', icon: BanknotesIcon },
         { id: 'email', name: 'Email (Example)', icon: EnvelopeIcon },
     ];
 
@@ -231,6 +282,148 @@ export default function AdminSettingsPage() {
                                             className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white"
                                         />
                                     </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'payments' && (
+                            <div className="space-y-6">
+                                <h2 className="text-xl font-semibold text-white">Payment Methods Configuration</h2>
+                                <p className="text-sm text-gray-400">
+                                    Toggle which payment methods are available to your users. Only enabled methods will appear on the billing page.
+                                </p>
+
+                                {/* Toggle: Payoneer */}
+                                <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-white font-medium text-lg">💳 Payoneer (Automatic)</p>
+                                            <p className="text-sm text-gray-400">Users pay via Payoneer checkout. Plan upgrades automatically on successful payment.</p>
+                                        </div>
+                                        <label className="relative inline-flex items-center cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={paymentConfig.payoneer.enabled}
+                                                onChange={(e) => setPaymentConfig({ ...paymentConfig, payoneer: { enabled: e.target.checked } })}
+                                                className="sr-only peer"
+                                            />
+                                            <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                                        </label>
+                                    </div>
+                                    {paymentConfig.payoneer.enabled && (
+                                        <p className="text-xs text-green-400">✅ Active — Requires PAYONEER env variables to be set</p>
+                                    )}
+                                </div>
+
+                                {/* Toggle: JazzCash/EasyPaisa */}
+                                <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-white font-medium text-lg">📱 JazzCash / EasyPaisa (Automatic)</p>
+                                            <p className="text-sm text-gray-400">Users pay via JazzCash or EasyPaisa mobile wallet. Plan upgrades automatically on successful payment.</p>
+                                        </div>
+                                        <label className="relative inline-flex items-center cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={paymentConfig.jazzcashEasypaisa.enabled}
+                                                onChange={(e) => setPaymentConfig({ ...paymentConfig, jazzcashEasypaisa: { enabled: e.target.checked } })}
+                                                className="sr-only peer"
+                                            />
+                                            <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                                        </label>
+                                    </div>
+                                    {paymentConfig.jazzcashEasypaisa.enabled && (
+                                        <p className="text-xs text-green-400">✅ Active — Requires JAZZCASH & EASYPAISA env variables to be set</p>
+                                    )}
+                                </div>
+
+                                {/* Toggle: Manual Bank Transfer */}
+                                <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700 space-y-4">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-white font-medium text-lg">🏦 Manual Bank Transfer</p>
+                                            <p className="text-sm text-gray-400">User sees your bank account details, sends money, uploads screenshot. You verify and upgrade manually.</p>
+                                        </div>
+                                        <label className="relative inline-flex items-center cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={paymentConfig.manualBank.enabled}
+                                                onChange={(e) => setPaymentConfig({ ...paymentConfig, manualBank: { ...paymentConfig.manualBank, enabled: e.target.checked } })}
+                                                className="sr-only peer"
+                                            />
+                                            <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                                        </label>
+                                    </div>
+
+                                    {paymentConfig.manualBank.enabled && (
+                                        <div className="space-y-4 pt-2 border-t border-gray-700">
+                                            <h4 className="text-white font-medium">Bank Accounts</h4>
+
+                                            {/* Existing Accounts */}
+                                            {paymentConfig.manualBank.accounts.length > 0 ? (
+                                                <div className="space-y-2">
+                                                    {paymentConfig.manualBank.accounts.map((acc, idx) => (
+                                                        <div key={idx} className="flex items-center justify-between bg-gray-900 p-3 rounded-lg border border-gray-700">
+                                                            <div>
+                                                                <p className="text-white font-medium">{acc.bankName}</p>
+                                                                <p className="text-sm text-gray-400">{acc.accountTitle} — {acc.accountNumber}</p>
+                                                                {acc.iban && <p className="text-xs text-gray-500">IBAN: {acc.iban}</p>}
+                                                            </div>
+                                                            <button
+                                                                onClick={() => removeBankAccount(idx)}
+                                                                className="text-red-400 hover:text-red-300 p-1"
+                                                            >
+                                                                <TrashIcon className="h-5 w-5" />
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p className="text-yellow-400 text-sm">⚠️ No bank accounts added yet. Add at least one account for users to see.</p>
+                                            )}
+
+                                            {/* Add New Account */}
+                                            <div className="bg-gray-900 p-4 rounded-lg border border-gray-700 space-y-3">
+                                                <h5 className="text-gray-300 font-medium text-sm">Add Bank Account</h5>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Bank Name (e.g. SadaPay, NayaPay, Meezan)"
+                                                        value={newAccount.bankName}
+                                                        onChange={(e) => setNewAccount({ ...newAccount, bankName: e.target.value })}
+                                                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Account Title"
+                                                        value={newAccount.accountTitle}
+                                                        onChange={(e) => setNewAccount({ ...newAccount, accountTitle: e.target.value })}
+                                                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Account Number"
+                                                        value={newAccount.accountNumber}
+                                                        onChange={(e) => setNewAccount({ ...newAccount, accountNumber: e.target.value })}
+                                                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        placeholder="IBAN (optional)"
+                                                        value={newAccount.iban}
+                                                        onChange={(e) => setNewAccount({ ...newAccount, iban: e.target.value })}
+                                                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                    />
+                                                </div>
+                                                <button
+                                                    onClick={addBankAccount}
+                                                    className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm transition"
+                                                >
+                                                    <PlusIcon className="h-4 w-4" /> Add Account
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}

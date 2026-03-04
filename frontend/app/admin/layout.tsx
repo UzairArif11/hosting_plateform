@@ -90,6 +90,9 @@ export default function AdminLayout({
                         <a href="/admin/settings" className="block px-4 py-2 text-gray-300 hover:bg-gray-800 rounded-lg">
                             ⚙️ Settings
                         </a>
+                        <a href="/admin/payments" className="block px-4 py-2 text-gray-300 hover:bg-gray-800 rounded-lg">
+                            💰 Payments
+                        </a>
                         <div className="border-t border-gray-800 my-4"></div>
                         <a href="/dashboard" className="block px-4 py-2 text-gray-300 hover:bg-gray-800 rounded-lg">
                             ← Back to User Panel

@@ -1677,6 +1677,160 @@ router.get('/deployment-queue/stats', requireAuth, requireAdmin, async (req, res
   }
 });
 
+// ==================== MANUAL PAYMENT MANAGEMENT ====================
+
+const ManualPayment = require('../models/ManualPayment');
+const Payment = require('../models/Payment');
+
+// Get all manual payments (admin)
+router.get('/manual-payments', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { status = 'all', page = 1, limit = 20 } = req.query;
+    const result = await ManualPayment.getAllPayments({
+      status,
+      page: parseInt(page),
+      limit: parseInt(limit)
+    });
+
+    // Count pending for badge
+    const pendingCount = await ManualPayment.countDocuments({ status: 'pending' });
+
+    res.json({
+      success: true,
+      payments: result.payments,
+      pendingCount,
+      pagination: {
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
+        totalPages: result.totalPages
+      }
+    });
+  } catch (error) {
+    logger.error('Admin get manual payments error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch manual payments' });
+  }
+});
+
+// Verify (approve) manual payment
+router.post('/manual-payments/:id/verify', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { notes } = req.body;
+    const payment = await ManualPayment.findById(req.params.id);
+
+    if (!payment) {
+      return res.status(404).json({ success: false, error: 'Payment not found' });
+    }
+
+    if (payment.status !== 'pending') {
+      return res.status(400).json({ success: false, error: `Payment is already ${payment.status}` });
+    }
+
+    // Verify the payment
+    await payment.verify(req.user._id, notes);
+
+    // Upgrade the user's plan
+    const user = await User.findById(payment.user);
+    const plan = await Plan.findById(payment.plan);
+
+    if (user && plan) {
+      user.plan = plan._id;
+      user.subscriptionStatus = 'active';
+      user.status = 'active';
+      user.isTrialActive = false;
+      await user.save();
+
+      // Also create a formal Payment record for billing history
+      try {
+        await Payment.create({
+          user: user._id,
+          amount: payment.amount,
+          currency: payment.currency,
+          status: 'completed',
+          type: 'subscription',
+          plan: plan._id,
+          planName: plan.displayName,
+          description: `${plan.displayName} Plan - Manual Bank Transfer`,
+          paymentMethod: 'bank_transfer',
+          completedAt: new Date(),
+          metadata: {
+            manualPaymentId: payment._id,
+            verifiedBy: req.user._id,
+            bankName: payment.bankAccount?.bankName
+          }
+        });
+      } catch (paymentErr) {
+        logger.error('Failed to create Payment record for manual payment:', paymentErr.message);
+      }
+
+      // Try to upgrade container resources
+      try {
+        const containerOrchestrator = require('../services/containerOrchestrator');
+        await containerOrchestrator.upgradeUserPlan(user._id, plan);
+      } catch (upgradeErr) {
+        logger.error('Failed to upgrade container after manual payment:', upgradeErr.message);
+      }
+
+      logger.billing('Manual payment verified and plan upgraded', {
+        userId: user._id,
+        planName: plan.displayName,
+        amount: payment.amount,
+        verifiedBy: req.user._id
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Payment verified and user plan upgraded successfully',
+      payment: {
+        id: payment._id,
+        status: payment.status,
+        verifiedAt: payment.verifiedAt
+      }
+    });
+  } catch (error) {
+    logger.error('Verify manual payment error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to verify payment' });
+  }
+});
+
+// Reject manual payment
+router.post('/manual-payments/:id/reject', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const payment = await ManualPayment.findById(req.params.id);
+
+    if (!payment) {
+      return res.status(404).json({ success: false, error: 'Payment not found' });
+    }
+
+    if (payment.status !== 'pending') {
+      return res.status(400).json({ success: false, error: `Payment is already ${payment.status}` });
+    }
+
+    await payment.reject(req.user._id, reason || 'Payment rejected by admin');
+
+    logger.billing('Manual payment rejected', {
+      manualPaymentId: payment._id,
+      userId: payment.user,
+      reason: reason || 'Payment rejected by admin',
+      rejectedBy: req.user._id
+    });
+
+    res.json({
+      success: true,
+      message: 'Payment rejected',
+      payment: {
+        id: payment._id,
+        status: payment.status,
+        rejectedAt: payment.rejectedAt,
+        adminNotes: payment.adminNotes
+      }
+    });
+  } catch (error) {
+    logger.error('Reject manual payment error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to reject payment' });
+  }
+});
+
 module.exports = router;
-
-
