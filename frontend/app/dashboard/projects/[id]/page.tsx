@@ -38,6 +38,58 @@ export default function ProjectDetailPage() {
     const [addingDomain, setAddingDomain] = useState(false);
     const [selectedBranch, setSelectedBranch] = useState<string>('main');
     const [showBranchDropdown, setShowBranchDropdown] = useState(false);
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [deleteConfirmText, setDeleteConfirmText] = useState('');
+    const [importing, setImporting] = useState(false);
+    const [autoBackup, setAutoBackup] = useState(true);
+    const [deleting, setDeleting] = useState(false);
+
+    // Get the deployed template URL for export/import
+    const getDeploymentBaseUrl = () => {
+        const url = currentProject?.deploymentUrl || currentProject?.latestDeployment?.deploymentUrl;
+        if (!url) return null;
+        return url.startsWith('http') ? url : `https://${url}`;
+    };
+
+    const handleExportData = () => {
+        const baseUrl = getDeploymentBaseUrl();
+        if (!baseUrl) { toast.error('No deployment URL found'); return; }
+        window.open(`${baseUrl}/api/data/export`, '_blank');
+        toast.success('Downloading data backup...');
+    };
+
+    const handleImportData = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        e.target.value = ''; // reset for re-upload
+
+        const baseUrl = getDeploymentBaseUrl();
+        if (!baseUrl) { toast.error('No deployment URL found'); return; }
+
+        setImporting(true);
+        try {
+            const text = await file.text();
+            const json = JSON.parse(text);
+
+            const res = await fetch(`${baseUrl}/api/data/import`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: text,
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                toast.success(data.message || 'Data imported successfully!');
+            } else {
+                toast.error(data.error || 'Import failed');
+            }
+        } catch (err: any) {
+            toast.error(`Import error: ${err.message}`);
+        } finally {
+            setImporting(false);
+        }
+    };
 
     // Mock branches - in production, fetch from GitHub API
     const availableBranches = ['main', 'master', 'develop', 'staging'];
@@ -111,16 +163,28 @@ export default function ProjectDetailPage() {
     };
 
     const handleDeleteProject = async () => {
-        if (!confirm(`Are you sure you want to delete "${currentProject?.name}"?`)) {
-            return;
-        }
-
+        setDeleting(true);
         try {
+            // Auto-backup: download data before deleting
+            if (autoBackup) {
+                const baseUrl = getDeploymentBaseUrl();
+                if (baseUrl) {
+                    toast.success('Downloading backup before delete...');
+                    window.open(`${baseUrl}/api/data/export`, '_blank');
+                    // Wait 2 seconds for download to start
+                    await new Promise(r => setTimeout(r, 2000));
+                }
+            }
+
             await dispatch(deleteProject(params.id as string)).unwrap();
             toast.success('Project deleted successfully');
             router.push('/dashboard/projects');
         } catch (error: any) {
             toast.error(error || 'Failed to delete project');
+        } finally {
+            setShowDeleteModal(false);
+            setDeleteConfirmText('');
+            setDeleting(false);
         }
     };
 
@@ -291,8 +355,40 @@ export default function ProjectDetailPage() {
                                 </button>
                             );
                         })()}
+                    {/* Export / Import Data Buttons (only show when deployed) */}
+                    {(currentProject.deploymentUrl || currentProject.latestDeployment?.deploymentUrl) && (
+                        <>
+                            <button
+                                onClick={handleExportData}
+                                className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg transition-colors"
+                                title="Download all store data as JSON backup"
+                            >
+                                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                                <span>Export Data</span>
+                            </button>
+                            <label
+                                className={`flex items-center space-x-2 ${importing ? 'bg-gray-600 cursor-wait' : 'bg-blue-600 hover:bg-blue-700 cursor-pointer'} text-white px-4 py-2 rounded-lg transition-colors`}
+                                title="Restore store data from a JSON backup"
+                            >
+                                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                                </svg>
+                                <span>{importing ? 'Importing...' : 'Import Data'}</span>
+                                <input
+                                    type="file"
+                                    accept=".json"
+                                    onChange={handleImportData}
+                                    className="hidden"
+                                    disabled={importing}
+                                />
+                            </label>
+                        </>
+                    )}
+
                     <button
-                        onClick={handleDeleteProject}
+                        onClick={() => { setShowDeleteModal(true); setDeleteConfirmText(''); }}
                         className="flex items-center space-x-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
                     >
                         <TrashIcon className="h-5 w-5" />
@@ -693,6 +789,97 @@ export default function ProjectDetailPage() {
                     <DeploymentSettings project={currentProject} />
                 )}
             </div>
+            {/* Delete Confirmation Modal */}
+            {showDeleteModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center">
+                    {/* Backdrop */}
+                    <div
+                        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+                        onClick={() => { setShowDeleteModal(false); setDeleteConfirmText(''); }}
+                    />
+
+                    {/* Modal */}
+                    <div className="relative bg-gray-900 border border-red-500/30 rounded-2xl p-8 max-w-lg w-full mx-4 shadow-2xl">
+                        {/* Warning Icon */}
+                        <div className="flex items-center justify-center w-16 h-16 bg-red-500/10 rounded-full mx-auto mb-6">
+                            <svg className="w-8 h-8 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.072 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                            </svg>
+                        </div>
+
+                        <h3 className="text-2xl font-bold text-white text-center mb-2">Delete Project</h3>
+                        <p className="text-gray-400 text-center mb-6">This action is <strong className="text-red-400">irreversible</strong>.</p>
+
+                        {/* Warning Box */}
+                        <div className="bg-red-950/40 border border-red-500/30 rounded-xl p-4 mb-6">
+                            <p className="text-red-300 font-semibold text-sm mb-3">⚠️ The following will be permanently deleted:</p>
+                            <ul className="text-red-200/80 text-sm space-y-1.5">
+                                <li className="flex items-center gap-2"><span>•</span> All products, blog posts, and content</li>
+                                <li className="flex items-center gap-2"><span>•</span> All customer orders and order history</li>
+                                <li className="flex items-center gap-2"><span>•</span> All registered user accounts</li>
+                                <li className="flex items-center gap-2"><span>•</span> Database and uploaded files</li>
+                                <li className="flex items-center gap-2"><span>•</span> Deployment configuration and domains</li>
+                            </ul>
+                        </div>
+
+                        {/* Auto-backup checkbox */}
+                        {(currentProject.deploymentUrl || currentProject.latestDeployment?.deploymentUrl) && (
+                            <label className="flex items-center gap-3 p-3 rounded-lg bg-emerald-950/30 border border-emerald-500/20 mb-5 cursor-pointer select-none hover:bg-emerald-950/50 transition-colors">
+                                <input
+                                    type="checkbox"
+                                    checked={autoBackup}
+                                    onChange={(e) => setAutoBackup(e.target.checked)}
+                                    className="w-4 h-4 rounded accent-emerald-500"
+                                />
+                                <div>
+                                    <span className="text-emerald-300 font-medium text-sm">Download backup before deleting</span>
+                                    <p className="text-emerald-400/60 text-xs mt-0.5">Saves all data as JSON so you can restore later via Import</p>
+                                </div>
+                            </label>
+                        )}
+
+                        {/* Type to confirm */}
+                        <div className="mb-6">
+                            <label className="block text-sm text-gray-400 mb-2">
+                                Type <strong className="text-white">{currentProject?.name}</strong> to confirm:
+                            </label>
+                            <input
+                                type="text"
+                                value={deleteConfirmText}
+                                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                                placeholder={currentProject?.name}
+                                className="w-full bg-gray-800 border border-gray-600 focus:border-red-500 rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none transition-colors"
+                                autoFocus
+                            />
+                        </div>
+
+                        {/* Buttons */}
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => { setShowDeleteModal(false); setDeleteConfirmText(''); }}
+                                className="flex-1 px-4 py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors text-sm font-medium"
+                                disabled={deleting}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleDeleteProject}
+                                disabled={deleteConfirmText !== currentProject?.name || deleting}
+                                className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white rounded-lg transition-colors text-sm font-bold"
+                            >
+                                {deleting ? (
+                                    <span className="flex items-center justify-center gap-2">
+                                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                        {autoBackup ? 'Backing up & Deleting...' : 'Deleting...'}
+                                    </span>
+                                ) : (
+                                    '🗑️ Permanently Delete'
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div >
     );
 }
