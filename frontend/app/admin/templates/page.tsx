@@ -96,6 +96,12 @@ export default function TemplateManagement() {
     const [deploymentLogs, setDeploymentLogs] = useState<Array<{ timestamp: string, message: string, level: string }>>([]);
     const logsEndRef = useRef<HTMLDivElement>(null);
 
+    // Delete Demo Confirmation Modal
+    const [showDeleteDemoModal, setShowDeleteDemoModal] = useState(false);
+    const [deleteDemoTemplate, setDeleteDemoTemplate] = useState<Template | null>(null);
+    const [deleteDemoBackup, setDeleteDemoBackup] = useState(true);
+    const [deletingDemo, setDeletingDemo] = useState(false);
+
     // Socket.IO for real-time demo deployment updates
     const socketRef = useRef<Socket | null>(null);
     const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -451,17 +457,36 @@ export default function TemplateManagement() {
     };
 
     const handleDeleteDemo = async (template: Template) => {
-        if (!confirm(`Delete demo deployment for "${template.displayName}"? This will remove the live demo.`)) return;
+        setDeleteDemoTemplate(template);
+        setDeleteDemoBackup(true);
+        setShowDeleteDemoModal(true);
+    };
+
+    const confirmDeleteDemo = async () => {
+        if (!deleteDemoTemplate) return;
+        setDeletingDemo(true);
 
         try {
+            // If backup is checked, trigger export download first
+            if (deleteDemoBackup && deleteDemoTemplate.demoDeploymentUrl) {
+                const exportUrl = deleteDemoTemplate.demoDeploymentUrl.replace(/\/$/, '') + '/api/data/export';
+                window.open(exportUrl, '_blank');
+                // Wait a moment for the download to start
+                await new Promise(r => setTimeout(r, 2000));
+            }
+
             toast.loading('Deleting demo deployment...');
-            await api.delete(`/templates/${template._id}/remove-demo`);
+            await api.delete(`/templates/${deleteDemoTemplate._id}/remove-demo`);
             toast.dismiss();
             toast.success('✅ Demo deployment deleted');
             fetchTemplates();
         } catch (error: any) {
             toast.dismiss();
             toast.error(error.response?.data?.error || 'Failed to delete demo deployment');
+        } finally {
+            setDeletingDemo(false);
+            setShowDeleteDemoModal(false);
+            setDeleteDemoTemplate(null);
         }
     };
 
@@ -515,14 +540,10 @@ export default function TemplateManagement() {
     };
 
     const handleRemoveDemo = async (templateId: string, templateName: string) => {
-        if (!confirm(`Remove live demo deployment for "${templateName}"?`)) return;
-
-        try {
-            await api.delete(`/templates/${templateId}/remove-demo`);
-            toast.success('✅ Demo deployment removed');
-            fetchTemplates();
-        } catch (error: any) {
-            toast.error(error.response?.data?.error || 'Failed to remove demo deployment');
+        // Find the template and use the modal
+        const template = templates.find(t => t._id === templateId);
+        if (template) {
+            handleDeleteDemo(template);
         }
     };
 
@@ -1800,6 +1821,65 @@ export default function TemplateManagement() {
                                 className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2.5 rounded-lg transition"
                             >
                                 Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* Delete Demo Confirmation Modal */}
+            {showDeleteDemoModal && deleteDemoTemplate && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+                    <div className="bg-gray-900 border border-gray-700 rounded-2xl max-w-md w-full p-8 shadow-2xl">
+                        <div className="flex items-center justify-center w-14 h-14 bg-red-500/20 rounded-full mx-auto mb-4">
+                            <svg className="w-7 h-7 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.072 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                            </svg>
+                        </div>
+
+                        <h3 className="text-xl font-bold text-white text-center mb-2">Delete Demo Deployment?</h3>
+                        <p className="text-gray-400 text-center text-sm mb-4">
+                            This will permanently remove the live demo for <strong className="text-white">{deleteDemoTemplate.displayName}</strong>.
+                        </p>
+
+                        {/* Warning */}
+                        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mb-4 text-sm text-red-300 space-y-1">
+                            <p className="font-semibold">⚠️ This action will:</p>
+                            <ul className="list-disc list-inside text-xs space-y-0.5 text-red-400">
+                                <li>Remove the live demo URL</li>
+                                <li>Delete all demo data (products, posts, etc.)</li>
+                                <li>Remove the deployed container</li>
+                            </ul>
+                        </div>
+
+                        {/* Auto-backup checkbox */}
+                        {deleteDemoTemplate.demoDeploymentUrl && (
+                            <label className="flex items-center gap-3 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 mb-5 cursor-pointer select-none hover:bg-emerald-500/20 transition-colors">
+                                <input
+                                    type="checkbox"
+                                    checked={deleteDemoBackup}
+                                    onChange={(e) => setDeleteDemoBackup(e.target.checked)}
+                                    className="w-4 h-4 rounded accent-emerald-500"
+                                />
+                                <div>
+                                    <span className="text-emerald-300 font-medium text-sm">Download backup before deleting</span>
+                                    <p className="text-emerald-400/70 text-xs mt-0.5">Exports all demo data as JSON so you can restore later</p>
+                                </div>
+                            </label>
+                        )}
+
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => { setShowDeleteDemoModal(false); setDeleteDemoTemplate(null); }}
+                                className="flex-1 px-4 py-2.5 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-medium text-sm transition"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={confirmDeleteDemo}
+                                disabled={deletingDemo}
+                                className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium text-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {deletingDemo ? 'Deleting...' : 'Yes, Delete Demo'}
                             </button>
                         </div>
                     </div>
