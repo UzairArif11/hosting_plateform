@@ -293,7 +293,7 @@ export default function PlanManagement() {
                             )}
 
                             <div className="pt-4 border-t border-gray-800">
-                                <div className="grid grid-cols-3 gap-2 text-center">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-center">
                                     <div className="bg-black/20 p-2 rounded">
                                         <p className="text-xs text-gray-500">CPU</p>
                                         <p className="text-sm font-bold text-white">{plan.resources.cpu}</p>
@@ -362,7 +362,7 @@ export default function PlanManagement() {
                             </div>
 
                             {/* Basic Info */}
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-gray-300 mb-2">
                                         Plan Name (Slug) *
@@ -406,7 +406,7 @@ export default function PlanManagement() {
                             {/* Pricing */}
                             <div>
                                 <h3 className="text-lg font-semibold text-white mb-3">Pricing</h3>
-                                <div className="grid grid-cols-4 gap-4">
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                     {['usd', 'pkr', 'eur', 'gbp'].map(currency => (
                                         <div key={currency}>
                                             <label className="block text-sm font-medium text-gray-300 mb-2">
@@ -431,7 +431,7 @@ export default function PlanManagement() {
                             {/* Resources */}
                             <div>
                                 <h3 className="text-lg font-semibold text-white mb-3">Resources (Enforced Limits)</h3>
-                                <div className="grid grid-cols-3 gap-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                     <div>
                                         <label className="block text-sm text-gray-300 mb-2">CPU (OCPU) *</label>
                                         <input
@@ -523,7 +523,7 @@ export default function PlanManagement() {
                                         These are shown to users in pricing pages - can be different from actual limits
                                     </span>
                                 </h3>
-                                <div className="grid grid-cols-3 gap-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                     <div>
                                         <label className="block text-sm text-gray-300 mb-2">Display CPU</label>
                                         <input

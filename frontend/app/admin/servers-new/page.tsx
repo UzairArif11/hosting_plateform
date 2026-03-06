@@ -232,7 +232,7 @@ export default function ServersPage() {
                             </div>
 
                             {server.systemStats?.success && (
-                                <div className="grid grid-cols-3 gap-3">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                     <div className="bg-black/20 rounded-lg p-3">
                                         <div className="flex items-center gap-2 mb-1">
                                             <CpuChipIcon className="h-4 w-4 text-blue-400" />

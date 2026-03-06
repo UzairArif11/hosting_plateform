@@ -116,7 +116,7 @@ export default function ServerManagement() {
                                                 key={idx}
                                                 className="bg-white/5 border border-white/10 rounded p-3 font-mono text-sm"
                                             >
-                                                <div className="grid grid-cols-4 gap-4 text-gray-300">
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-gray-300">
                                                     <div>
                                                         <span className="text-gray-500">Type:</span>{' '}
                                                         <strong className="text-blue-400">{record.type}</strong>
