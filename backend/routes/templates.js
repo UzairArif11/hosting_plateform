@@ -440,6 +440,22 @@ router.post('/:id/deploy', requireAuth, async (req, res) => {
             });
         }
 
+        // Enforce template minPlan restriction
+        const PLAN_LEVELS = { 'free': 0, 'pro': 1, 'enterprise': 2 };
+        const userPlanName = (fullUser.plan?.name || fullUser.planType || 'free').toLowerCase();
+        const minPlan = template.minPlan || (template.isPremium ? 'pro' : 'free');
+        const userLevel = PLAN_LEVELS[userPlanName] || 0;
+        const requiredLevel = PLAN_LEVELS[minPlan] || 0;
+
+        if (userLevel < requiredLevel) {
+            return res.status(403).json({
+                success: false,
+                error: `This template requires the ${minPlan} plan. Please upgrade to deploy.`,
+                upgradeRequired: true,
+                requiredPlan: minPlan
+            });
+        }
+
         const { projectName, environmentVariables, mode } = req.body;
 
         if (!projectName) {

@@ -453,10 +453,22 @@ router.post('/jazzcash', express.urlencoded({ extended: true }), async (req, res
           const plan = await Plan.findById(result.metadata.plan_id);
 
           if (user && plan) {
+            if (user.resourcesDeleted) {
+              user.resourcesDeleted = false;
+              user.resourcesDeletedAt = null;
+              user.oracleAccountId = null;
+              user.containerId = null;
+              user.containerName = null;
+              user.assignedServer = null;
+              user.assignedPort = null;
+            }
             user.plan = plan._id;
             user.subscriptionStatus = 'active';
             user.status = 'active';
             user.isTrialActive = false;
+            user.suspendedAt = null;
+            user.suspensionReason = null;
+            user.autoSuspended = false;
             await user.save();
 
             logger.info('User plan upgraded via JazzCash', {
@@ -521,10 +533,22 @@ router.post('/easypaisa', express.urlencoded({ extended: true }), async (req, re
           const plan = await Plan.findById(pendingPayment.plan);
 
           if (user && plan) {
+            if (user.resourcesDeleted) {
+              user.resourcesDeleted = false;
+              user.resourcesDeletedAt = null;
+              user.oracleAccountId = null;
+              user.containerId = null;
+              user.containerName = null;
+              user.assignedServer = null;
+              user.assignedPort = null;
+            }
             user.plan = plan._id;
             user.subscriptionStatus = 'active';
             user.status = 'active';
             user.isTrialActive = false;
+            user.suspendedAt = null;
+            user.suspensionReason = null;
+            user.autoSuspended = false;
             await user.save();
 
             logger.info('User plan upgraded via EasyPaisa', {

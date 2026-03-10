@@ -23,7 +23,7 @@ async function checkAndSuspendExpiredTrials() {
         const expiredUsers = await User.find({
             status: 'active',
             role: { $ne: 'admin' }, // ← CRITICAL: Never suspend admins
-            plan: 'free',
+            planType: 'free',
             trialExpiry: { $lt: now },
             isTrialActive: true
         });
@@ -84,7 +84,7 @@ async function checkAndSuspendExpiredSubscriptions() {
         const expiredUsers = await User.find({
             status: 'active',
             role: { $ne: 'admin' }, // ← CRITICAL: Never suspend admins
-            plan: { $in: ['pro', 'enterprise'] },
+            planType: { $in: ['pro', 'enterprise'] },
             subscriptionExpiry: { $lt: now }
         });
 
@@ -135,18 +135,18 @@ async function checkAndSuspendExpiredSubscriptions() {
  */
 async function deleteResourcesForLongSuspended() {
     try {
-        logger.info('Checking for users suspended > 7 days...');
+        const RESOURCE_DELETION_DAYS = 30;
+        logger.info(`Checking for users suspended > ${RESOURCE_DELETION_DAYS} days...`);
 
-        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const cutoffDate = new Date(Date.now() - RESOURCE_DELETION_DAYS * 24 * 60 * 60 * 1000);
 
-        // Find users suspended for more than 7 days
         const longSuspendedUsers = await User.find({
             status: 'suspended',
-            suspendedAt: { $lt: sevenDaysAgo },
+            suspendedAt: { $lt: cutoffDate },
             resourcesDeleted: { $ne: true }
         });
 
-        logger.info(`Found ${longSuspendedUsers.length} users suspended > 7 days`);
+        logger.info(`Found ${longSuspendedUsers.length} users suspended > ${RESOURCE_DELETION_DAYS} days`);
 
         for (const user of longSuspendedUsers) {
             try {

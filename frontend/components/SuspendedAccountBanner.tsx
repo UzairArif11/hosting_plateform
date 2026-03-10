@@ -17,7 +17,6 @@ export default function SuspendedAccountBanner() {
   const router = useRouter();
 
   useEffect(() => {
-    // Check suspension status from API
     fetch('/api/auth/me')
       .then(res => res.json())
       .then(data => {
@@ -27,6 +26,13 @@ export default function SuspendedAccountBanner() {
             suspensionReason: data.user.suspensionReason || 'Account suspended',
             suspendedAt: data.user.suspendedAt,
             planType: data.user.planType
+          });
+        } else if (data.suspended) {
+          setSuspensionInfo({
+            suspended: true,
+            suspensionReason: data.suspensionReason || 'Account suspended',
+            suspendedAt: data.suspendedAt,
+            planType: data.planType
           });
         }
       })

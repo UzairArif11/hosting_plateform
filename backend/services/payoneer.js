@@ -406,15 +406,33 @@ const handlePaymentCompleted = async (paymentData) => {
       return { success: false, error: 'User or plan not found' };
     }
 
-    // Update user subscription status first
-    await User.findByIdAndUpdate(userId, {
+    // Update user subscription status and clear suspension/deletion flags
+    const userBeforeUpdate = await User.findById(userId);
+    const hadResourcesDeleted = userBeforeUpdate?.resourcesDeleted;
+
+    const updateFields = {
       plan: planId,
       subscriptionStatus: 'active',
       status: 'active',
-      isTrialActive: false
-    });
+      isTrialActive: false,
+      suspendedAt: null,
+      suspensionReason: null,
+      autoSuspended: false
+    };
 
-    // Use the new plan upgrade system with data preservation
+    // If resources were deleted, reset container fields so a fresh one is allocated
+    if (hadResourcesDeleted) {
+      updateFields.resourcesDeleted = false;
+      updateFields.resourcesDeletedAt = null;
+      updateFields.oracleAccountId = null;
+      updateFields.containerId = null;
+      updateFields.containerName = null;
+      updateFields.assignedServer = null;
+      updateFields.assignedPort = null;
+    }
+
+    await User.findByIdAndUpdate(userId, updateFields);
+
     const upgradeResult = await containerOrchestrator.upgradeUserPlan(userId, plan);
     
     if (upgradeResult.success) {

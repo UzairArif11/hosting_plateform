@@ -120,16 +120,16 @@ router.get('/account/status', requireAuth, async (req, res) => {
             status.daysLeftToRecover = Math.ceil((user.recoveryDeadline - now) / (1000 * 60 * 60 * 24));
         }
 
-        // Check if suspended
         if (user.status === 'suspended') {
             status.suspendedAt = user.suspendedAt;
             status.suspensionReason = user.suspensionReason;
-            status.resourcesDeleted = user.resourcesDeleted;
+            status.resourcesDeleted = user.resourcesDeleted || false;
+            status.resourcesDeletedAt = user.resourcesDeletedAt || null;
 
             if (user.suspendedAt) {
                 const daysSuspended = Math.floor((new Date() - user.suspendedAt) / (1000 * 60 * 60 * 24));
                 status.daysSuspended = daysSuspended;
-                status.daysUntilResourceDeletion = Math.max(0, 7 - daysSuspended);
+                status.daysUntilResourceDeletion = user.resourcesDeleted ? 0 : Math.max(0, 30 - daysSuspended);
             }
         }
 

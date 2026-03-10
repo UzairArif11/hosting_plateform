@@ -29,7 +29,7 @@ export default function Sidebar() {
     const router = useRouter();
     const { user } = useSelector((state: RootState) => state.auth);
     const [refreshing, setRefreshing] = useState(false);
-    
+
     // Check if account is suspended
     const isSuspended = user?.status === 'suspended' && user?.role !== 'admin';
 
@@ -88,7 +88,7 @@ export default function Sidebar() {
         { name: 'Projects', href: '/dashboard/projects', icon: FolderIcon },
         { name: 'Deployments', href: '/dashboard/deployments', icon: RocketLaunchIcon },
         // Always show Templates - FeatureGuard will handle access check
-        { name: 'Templates', href: '/templates', icon: Square3Stack3DIcon, requiresFeature: 'templates' },
+        { name: 'Templates', href: '/templates', icon: Square3Stack3DIcon },
         ...(hasAnalytics ? [{ name: 'Analytics', href: '/dashboard/analytics', icon: ChartBarIcon }] : []),
         ...(hasAuditLogs ? [{ name: 'Activity', href: '/dashboard/activity', icon: ClipboardDocumentListIcon }] : []),
         { name: 'Billing', href: '/dashboard/billing', icon: CreditCardIcon },
@@ -160,7 +160,7 @@ export default function Sidebar() {
                         </button>
                     </div>
                 )}
-                
+
                 {/* Trial Status */}
                 {!isSuspended && user?.isTrialActive && (
                     <div className="mt-3 px-3 py-2 bg-purple-500/10 border border-purple-500/20 rounded-lg">
@@ -185,14 +185,14 @@ export default function Sidebar() {
             <nav className="flex-1 px-4 py-4 space-y-1 overflow-y-auto">
                 {navigation.map((item: any) => {
                     const isActive = pathname === item.href;
-                    const hasRequiredFeature = item.requiresFeature 
-                        ? checkFeature(item.requiresFeature) 
+                    const hasRequiredFeature = item.requiresFeature
+                        ? checkFeature(item.requiresFeature)
                         : true;
-                    
+
                     // Disable all navigation if suspended (except Billing and Settings)
                     const allowedWhenSuspended = ['Billing', 'Settings', 'Dashboard'];
                     const isDisabled = isSuspended && !allowedWhenSuspended.includes(item.name);
-                    
+
                     return (
                         <Link
                             key={item.name}
@@ -204,15 +204,14 @@ export default function Sidebar() {
                                     toast.error('Account suspended. Upgrade to access features.');
                                 }
                             }}
-                            className={`flex items-center space-x-3 px-3 py-2 rounded-lg transition-colors ${
-                                isDisabled
+                            className={`flex items-center space-x-3 px-3 py-2 rounded-lg transition-colors ${isDisabled
                                     ? 'text-gray-600 cursor-not-allowed opacity-50'
                                     : isActive
-                                    ? 'bg-purple-600 text-white'
-                                    : hasRequiredFeature
-                                        ? 'text-gray-400 hover:bg-gray-800 hover:text-white'
-                                        : 'text-gray-600 hover:bg-gray-800 hover:text-gray-500'
-                            }`}
+                                        ? 'bg-purple-600 text-white'
+                                        : hasRequiredFeature
+                                            ? 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                                            : 'text-gray-600 hover:bg-gray-800 hover:text-gray-500'
+                                }`}
                             title={!hasRequiredFeature ? `Requires ${item.requiresFeature} feature` : undefined}
                         >
                             <item.icon className="h-5 w-5" />

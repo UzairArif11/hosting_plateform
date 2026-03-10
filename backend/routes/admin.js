@@ -326,14 +326,45 @@ router.put('/users/:userId/suspend', requireAuth, requireAdmin, async (req, res)
 // Unsuspend User
 router.put('/users/:userId/unsuspend', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const user = await User.findById(req.params.userId);
+    const user = await User.findById(req.params.userId).populate('plan');
     if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const hadResourcesDeleted = user.resourcesDeleted;
 
     user.status = 'active';
     user.suspendedAt = null;
+    user.suspensionReason = null;
+    user.autoSuspended = false;
     await user.save();
 
-    res.json({ success: true, message: 'User unsuspended' });
+    // If resources were previously deleted, reset the flags and attempt container allocation
+    if (hadResourcesDeleted) {
+      user.resourcesDeleted = false;
+      user.resourcesDeletedAt = null;
+      user.oracleAccountId = null;
+      user.containerId = null;
+      user.containerName = null;
+      user.assignedServer = null;
+      user.assignedPort = null;
+      await user.save();
+
+      logger.info(`User ${user.email} unsuspended with resource reset - new container will be allocated on next deployment`);
+    } else {
+      // Restart existing containers
+      try {
+        const accountLifecycle = require('../services/accountLifecycle');
+        await accountLifecycle.restartUserContainers(user._id);
+      } catch (containerErr) {
+        logger.warn(`Could not restart containers for ${user.email}: ${containerErr.message}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: hadResourcesDeleted
+        ? 'User unsuspended. Resources were deleted — new container will be allocated on next deployment.'
+        : 'User unsuspended and containers restarted.'
+    });
   } catch (error) {
     logger.error('Unsuspend user error:', error);
     res.status(500).json({ error: 'Failed to unsuspend user' });
@@ -1734,10 +1765,22 @@ router.post('/manual-payments/:id/verify', requireAuth, requireAdmin, async (req
     const plan = await Plan.findById(payment.plan);
 
     if (user && plan) {
+      if (user.resourcesDeleted) {
+        user.resourcesDeleted = false;
+        user.resourcesDeletedAt = null;
+        user.oracleAccountId = null;
+        user.containerId = null;
+        user.containerName = null;
+        user.assignedServer = null;
+        user.assignedPort = null;
+      }
       user.plan = plan._id;
       user.subscriptionStatus = 'active';
       user.status = 'active';
       user.isTrialActive = false;
+      user.suspendedAt = null;
+      user.suspensionReason = null;
+      user.autoSuspended = false;
       await user.save();
 
       // Also create a formal Payment record for billing history

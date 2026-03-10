@@ -169,6 +169,8 @@ const requireAuth = async (req, res, next) => {
           suspensionReason: user.suspensionReason || 'Account suspended',
           suspendedAt: user.suspendedAt,
           planType: user.planType,
+          resourcesDeleted: user.resourcesDeleted || false,
+          resourcesDeletedAt: user.resourcesDeletedAt || null,
           upgradeUrl: '/dashboard/billing',
           contactSupport: 'support@foodpanda.site'
         });
