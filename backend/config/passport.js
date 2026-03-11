@@ -139,8 +139,9 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                 clientSecret: process.env.GITHUB_CLIENT_SECRET,
                 callbackURL: `${process.env.API_URL || 'http://localhost:5000'}/api/auth/github/callback`,
                 scope: ['user:email', 'repo'],
+                passReqToCallback: true,
             },
-            async (accessToken, refreshToken, profile, done) => {
+            async (req, accessToken, refreshToken, profile, done) => {
                 // Declare variables outside try block for error logging
                 let username, email, displayName, defaultPlan, user;
 
@@ -165,7 +166,18 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
 
                         // Update GitHub access token
                         user.githubAccessToken = accessToken;
+                        user.lastLogin = new Date();
+                        user.loginCount = (user.loginCount || 0) + 1;
                         await user.save();
+
+                        // Track login IP
+                        try {
+                            const ipRestrictions = require('../services/ipRestrictions');
+                            const ipAddress = req?.ip || req?.connection?.remoteAddress || 'unknown';
+                            await ipRestrictions.trackIP(user._id, ipAddress, 'login');
+                        } catch (ipErr) {
+                            logger.warn('IP tracking failed (non-fatal):', ipErr.message);
+                        }
 
                         logger.info('✅ GitHub token updated successfully!', {
                             userId: user._id,
@@ -178,8 +190,34 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                     }
 
                     // Create new user
-                    // Ensure all required fields are present
+                    // Check signup restrictions before creating
                     email = profile.emails?.[0]?.value || `${profile.username}@github.com`;
+                    const ipAddress = req?.ip || req?.connection?.remoteAddress || 'unknown';
+
+                    try {
+                        const ipRestrictions = require('../services/ipRestrictions');
+                        const signupCheck = await ipRestrictions.canSignup(email, ipAddress);
+                        if (!signupCheck.allowed) {
+                            logger.warn('GitHub signup blocked - restriction', { email, ip: ipAddress, reason: signupCheck.reason });
+                            return done(new Error(signupCheck.reason), null);
+                        }
+                    } catch (restrictErr) {
+                        logger.warn('Signup restriction check failed (allowing signup):', restrictErr.message);
+                    }
+
+                    // Check platform capacity before creating new user
+                    try {
+                        const resourceMonitoring = require('../services/resourceMonitoring');
+                        const capacityCheck = await resourceMonitoring.canSignupForPlan('free');
+                        if (!capacityCheck.allowed) {
+                            logger.warn('GitHub signup blocked - capacity reached', { reason: capacityCheck.reason });
+                            return done(new Error(capacityCheck.reason), null);
+                        }
+                    } catch (capErr) {
+                        logger.warn('Capacity check failed (allowing signup):', capErr.message);
+                    }
+
+                    // Ensure all required fields are present
                     username = profile.username || `github_${profile.id}`;
                     displayName = profile.displayName || profile.username || username;
 
@@ -322,6 +360,41 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                         hasToken: !!user.githubAccessToken,
                         tokenPreview: user.githubAccessToken ? `${user.githubAccessToken.substring(0, 10)}...` : 'none'
                     });
+
+                    // Track signup IP
+                    try {
+                        user.signupIP = ipAddress;
+                        user.ipHistory = [{ ip: ipAddress, timestamp: new Date(), action: 'signup' }];
+                        await user.save();
+                    } catch (ipSaveErr) {
+                        logger.warn('IP save failed (non-fatal):', ipSaveErr.message);
+                    }
+
+                    // Assign new user to container server
+                    try {
+                        const { assignUserToServer } = require('../services/containerOrchestrator');
+                        const containerAssignment = await assignUserToServer(user._id, 'free-trial');
+                        logger.info('✅ New GitHub user assigned to server', {
+                            userId: user._id,
+                            serverId: containerAssignment.serverId,
+                            serverName: containerAssignment.serverName
+                        });
+                    } catch (containerError) {
+                        logger.error('Failed to assign GitHub user to server:', containerError.message);
+                        // Don't fail user creation if container assignment fails
+                    }
+
+                    // Create Payoneer customer for billing
+                    try {
+                        const payoneerService = require('../services/payoneer');
+                        await payoneerService.createCustomer({
+                            userId: user._id,
+                            email: user.email,
+                            name: user.displayName
+                        });
+                    } catch (payErr) {
+                        logger.warn('Payoneer customer creation failed (non-fatal):', payErr.message);
+                    }
 
                     done(null, user);
                 } catch (error) {

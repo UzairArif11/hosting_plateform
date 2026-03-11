@@ -259,6 +259,15 @@ router.post('/',
         }
       }
 
+      // Check if user already has a project with the same name
+      const existingProject = await Project.findOne({ name, owner: req.user._id });
+      if (existingProject) {
+        return res.status(400).json({
+          success: false,
+          error: `You already have a project named "${name}". Please choose a different name.`
+        });
+      }
+
       // Create the project
       let slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 

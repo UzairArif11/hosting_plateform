@@ -27,17 +27,26 @@ export default function TemplatesPage() {
     const [templates, setTemplates] = useState<Template[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
+    const [debouncedSearch, setDebouncedSearch] = useState('');
     const [category, setCategory] = useState('all');
+
+    // Debounce search input (300ms)
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setDebouncedSearch(search);
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [search]);
 
     useEffect(() => {
         fetchTemplates();
-    }, [search, category]);
+    }, [debouncedSearch, category]);
 
     const fetchTemplates = async () => {
         setLoading(true);
         try {
             const params = new URLSearchParams();
-            if (search) params.append('search', search);
+            if (debouncedSearch) params.append('search', debouncedSearch);
             if (category !== 'all') params.append('category', category);
 
             const res = await fetch(`/api/templates?${params.toString()}`);

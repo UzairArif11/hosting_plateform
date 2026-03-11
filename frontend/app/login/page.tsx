@@ -1,17 +1,19 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useDispatch, useSelector } from 'react-redux';
 import { getCurrentUser } from '@/lib/slices/authSlice';
 import { AppDispatch, RootState } from '@/lib/store';
 
 export default function LoginPage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
     const dispatch = useDispatch<AppDispatch>();
     const { isAuthenticated, loading, user } = useSelector((state: RootState) => state.auth);
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+    const authError = searchParams.get('error');
 
     // Check authentication and redirect based on role
     useEffect(() => {
@@ -48,6 +50,18 @@ export default function LoginPage() {
                         <h1 className="text-3xl font-bold text-white mb-2">Welcome Back</h1>
                         <p className="text-gray-300">Sign in to continue to your dashboard</p>
                     </div>
+
+                    {authError && (
+                        <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
+                            <p className="text-red-400 text-sm text-center">
+                                {authError === 'auth_failed'
+                                    ? 'Authentication failed. Please try again.'
+                                    : authError === 'rate_limited'
+                                        ? 'Too many login attempts. Please wait a minute and try again.'
+                                        : `Login error: ${authError}`}
+                            </p>
+                        </div>
+                    )}
 
                     <div className="space-y-4">
                         <button

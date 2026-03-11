@@ -1,11 +1,21 @@
 const express = require('express');
 const passport = require('passport');
 const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
 const User = require('../models/User');
 const Plan = require('../models/Plan');
 const payoneerService = require('../services/payoneer');
 const { assignUserToServer } = require('../services/containerOrchestrator');
 const logger = require('../utils/logger');
+
+// Strict rate limiter for OAuth endpoints (prevent redirect spam)
+const oauthLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10, // 10 attempts per minute per IP
+  message: { error: 'Too many login attempts. Please try again in a minute.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 const router = express.Router();
 
@@ -595,7 +605,7 @@ const refreshToken = async (req, res) => {
 // Routes
 
 // GitHub OAuth
-router.get('/github', handleGitHubOAuthStart);
+router.get('/github', oauthLimiter, handleGitHubOAuthStart);
 
 router.get('/github/callback',
   passport.authenticate('github', {
@@ -606,7 +616,7 @@ router.get('/github/callback',
 );
 
 // Google OAuth
-router.get('/google', passport.authenticate('google', {
+router.get('/google', oauthLimiter, passport.authenticate('google', {
   scope: ['profile', 'email']
 }));
 
