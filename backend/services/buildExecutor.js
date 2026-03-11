@@ -448,15 +448,15 @@ async function cloneRepository(deployment, project, user, onLog) {
             ? (process.env.GITHUB_API_TOKEN || user.githubAccessToken)
             : (user.githubAccessToken || process.env.GITHUB_API_TOKEN);
 
-        if (!githubToken) {
-            throw new Error('No GitHub token available for repository access. Add GITHUB_API_TOKEN to .env');
+        if (!githubToken && !isTemplateDeployment) {
+            throw new Error('No GitHub token available for repository access. Please connect your GitHub account or add GITHUB_API_TOKEN to .env');
         }
 
         const repoUrl = project.repository.url;
-        const repoWithAuth = repoUrl.replace(
-            'https://github.com/',
-            `https://${githubToken}@github.com/`
-        );
+        // If we have a token, use authenticated clone. Otherwise (template deploy), clone public repo without auth.
+        const repoWithAuth = githubToken
+            ? repoUrl.replace('https://github.com/', `https://${githubToken}@github.com/`)
+            : repoUrl;
 
         await onLog('info', `Cloning ${project.repository.fullName}...`);
 

@@ -30,6 +30,7 @@ interface User {
     githubUsername?: string;
     githubId?: string;
     googleId?: string;
+    provider?: string;
     // Suspension fields
     suspendedAt?: string;
     suspendedBy?: string;

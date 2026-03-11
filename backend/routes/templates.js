@@ -427,18 +427,10 @@ router.post('/:id/deploy', requireAuth, async (req, res) => {
             return res.status(403).json({ success: false, error: 'Template is not published' });
         }
 
-        // CRITICAL: Check templates feature access
+        // Plan-based access is enforced by minPlan check below
+        // No separate feature gate needed — all users can deploy templates matching their plan level
         const User = require('../models/User');
-        const { hasFeature } = require('../utils/featureCheck');
         const fullUser = await User.findById(req.user._id).populate('plan');
-
-        if (!hasFeature(fullUser.plan, 'templates')) {
-            return res.status(403).json({
-                success: false,
-                error: 'Template deployment not available in your current plan',
-                upgradeRequired: true
-            });
-        }
 
         // Enforce template minPlan restriction
         const PLAN_LEVELS = { 'free': 0, 'pro': 1, 'enterprise': 2 };

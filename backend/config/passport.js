@@ -29,38 +29,98 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
             },
             async (accessToken, refreshToken, profile, done) => {
                 try {
-                    // Check if user already exists
-                    let user = await User.findOne({ googleId: profile.id });
+                    const Plan = require('../models/Plan');
+                    const logger = require('../utils/logger');
 
+                    // 1. Check if user already exists by Google ID
+                    let user = await User.findOne({ googleId: profile.id });
                     if (user) {
+                        user.lastLogin = new Date();
+                        user.loginCount = (user.loginCount || 0) + 1;
+                        await user.save();
                         return done(null, user);
                     }
 
-                    // Create new user
-                    let username = profile.displayName.toLowerCase().replace(/\s+/g, '');
-                    // Ensure username is unique (simple check, ideally should be more robust)
+                    // 2. Check if user exists with same email (link accounts)
+                    const googleEmail = profile.emails?.[0]?.value;
+                    user = await User.findOne({ email: googleEmail });
+                    if (user) {
+                        user.googleId = profile.id;
+                        user.avatar = profile.photos?.[0]?.value || user.avatar;
+                        user.lastLogin = new Date();
+                        user.loginCount = (user.loginCount || 0) + 1;
+                        await user.save();
+                        logger.info('Google account linked to existing user', { email: user.email });
+                        return done(null, user);
+                    }
+
+                    // 3. Create new user with proper plan setup
+                    let defaultPlan = await Plan.findTrialPlan();
+                    if (!defaultPlan) {
+                        await Plan.createDefaultPlans();
+                        defaultPlan = await Plan.findTrialPlan();
+                    }
+
+                    let username = googleEmail?.split('@')[0] || profile.displayName?.toLowerCase().replace(/\s+/g, '') || `user_${profile.id}`;
                     const existingUsername = await User.findOne({ username });
                     if (existingUsername) {
                         username = `${username}${Math.floor(Math.random() * 1000)}`;
                     }
 
-                    user = await User.create({
+                    user = new User({
                         googleId: profile.id,
-                        email: profile.emails[0].value,
-                        displayName: profile.displayName,
+                        email: googleEmail || `${profile.id}@google.local`,
                         username: username,
-                        avatar: profile.photos[0]?.value,
+                        displayName: profile.displayName || profile.name?.givenName || 'User',
+                        avatar: profile.photos?.[0]?.value || '',
+                        plan: defaultPlan?._id || null,
+                        planType: 'free',
+                        status: 'trial',
+                        subscriptionStatus: 'trial',
+                        isTrialActive: true,
+                        trialStarted: new Date(),
+                        trialExpiry: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
                     });
 
+                    if (defaultPlan) {
+                        user.resourceAllocation = { ...defaultPlan.resources };
+                    }
+
+                    try {
+                        await user.save();
+                    } catch (saveError) {
+                        // Handle E11000 duplicate key race condition
+                        if (saveError.code === 11000) {
+                            logger.info('Google OAuth race condition detected, retrying lookup');
+                            const existingUser = await User.findOne({
+                                $or: [{ googleId: profile.id }, { email: googleEmail }]
+                            });
+                            if (existingUser) {
+                                if (!existingUser.googleId) existingUser.googleId = profile.id;
+                                existingUser.lastLogin = new Date();
+                                existingUser.loginCount = (existingUser.loginCount || 0) + 1;
+                                await existingUser.save();
+                                return done(null, existingUser);
+                            }
+                            throw saveError;
+                        }
+                        throw saveError;
+                    }
+
+                    // Assign to container server
+                    try {
+                        const { assignUserToServer } = require('../services/containerOrchestrator');
+                        if (assignUserToServer) {
+                            await assignUserToServer(user._id, 'free-trial');
+                        }
+                    } catch (containerErr) {
+                        logger.warn('Container assignment deferred:', containerErr.message);
+                    }
+
+                    logger.info('New Google user created', { email: user.email, userId: user._id });
                     done(null, user);
                 } catch (error) {
-                    console.error('❌ Google OAuth User Creation Error:');
-                    console.error('Error:', error.message);
-                    if (error.errors) {
-                        Object.keys(error.errors).forEach(key => {
-                            console.error(`  - ${key}:`, error.errors[key].message);
-                        });
-                    }
+                    console.error('❌ Google OAuth Error:', error.message);
                     done(error, null);
                 }
             }
@@ -83,7 +143,7 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
             async (accessToken, refreshToken, profile, done) => {
                 // Declare variables outside try block for error logging
                 let username, email, displayName, defaultPlan, user;
-                
+
                 try {
                     logger.info('🔐 GitHub OAuth callback received', {
                         githubId: profile.id,
@@ -123,18 +183,29 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                     username = profile.username || `github_${profile.id}`;
                     displayName = profile.displayName || profile.username || username;
 
-                    // Check if username or email already exists and make them unique
+                    // Check if username or email already exists
                     let usernameExists = await User.findOne({ username });
                     let emailExists = await User.findOne({ email });
-                    
+
+                    // CRITICAL: If email exists, LINK the GitHub account instead of creating duplicate
+                    if (emailExists) {
+                        logger.info(`🔗 Linking GitHub account to existing user with email: ${email}`, {
+                            existingUserId: emailExists._id,
+                            githubId: profile.id,
+                            username: profile.username
+                        });
+                        emailExists.githubId = profile.id;
+                        emailExists.githubAccessToken = accessToken;
+                        emailExists.avatar = profile.photos?.[0]?.value || emailExists.avatar;
+                        emailExists.lastLogin = new Date();
+                        emailExists.loginCount = (emailExists.loginCount || 0) + 1;
+                        await emailExists.save();
+                        return done(null, emailExists);
+                    }
+
                     if (usernameExists) {
                         username = `${username}_${profile.id}`;
                         logger.info(`Username already exists, using: ${username}`);
-                    }
-                    
-                    if (emailExists) {
-                        email = `github_${profile.id}@github.com`;
-                        logger.info(`Email already exists, using: ${email}`);
                     }
 
                     logger.info('👤 Creating new user from GitHub...', {
@@ -257,7 +328,7 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                     logger.error('═══════════════════════════════════════════════════════════');
                     logger.error('❌ GITHUB OAUTH ERROR - COMPREHENSIVE DEBUG INFO');
                     logger.error('═══════════════════════════════════════════════════════════');
-                    
+
                     // Basic error info
                     logger.error('📌 Basic Error Info:', {
                         name: error.name,
@@ -316,7 +387,7 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                         logger.error('  Code:', error.code);
                         logger.error('  Code Name:', error.codeName);
                         logger.error('  Error Message:', error.errmsg || error.message);
-                        
+
                         // Error Info (contains validation details)
                         if (error.errorInfo) {
                             logger.error('  Error Info:', JSON.stringify(error.errorInfo, null, 2));
@@ -370,7 +441,7 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                     logger.error(error.stack);
 
                     logger.error('═══════════════════════════════════════════════════════════');
-                    
+
                     done(error, null);
                 }
             }

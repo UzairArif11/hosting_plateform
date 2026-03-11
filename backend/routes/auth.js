@@ -233,108 +233,10 @@ const handleGitHubAuthentication = async (accessToken, refreshToken, profile, do
   }
 };
 
+
 // GitHub OAuth Strategy configured in config/passport.js
+// Google OAuth Strategy configured in config/passport.js (inline handler with E11000 fix)
 
-// Google OAuth handler
-const handleGoogleAuthentication = async (accessToken, refreshToken, profile, done) => {
-  try {
-    // Check if user already exists by Google ID
-    let user = await User.findOne({ googleId: profile.id });
-
-    if (user) {
-      // Update existing user
-      user.displayName = profile.displayName || user.displayName;
-      user.avatar = profile.photos?.[0]?.value || user.avatar;
-      user.lastLogin = new Date();
-      user.loginCount += 1;
-      await user.save();
-
-      logger.security('User logged in via Google', {
-        userId: user._id,
-        email: user.email,
-        loginCount: user.loginCount
-      });
-
-      return done(null, user);
-    }
-
-    // Check if user exists with same email (link accounts)
-    user = await User.findOne({ email: profile.emails?.[0]?.value });
-
-    if (user) {
-      // Link Google account to existing user
-      user.googleId = profile.id;
-      user.avatar = profile.photos?.[0]?.value || user.avatar;
-      user.lastLogin = new Date();
-      user.loginCount += 1;
-      await user.save();
-
-      logger.security('Google account linked to existing user', {
-        userId: user._id,
-        email: user.email
-      });
-
-      return done(null, user);
-    }
-
-    // Create new user
-    let defaultPlan = await Plan.findTrialPlan();
-
-    if (!defaultPlan) {
-      await Plan.createDefaultPlans();
-      defaultPlan = await Plan.findTrialPlan();
-    }
-
-    user = new User({
-      googleId: profile.id,
-      email: profile.emails?.[0]?.value || `${profile.id}@google.local`,
-      username: profile.emails?.[0]?.value?.split('@')[0] || `user_${profile.id}`,
-      displayName: profile.displayName || profile.name?.givenName || 'User',
-      avatar: profile.photos?.[0]?.value || '',
-      plan: defaultPlan?._id || null,
-      planType: 'free',
-      status: 'trial',
-      subscriptionStatus: 'trial',
-      isTrialActive: true,
-      trialStarted: new Date(),
-      trialExpiry: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-    });
-
-    if (defaultPlan) {
-      user.resourceAllocation = { ...defaultPlan.resources };
-    }
-
-    await user.save();
-
-    // Assign to container server
-    try {
-      const containerAssignment = await assignUserToServer(user._id, 'free-trial');
-      logger.info('New Google user assigned to server', {
-        userId: user._id,
-        serverId: containerAssignment.serverId
-      });
-    } catch (error) {
-      logger.error('Failed to assign Google user to server:', error.message);
-    }
-
-    // Create Payoneer customer
-    await createPayoneerCustomerForUser(user);
-
-    logger.security('New user registered via Google', {
-      userId: user._id,
-      email: user.email
-    });
-
-    return done(null, user);
-  } catch (error) {
-    logger.error('Google OAuth error:', error.message);
-    return done(error, null);
-  }
-};
-
-// Google OAuth Strategy configured in config/passport.js
-
-// Serialize/deserialize configured in config/passport.js
 
 // Route handlers
 const handleGitHubOAuthStart = passport.authenticate('github', {
@@ -488,6 +390,9 @@ const getCurrentUser = async (req, res) => {
         displayName: user.displayName,
         avatar: user.avatar,
         role: user.role,
+        githubId: user.githubId || null,
+        googleId: user.googleId || null,
+        provider: user.provider || null,
         status: user.status,
         subscriptionStatus: user.subscriptionStatus,
         plan: user.plan ? {
@@ -706,7 +611,7 @@ router.get('/google', passport.authenticate('google', {
 }));
 
 router.get('/google/callback',
-  passport.authenticate('google', { failureRedirect: '/login?error=auth_failed' }),
+  passport.authenticate('google', { failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login?error=auth_failed` }),
   handleGitHubCallback // Reuse same callback handler
 );
 

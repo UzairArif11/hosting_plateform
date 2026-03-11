@@ -183,6 +183,73 @@ async function deployProjectToUserContainer(user, project, buildPath, containerI
             privateKey: keyContent
         });
 
+        // CRITICAL: Verify container exists and is running before docker cp
+        logger.info(`🔍 [DEPLOY_PROJECT] Checking if container ${containerName} exists and is running...`);
+        const containerCheck = await ssh.execCommand(`docker inspect --format='{{.State.Running}}' ${containerName} 2>&1`);
+        const isRunning = containerCheck.stdout && containerCheck.stdout.trim() === 'true';
+        const containerNotFound = containerCheck.stderr && (containerCheck.stderr.includes('No such object') || containerCheck.stderr.includes('Error'));
+
+        if (containerNotFound || !isRunning) {
+            logger.warn(`⚠️ [DEPLOY_PROJECT] Container ${containerName} ${containerNotFound ? 'NOT FOUND' : 'NOT RUNNING'}. Auto-creating...`);
+
+            // Try to start if exists but not running
+            if (!containerNotFound) {
+                const startResult = await ssh.execCommand(`docker start ${containerName}`);
+                if (startResult.code === 0) {
+                    logger.info(`✅ [DEPLOY_PROJECT] Container ${containerName} started successfully`);
+                    // Wait for container to fully start
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                } else {
+                    logger.warn(`⚠️ [DEPLOY_PROJECT] Failed to start container, will recreate: ${startResult.stderr}`);
+                }
+            }
+
+            // If still not running, create a new container
+            const recheckResult = await ssh.execCommand(`docker inspect --format='{{.State.Running}}' ${containerName} 2>&1`);
+            if (!recheckResult.stdout || recheckResult.stdout.trim() !== 'true') {
+                logger.info(`🔨 [DEPLOY_PROJECT] Creating new container ${containerName}...`);
+
+                // Get user's plan resources
+                const Plan = require('../models/Plan');
+                const User = require('../models/User');
+                const fullUser = await User.findById(user._id).populate('plan');
+                const resources = fullUser?.plan?.resources || fullUser?.resourceAllocation || {
+                    cpu: 0.5, ram: 0.5, storage: 2, bandwidth: 100
+                };
+
+                // Determine server object from containerOrchestrator
+                const containerOrchestrator = require('./containerOrchestrator');
+                const server = containerOrchestrator.ORACLE_SERVERS[serverKey];
+
+                if (!server) {
+                    throw new Error(`Server ${serverKey} not found in ORACLE_SERVERS`);
+                }
+
+                // Remove old container if it exists but is broken
+                if (!containerNotFound) {
+                    await ssh.execCommand(`docker rm -f ${containerName} 2>/dev/null || true`);
+                }
+
+                const containerResult = await createUserContainer(
+                    fullUser || user,
+                    serverKey,
+                    server,
+                    resources
+                );
+
+                if (!containerResult.success) {
+                    throw new Error(`Failed to auto-create container: ${containerResult.error}`);
+                }
+
+                logger.info(`✅ [DEPLOY_PROJECT] Container ${containerResult.containerName} created and running`);
+
+                // Wait for container to be fully ready
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+        } else {
+            logger.info(`✅ [DEPLOY_PROJECT] Container ${containerName} is running`);
+        }
+
         // Create project directory in container
         const projectPath = `/app/projects/${project._id}`;
         await ssh.execCommand(`docker exec ${containerName} mkdir -p ${projectPath}`);
@@ -198,7 +265,6 @@ async function deployProjectToUserContainer(user, project, buildPath, containerI
 
         if (cpResult.code !== 0) {
             logger.error(`Docker CP failed: ${cpResult.stderr}`);
-            // Fallback to tar if cp fails (or just throw)
             throw new Error(`Failed to copy files: ${cpResult.stderr}`);
         }
 
@@ -219,9 +285,24 @@ async function deployProjectToUserContainer(user, project, buildPath, containerI
             const checkRemote = await ssh.execCommand(`ls -la ${buildPath}/server.js 2>&1 || echo "NOT_FOUND"`);
             logger.error(`Remote server.js check: ${checkRemote.stdout || checkRemote.stderr}`);
 
-            throw new Error(`server.js not found in container at ${projectPath}/server.js. Files copied: ${listFiles.stdout}`);
+            // RETRY: If docker cp silently failed, try alternate method (tar pipe)
+            logger.info(`🔄 [DEPLOY_PROJECT] Retrying file copy using tar pipe method...`);
+            const tarCopyCmd = `cd ${buildPath} && tar cf - . | docker exec -i ${containerName} tar xf - -C ${projectPath}/`;
+            const tarResult = await ssh.execCommand(tarCopyCmd);
+
+            if (tarResult.code !== 0) {
+                logger.error(`Tar pipe copy also failed: ${tarResult.stderr}`);
+            }
+
+            // Re-verify after retry
+            const recheck = await ssh.execCommand(`docker exec ${containerName} test -f ${projectPath}/server.js && echo "EXISTS" || echo "MISSING"`);
+            if (!recheck.stdout || !recheck.stdout.includes('EXISTS')) {
+                throw new Error(`server.js not found in container at ${projectPath}/server.js after retry. Container may have issues.`);
+            }
+            logger.info(`✅ server.js found after tar pipe retry!`);
+        } else {
+            logger.info(`✅ server.js verified: ${projectPath}/server.js`);
         }
-        logger.info(`✅ server.js verified: ${projectPath}/server.js`);
 
         // Verify build directory was created (for static sites)
         const checkBuildDir = await ssh.execCommand(`docker exec ${containerName} ls -la ${projectPath}/build 2>&1 || echo "NO_BUILD_DIR"`);
