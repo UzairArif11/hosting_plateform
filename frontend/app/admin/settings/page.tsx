@@ -158,56 +158,82 @@ export default function AdminSettingsPage() {
         }
     };
 
-    const addBankAccount = () => {
+    const addBankAccount = async () => {
         if (!newAccount.bankName || !newAccount.accountTitle || !newAccount.accountNumber) {
             toast.error('Bank name, account title, and account number are required');
             return;
         }
-        setPaymentConfig({
+        const updatedConfig = {
             ...paymentConfig,
             manualBank: {
                 ...paymentConfig.manualBank,
+                enabled: true,
                 accounts: [...paymentConfig.manualBank.accounts, { ...newAccount }]
             }
-        });
+        };
+        setPaymentConfig(updatedConfig);
         setNewAccount({ bankName: '', accountTitle: '', accountNumber: '', iban: '', currency: 'PKR', isActive: true });
-        toast.success('Bank account added. Click Save to persist.');
+        try {
+            await api.put('/settings', { paymentConfig: updatedConfig });
+            toast.success('Bank account added and saved!');
+        } catch (error) {
+            toast.error('Failed to save bank account');
+        }
     };
 
-    const removeBankAccount = (index: number) => {
+    const removeBankAccount = async (index: number) => {
         const updated = [...paymentConfig.manualBank.accounts];
         updated.splice(index, 1);
-        setPaymentConfig({
+        const updatedConfig = {
             ...paymentConfig,
             manualBank: { ...paymentConfig.manualBank, accounts: updated }
-        });
-        toast.success('Account removed. Click Save to persist.');
+        };
+        setPaymentConfig(updatedConfig);
+        try {
+            await api.put('/settings', { paymentConfig: updatedConfig });
+            toast.success('Account removed!');
+        } catch (error) {
+            toast.error('Failed to save');
+        }
     };
 
-    const addCryptoWallet = () => {
+    const addCryptoWallet = async () => {
         if (!newWallet.coinName || !newWallet.network || !newWallet.walletAddress) {
             toast.error('Coin name, network, and wallet address are required');
             return;
         }
-        setPaymentConfig({
+        const updatedConfig = {
             ...paymentConfig,
             crypto: {
                 ...paymentConfig.crypto,
+                enabled: true,
                 wallets: [...paymentConfig.crypto.wallets, { ...newWallet }]
             }
-        });
+        };
+        setPaymentConfig(updatedConfig);
         setNewWallet({ coinName: '', network: '', walletAddress: '', isActive: true });
-        toast.success('Crypto wallet added. Click Save to persist.');
+        try {
+            await api.put('/settings', { paymentConfig: updatedConfig });
+            toast.success('Crypto wallet added and saved!');
+        } catch (error) {
+            toast.error('Failed to save crypto wallet');
+        }
     };
 
-    const removeCryptoWallet = (index: number) => {
+    const removeCryptoWallet = async (index: number) => {
         const updated = [...paymentConfig.crypto.wallets];
         updated.splice(index, 1);
-        setPaymentConfig({
+        const updatedConfig = {
             ...paymentConfig,
             crypto: { ...paymentConfig.crypto, wallets: updated }
-        });
-        toast.success('Wallet removed. Click Save to persist.');
+        };
+        setPaymentConfig(updatedConfig);
+        try {
+            await api.put('/settings', { paymentConfig: updatedConfig });
+            toast.success('Wallet removed!');
+        } catch (error) {
+            toast.error('Failed to save');
+        }
     };
 
     const tabs = [

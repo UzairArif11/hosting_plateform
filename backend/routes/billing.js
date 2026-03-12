@@ -525,6 +525,14 @@ router.get('/payment-config', async (req, res) => {
       }
     };
 
+    // Auto-enable payment methods if accounts/wallets exist (user-friendly fallback)
+    if (response.manualBank.accounts.length > 0 && !response.manualBank.enabled) {
+      response.manualBank.enabled = true;
+    }
+    if (response.crypto.wallets.length > 0 && !response.crypto.enabled) {
+      response.crypto.enabled = true;
+    }
+
     res.json({ success: true, paymentConfig: response });
   } catch (error) {
     logger.error('Get payment config error:', error.message);
