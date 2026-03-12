@@ -35,6 +35,8 @@ const AVAILABLE_FOR_USERS = {
 // Alert threshold (70% of available)
 const ALERT_THRESHOLD = 0.70;
 
+// Signup capacity limit is now admin-configurable via Settings.resourceLimits.signupCapacityLimit (default 200%)
+
 // Plan resource allocation
 const PLAN_RESOURCES = {
     free: {
@@ -251,35 +253,63 @@ async function calculateCapacity() {
  */
 async function canSignupForPlan(plan) {
     try {
-        const { capacity } = await calculateCapacity();
+        const { capacity, remaining } = await calculateCapacity();
 
-        if (capacity.limitReached) {
+        // Read admin-configurable threshold from Settings (default 200%)
+        let criticalThresholdPercent = 200;
+        try {
+            const settings = await Settings.getSettings();
+            criticalThresholdPercent = settings.resourceLimits?.signupCapacityLimit || 200;
+        } catch (settingsErr) {
+            logger.warn('Could not read signupCapacityLimit from Settings, using default 200%');
+        }
+        const criticalThreshold = criticalThresholdPercent / 100; // Convert 200% → 2.0
+
+        // Calculate how much of total capacity is used
+        const cpuUsageRatio = 1 - (remaining.cpu / AVAILABLE_FOR_USERS.cpu);
+        const ramUsageRatio = 1 - (remaining.ram / AVAILABLE_FOR_USERS.ram);
+        const storageUsageRatio = 1 - (remaining.storage / AVAILABLE_FOR_USERS.storage);
+        const maxUsageRatio = Math.max(cpuUsageRatio, ramUsageRatio, storageUsageRatio);
+
+        // CRITICAL overload (exceeds admin-set limit) — block signups
+        if (maxUsageRatio >= criticalThreshold) {
             return {
                 allowed: false,
-                reason: 'Server capacity reached. Please try again in 24 hours.',
-                retryAfter: 24 * 60 * 60 * 1000 // 24 hours
+                severity: 'critical',
+                reason: `Server resources at ${(maxUsageRatio * 100).toFixed(0)}% (limit: ${criticalThresholdPercent}%). Please try again later.`,
+                usageRatio: maxUsageRatio,
+                threshold: criticalThresholdPercent,
+                retryAfter: 24 * 60 * 60 * 1000
             };
         }
 
+        // Normal overload (plan slots exhausted but under critical limit) — allow, alert admin
         const planCapacity = capacity[plan] || 0;
-
         if (planCapacity <= 0) {
             return {
-                allowed: false,
-                reason: `${plan} plan capacity reached. Please try a different plan or try again in 24 hours.`,
-                retryAfter: 24 * 60 * 60 * 1000
+                allowed: true,
+                severity: 'warning',
+                reason: `${plan} plan slots exhausted but under ${criticalThresholdPercent}% limit. Admin should review.`,
+                remainingSlots: 0,
+                usageRatio: maxUsageRatio,
+                threshold: criticalThresholdPercent
             };
         }
 
         return {
             allowed: true,
-            remainingSlots: planCapacity
+            severity: 'ok',
+            remainingSlots: planCapacity,
+            usageRatio: maxUsageRatio,
+            threshold: criticalThresholdPercent
         };
     } catch (error) {
         logger.error('Failed to check plan signup:', error);
+        // On error, allow signup (don't block users due to monitoring failures)
         return {
-            allowed: false,
-            reason: 'Error checking capacity'
+            allowed: true,
+            severity: 'error',
+            reason: 'Capacity check failed, allowing signup'
         };
     }
 }

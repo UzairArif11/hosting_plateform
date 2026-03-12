@@ -86,13 +86,24 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
                         logger.warn('Signup restriction check failed (allowing signup):', restrictErr.message);
                     }
 
-                    // 4. Check platform capacity (alert admin only, never block signups)
+                    // 4. Check platform capacity (two-tier: warn admin at normal overload, block at admin-set limit)
                     try {
                         const resourceMonitoring = require('../services/resourceMonitoring');
                         const capacityCheck = await resourceMonitoring.canSignupForPlan('free');
                         if (!capacityCheck.allowed) {
-                            logger.warn('⚠️ ADMIN ALERT: Platform capacity reached - new Google signup allowed but resources may need attention', {
+                            // CRITICAL overload (exceeds admin-set limit) — block signup
+                            logger.error('🛑 CRITICAL: Capacity limit exceeded, blocking Google signup', {
                                 reason: capacityCheck.reason,
+                                usageRatio: capacityCheck.usageRatio,
+                                email: googleEmail
+                            });
+                            return done(new Error('Server is currently at full capacity. Please try again later.'), null);
+                        }
+                        if (capacityCheck.severity === 'warning') {
+                            // Normal overload — allow signup, alert admin
+                            logger.warn('⚠️ ADMIN ALERT: Capacity warning - Google signup allowed', {
+                                reason: capacityCheck.reason,
+                                usageRatio: capacityCheck.usageRatio,
                                 email: googleEmail,
                                 action: 'Admin should review server resources'
                             });
@@ -273,13 +284,24 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                         logger.warn('Signup restriction check failed (allowing signup):', restrictErr.message);
                     }
 
-                    // Check platform capacity (alert admin only, never block signups)
+                    // Check platform capacity (two-tier: warn admin at normal overload, block at admin-set limit)
                     try {
                         const resourceMonitoring = require('../services/resourceMonitoring');
                         const capacityCheck = await resourceMonitoring.canSignupForPlan('free');
                         if (!capacityCheck.allowed) {
-                            logger.warn('⚠️ ADMIN ALERT: Platform capacity reached - new GitHub signup allowed but resources may need attention', {
+                            // CRITICAL overload (exceeds admin-set limit) — block signup
+                            logger.error('🛑 CRITICAL: Capacity limit exceeded, blocking GitHub signup', {
                                 reason: capacityCheck.reason,
+                                usageRatio: capacityCheck.usageRatio,
+                                email: email
+                            });
+                            return done(new Error('Server is currently at full capacity. Please try again later.'), null);
+                        }
+                        if (capacityCheck.severity === 'warning') {
+                            // Normal overload — allow signup, alert admin
+                            logger.warn('⚠️ ADMIN ALERT: Capacity warning - GitHub signup allowed', {
+                                reason: capacityCheck.reason,
+                                usageRatio: capacityCheck.usageRatio,
                                 email: email,
                                 action: 'Admin should review server resources'
                             });

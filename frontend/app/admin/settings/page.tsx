@@ -44,7 +44,8 @@ export default function AdminSettingsPage() {
 
     const [resourceLimits, setResourceLimits] = useState({
         warnThreshold: 80,
-        stopThreshold: 90
+        stopThreshold: 90,
+        signupCapacityLimit: 200
     });
 
     const [securitySettings, setSecuritySettings] = useState({
@@ -260,7 +261,7 @@ export default function AdminSettingsPage() {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="bg-gray-800 p-4 rounded-lg border border-gray-700">
                                         <h3 className="text-lg font-medium text-purple-400 mb-2">Warning Threshold (%)</h3>
-                                        <p className="text-sm text-gray-400 mb-4">Send email warning when usage exceeds this %.</p>
+                                        <p className="text-sm text-gray-400 mb-4">Send email warning when system usage exceeds this %.</p>
                                         <input
                                             type="number"
                                             min="1"
@@ -272,7 +273,7 @@ export default function AdminSettingsPage() {
                                     </div>
                                     <div className="bg-gray-800 p-4 rounded-lg border border-gray-700">
                                         <h3 className="text-lg font-medium text-red-400 mb-2">Stop Threshold (%)</h3>
-                                        <p className="text-sm text-gray-400 mb-4">Stop the highest consuming process when usage exceeds this %.</p>
+                                        <p className="text-sm text-gray-400 mb-4">Stop the highest consuming process when system usage exceeds this %.</p>
                                         <input
                                             type="number"
                                             min="1"
@@ -281,6 +282,36 @@ export default function AdminSettingsPage() {
                                             onChange={(e) => setResourceLimits({ ...resourceLimits, stopThreshold: parseInt(e.target.value) })}
                                             className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white"
                                         />
+                                    </div>
+                                </div>
+
+                                {/* Signup Capacity Limit */}
+                                <div className="bg-gray-800 p-5 rounded-lg border border-yellow-600/30">
+                                    <div className="flex items-center gap-3 mb-3">
+                                        <span className="text-2xl">👥</span>
+                                        <div>
+                                            <h3 className="text-lg font-medium text-yellow-400">Signup Capacity Limit (%)</h3>
+                                            <p className="text-sm text-gray-400">Block new signups when total user allocations exceed this % of available resources</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-4">
+                                        <input
+                                            type="number"
+                                            min="100"
+                                            max="500"
+                                            step="10"
+                                            value={resourceLimits.signupCapacityLimit}
+                                            onChange={(e) => setResourceLimits({ ...resourceLimits, signupCapacityLimit: parseInt(e.target.value) || 200 })}
+                                            className="w-32 bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-lg font-bold text-center"
+                                        />
+                                        <span className="text-gray-400 text-lg">%</span>
+                                    </div>
+                                    <div className="mt-3 p-3 bg-gray-900/50 rounded-lg border border-gray-700">
+                                        <p className="text-xs text-gray-400">
+                                            <strong className="text-gray-300">How it works:</strong> This is based on enrolled user plan allocations (CPU, RAM, Storage), NOT actual htop usage.
+                                            Setting to <strong className="text-yellow-400">200%</strong> means allowing 2× oversubscription before blocking signups.
+                                            Below this limit, signups succeed but admin gets a warning in logs.
+                                        </p>
                                     </div>
                                 </div>
                             </div>

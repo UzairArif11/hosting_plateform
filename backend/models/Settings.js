@@ -55,7 +55,8 @@ const settingsSchema = new mongoose.Schema({
     // Resource Limits (Admin Configurable)
     resourceLimits: {
         warnThreshold: { type: Number, default: 80 }, // % Usage for Warning
-        stopThreshold: { type: Number, default: 90 }  // % Usage for Stopping
+        stopThreshold: { type: Number, default: 90 },  // % Usage for Stopping
+        signupCapacityLimit: { type: Number, default: 200 } // % of allocated resources before signups are blocked (user-based, not htop)
     },
 
     // Feature Flags
