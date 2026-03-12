@@ -494,19 +494,34 @@ router.get('/payment-config', async (req, res) => {
   try {
     const settings = await Settings.getSettings();
     const config = settings.paymentConfig || {};
+    const currencyConfig = settings.currencyConfig || { displayCurrency: 'usd', exchangeRates: { usdToPkr: 278, usdToEur: 0.92, usdToGbp: 0.79 } };
 
     const response = {
       payoneer: { enabled: config.payoneer?.enabled || false },
       jazzcashEasypaisa: { enabled: config.jazzcashEasypaisa?.enabled || false },
       manualBank: {
         enabled: config.manualBank?.enabled || false,
-        accounts: (config.manualBank?.accounts || []).filter(a => a.isActive).map(a => ({
-          id: a._id,
+        accounts: (config.manualBank?.accounts || []).filter(a => a.isActive !== false).map(a => ({
+          id: a._id?.toString() || a.id || String(Math.random()),
           bankName: a.bankName,
           accountTitle: a.accountTitle,
           accountNumber: a.accountNumber,
-          iban: a.iban
+          iban: a.iban,
+          currency: a.currency || 'PKR'
         }))
+      },
+      crypto: {
+        enabled: config.crypto?.enabled || false,
+        wallets: (config.crypto?.wallets || []).filter(w => w.isActive !== false).map(w => ({
+          id: w._id?.toString() || w.id || String(Math.random()),
+          coinName: w.coinName,
+          network: w.network,
+          walletAddress: w.walletAddress
+        }))
+      },
+      currencyConfig: {
+        displayCurrency: currencyConfig.displayCurrency || 'usd',
+        exchangeRates: currencyConfig.exchangeRates || {}
       }
     };
 
@@ -517,18 +532,27 @@ router.get('/payment-config', async (req, res) => {
   }
 });
 
-// Submit manual bank transfer payment
+// Submit manual bank transfer or crypto payment
 router.post('/manual-payment', upload.single('screenshot'), async (req, res) => {
   try {
-    const { planId, bankAccountId, senderName, senderAccount, transactionId } = req.body;
+    const { planId, bankAccountId, cryptoWalletId, senderName, senderAccount, transactionId, paymentType } = req.body;
     const user = req.user;
+    const isCrypto = paymentType === 'crypto' || !!cryptoWalletId;
 
     if (!req.file) {
       return res.status(400).json({ success: false, error: 'Screenshot is required' });
     }
 
-    if (!planId || !bankAccountId || !senderName) {
-      return res.status(400).json({ success: false, error: 'Plan, bank account, and sender name are required' });
+    if (!planId) {
+      return res.status(400).json({ success: false, error: 'Plan is required' });
+    }
+
+    if (!isCrypto && (!bankAccountId || !senderName)) {
+      return res.status(400).json({ success: false, error: 'Bank account and sender name are required' });
+    }
+
+    if (isCrypto && !cryptoWalletId) {
+      return res.status(400).json({ success: false, error: 'Crypto wallet selection is required' });
     }
 
     // Get plan
@@ -537,12 +561,8 @@ router.post('/manual-payment', upload.single('screenshot'), async (req, res) => 
       return res.status(404).json({ success: false, error: 'Plan not found' });
     }
 
-    // Get bank account details from settings
+    // Get settings for account/wallet lookup
     const settings = await Settings.getSettings();
-    const bankAccount = settings.paymentConfig?.manualBank?.accounts?.id(bankAccountId);
-    if (!bankAccount) {
-      return res.status(404).json({ success: false, error: 'Bank account not found' });
-    }
 
     // Check if user already has a pending manual payment
     const existingPending = await ManualPayment.findOne({ user: user._id, status: 'pending' });
@@ -553,44 +573,79 @@ router.post('/manual-payment', upload.single('screenshot'), async (req, res) => 
       });
     }
 
-    // Get plan price in PKR
-    const amount = plan.getPricingForCurrency('pkr') || plan.getPricingForCurrency('usd');
+    let paymentRecord;
 
-    // Create manual payment record
-    const manualPayment = await ManualPayment.create({
-      user: user._id,
-      plan: plan._id,
-      planName: plan.displayName,
-      amount: amount,
-      currency: 'PKR',
-      bankAccount: {
-        bankName: bankAccount.bankName,
-        accountTitle: bankAccount.accountTitle,
-        accountNumber: bankAccount.accountNumber,
-        iban: bankAccount.iban
-      },
-      senderName,
-      senderAccount: senderAccount || '',
-      transactionId: transactionId || '',
-      screenshot: `/uploads/payments/${req.file.filename}`
-    });
+    if (isCrypto) {
+      // Crypto payment
+      const cryptoWallet = settings.paymentConfig?.crypto?.wallets?.id(cryptoWalletId);
+      if (!cryptoWallet) {
+        return res.status(404).json({ success: false, error: 'Crypto wallet not found' });
+      }
+
+      const amount = plan.getPricingForCurrency('usd') || plan.pricing.usd;
+
+      paymentRecord = await ManualPayment.create({
+        user: user._id,
+        plan: plan._id,
+        planName: plan.displayName,
+        amount: amount,
+        currency: cryptoWallet.coinName || 'CRYPTO',
+        paymentType: 'crypto',
+        cryptoWallet: {
+          coinName: cryptoWallet.coinName,
+          network: cryptoWallet.network,
+          walletAddress: cryptoWallet.walletAddress
+        },
+        senderName: senderName || 'Crypto Payment',
+        transactionId: transactionId || '',
+        screenshot: `/uploads/payments/${req.file.filename}`
+      });
+    } else {
+      // Bank transfer
+      const bankAccount = settings.paymentConfig?.manualBank?.accounts?.id(bankAccountId);
+      if (!bankAccount) {
+        return res.status(404).json({ success: false, error: 'Bank account not found' });
+      }
+
+      const bankCurrency = bankAccount.currency || 'PKR';
+      const amount = plan.getPricingForCurrency(bankCurrency.toLowerCase()) || plan.getPricingForCurrency('usd');
+
+      paymentRecord = await ManualPayment.create({
+        user: user._id,
+        plan: plan._id,
+        planName: plan.displayName,
+        amount: amount,
+        currency: bankCurrency,
+        paymentType: 'bank',
+        bankAccount: {
+          bankName: bankAccount.bankName,
+          accountTitle: bankAccount.accountTitle,
+          accountNumber: bankAccount.accountNumber,
+          iban: bankAccount.iban
+        },
+        senderName,
+        senderAccount: senderAccount || '',
+        transactionId: transactionId || '',
+        screenshot: `/uploads/payments/${req.file.filename}`
+      });
+    }
 
     logger.billing('Manual payment submitted', {
       userId: user._id,
       planId: plan._id,
-      amount,
-      manualPaymentId: manualPayment._id
+      paymentType: isCrypto ? 'crypto' : 'bank',
+      paymentId: paymentRecord._id
     });
 
     res.json({
       success: true,
       message: 'Payment submitted successfully. Admin will verify your payment shortly.',
       payment: {
-        id: manualPayment._id,
-        status: manualPayment.status,
-        amount: manualPayment.amount,
-        planName: manualPayment.planName,
-        createdAt: manualPayment.createdAt
+        id: paymentRecord._id,
+        status: paymentRecord.status,
+        amount: paymentRecord.amount,
+        planName: paymentRecord.planName,
+        createdAt: paymentRecord.createdAt
       }
     });
   } catch (error) {

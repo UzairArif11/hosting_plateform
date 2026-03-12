@@ -1793,13 +1793,16 @@ router.post('/manual-payments/:id/verify', requireAuth, requireAdmin, async (req
           type: 'subscription',
           plan: plan._id,
           planName: plan.displayName,
-          description: `${plan.displayName} Plan - Manual Bank Transfer`,
-          paymentMethod: 'bank_transfer',
+          description: `${plan.displayName} Plan - ${payment.paymentType === 'crypto' ? 'Crypto Payment' : 'Manual Bank Transfer'}`,
+          paymentMethod: payment.paymentType === 'crypto' ? 'crypto' : 'bank_transfer',
           completedAt: new Date(),
           metadata: {
             manualPaymentId: payment._id,
             verifiedBy: req.user._id,
-            bankName: payment.bankAccount?.bankName
+            ...(payment.paymentType === 'crypto'
+              ? { coinName: payment.cryptoWallet?.coinName, network: payment.cryptoWallet?.network }
+              : { bankName: payment.bankAccount?.bankName }
+            )
           }
         });
       } catch (paymentErr) {

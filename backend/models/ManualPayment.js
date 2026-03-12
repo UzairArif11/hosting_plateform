@@ -27,15 +27,29 @@ const manualPaymentSchema = new mongoose.Schema({
     currency: {
         type: String,
         default: 'PKR',
-        enum: ['PKR', 'USD']
+        enum: ['PKR', 'USD', 'EUR', 'GBP', 'USDT', 'USDC', 'BTC', 'ETH', 'CRYPTO']
     },
 
-    // Which bank account user sent money to
+    // Payment type
+    paymentType: {
+        type: String,
+        enum: ['bank', 'crypto'],
+        default: 'bank'
+    },
+
+    // Which bank account user sent money to (for bank transfers)
     bankAccount: {
-        bankName: { type: String, required: true },
+        bankName: { type: String },
         accountTitle: { type: String },
         accountNumber: { type: String },
         iban: { type: String }
+    },
+
+    // Crypto wallet details (for crypto payments)
+    cryptoWallet: {
+        coinName: { type: String },
+        network: { type: String },
+        walletAddress: { type: String }
     },
 
     // User's sender info

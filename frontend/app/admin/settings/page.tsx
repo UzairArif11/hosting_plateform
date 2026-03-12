@@ -11,6 +11,15 @@ interface BankAccount {
     accountTitle: string;
     accountNumber: string;
     iban: string;
+    currency: string;
+    isActive: boolean;
+}
+
+interface CryptoWallet {
+    _id?: string;
+    coinName: string;
+    network: string;
+    walletAddress: string;
     isActive: boolean;
 }
 
@@ -63,7 +72,17 @@ export default function AdminSettingsPage() {
         manualBank: {
             enabled: false,
             accounts: [] as BankAccount[]
+        },
+        crypto: {
+            enabled: false,
+            wallets: [] as CryptoWallet[]
         }
+    });
+
+    // Currency Configuration
+    const [currencyConfig, setCurrencyConfig] = useState({
+        displayCurrency: 'usd',
+        exchangeRates: { usdToPkr: 278, usdToEur: 0.92, usdToGbp: 0.79 }
     });
 
     const [newAccount, setNewAccount] = useState<BankAccount>({
@@ -71,6 +90,14 @@ export default function AdminSettingsPage() {
         accountTitle: '',
         accountNumber: '',
         iban: '',
+        currency: 'PKR',
+        isActive: true
+    });
+
+    const [newWallet, setNewWallet] = useState<CryptoWallet>({
+        coinName: '',
+        network: '',
+        walletAddress: '',
         isActive: true
     });
 
@@ -92,8 +119,15 @@ export default function AdminSettingsPage() {
                         manualBank: {
                             enabled: data.paymentConfig.manualBank?.enabled || false,
                             accounts: data.paymentConfig.manualBank?.accounts || []
+                        },
+                        crypto: {
+                            enabled: data.paymentConfig.crypto?.enabled || false,
+                            wallets: data.paymentConfig.crypto?.wallets || []
                         }
                     });
+                }
+                if (data.currencyConfig) {
+                    setCurrencyConfig(data.currencyConfig);
                 }
             }
             setLoading(false);
@@ -110,7 +144,8 @@ export default function AdminSettingsPage() {
             const payload = {
                 alertConfig: alertSettings,
                 resourceLimits,
-                paymentConfig
+                paymentConfig,
+                currencyConfig
             };
 
             await api.put('/settings', payload);
@@ -135,7 +170,7 @@ export default function AdminSettingsPage() {
                 accounts: [...paymentConfig.manualBank.accounts, { ...newAccount }]
             }
         });
-        setNewAccount({ bankName: '', accountTitle: '', accountNumber: '', iban: '', isActive: true });
+        setNewAccount({ bankName: '', accountTitle: '', accountNumber: '', iban: '', currency: 'PKR', isActive: true });
         toast.success('Bank account added. Click Save to persist.');
     };
 
@@ -147,6 +182,32 @@ export default function AdminSettingsPage() {
             manualBank: { ...paymentConfig.manualBank, accounts: updated }
         });
         toast.success('Account removed. Click Save to persist.');
+    };
+
+    const addCryptoWallet = () => {
+        if (!newWallet.coinName || !newWallet.network || !newWallet.walletAddress) {
+            toast.error('Coin name, network, and wallet address are required');
+            return;
+        }
+        setPaymentConfig({
+            ...paymentConfig,
+            crypto: {
+                ...paymentConfig.crypto,
+                wallets: [...paymentConfig.crypto.wallets, { ...newWallet }]
+            }
+        });
+        setNewWallet({ coinName: '', network: '', walletAddress: '', isActive: true });
+        toast.success('Crypto wallet added. Click Save to persist.');
+    };
+
+    const removeCryptoWallet = (index: number) => {
+        const updated = [...paymentConfig.crypto.wallets];
+        updated.splice(index, 1);
+        setPaymentConfig({
+            ...paymentConfig,
+            crypto: { ...paymentConfig.crypto, wallets: updated }
+        });
+        toast.success('Wallet removed. Click Save to persist.');
     };
 
     const tabs = [
@@ -314,6 +375,43 @@ export default function AdminSettingsPage() {
                                         </p>
                                     </div>
                                 </div>
+
+                                {/* Currency Configuration */}
+                                <div className="bg-gray-800 p-5 rounded-lg border border-blue-600/30">
+                                    <div className="flex items-center gap-3 mb-4">
+                                        <span className="text-2xl">💱</span>
+                                        <div>
+                                            <h3 className="text-lg font-medium text-blue-400">Plan Display Currency</h3>
+                                            <p className="text-sm text-gray-400">What currency users see on the billing page</p>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm text-gray-400 mb-1">Display Currency</label>
+                                            <select
+                                                value={currencyConfig.displayCurrency}
+                                                onChange={(e) => setCurrencyConfig({ ...currencyConfig, displayCurrency: e.target.value })}
+                                                className="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white"
+                                            >
+                                                <option value="usd">🇺🇸 USD ($)</option>
+                                                <option value="pkr">🇵🇰 PKR (Rs)</option>
+                                                <option value="eur">🇪🇺 EUR (€)</option>
+                                                <option value="gbp">🇬🇧 GBP (£)</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm text-gray-400 mb-1">USD → PKR Exchange Rate</label>
+                                            <input
+                                                type="number"
+                                                step="0.01"
+                                                value={currencyConfig.exchangeRates.usdToPkr}
+                                                onChange={(e) => setCurrencyConfig({ ...currencyConfig, exchangeRates: { ...currencyConfig.exchangeRates, usdToPkr: parseFloat(e.target.value) || 278 } })}
+                                                className="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white"
+                                            />
+                                        </div>
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-2">Plans already have fixed PKR pricing in database. Exchange rate is used for manual conversion display only.</p>
+                                </div>
                             </div>
                         )}
 
@@ -396,7 +494,7 @@ export default function AdminSettingsPage() {
                                                     {paymentConfig.manualBank.accounts.map((acc, idx) => (
                                                         <div key={idx} className="flex items-center justify-between bg-gray-900 p-3 rounded-lg border border-gray-700">
                                                             <div>
-                                                                <p className="text-white font-medium">{acc.bankName}</p>
+                                                                <p className="text-white font-medium">{acc.bankName} <span className="text-xs text-blue-400 ml-1">({acc.currency || 'PKR'})</span></p>
                                                                 <p className="text-sm text-gray-400">{acc.accountTitle} — {acc.accountNumber}</p>
                                                                 {acc.iban && <p className="text-xs text-gray-500">IBAN: {acc.iban}</p>}
                                                             </div>
@@ -445,12 +543,115 @@ export default function AdminSettingsPage() {
                                                         onChange={(e) => setNewAccount({ ...newAccount, iban: e.target.value })}
                                                         className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
                                                     />
+                                                    <select
+                                                        value={newAccount.currency}
+                                                        onChange={(e) => setNewAccount({ ...newAccount, currency: e.target.value })}
+                                                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                    >
+                                                        <option value="PKR">PKR (Pakistani Rupee)</option>
+                                                        <option value="USD">USD (US Dollar)</option>
+                                                        <option value="EUR">EUR (Euro)</option>
+                                                        <option value="GBP">GBP (British Pound)</option>
+                                                    </select>
                                                 </div>
                                                 <button
                                                     onClick={addBankAccount}
                                                     className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm transition"
                                                 >
                                                     <PlusIcon className="h-4 w-4" /> Add Account
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Toggle: Crypto Payment */}
+                                <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700 space-y-4">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-white font-medium text-lg">🪙 Crypto Payment (Manual)</p>
+                                            <p className="text-sm text-gray-400">User sends crypto (USDT, USDC, BTC, etc.) to your wallet, uploads screenshot. You verify and upgrade manually.</p>
+                                        </div>
+                                        <label className="relative inline-flex items-center cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={paymentConfig.crypto.enabled}
+                                                onChange={(e) => setPaymentConfig({ ...paymentConfig, crypto: { ...paymentConfig.crypto, enabled: e.target.checked } })}
+                                                className="sr-only peer"
+                                            />
+                                            <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                                        </label>
+                                    </div>
+
+                                    {paymentConfig.crypto.enabled && (
+                                        <div className="space-y-4 pt-2 border-t border-gray-700">
+                                            <h4 className="text-white font-medium">Crypto Wallets</h4>
+
+                                            {paymentConfig.crypto.wallets.length > 0 ? (
+                                                <div className="space-y-2">
+                                                    {paymentConfig.crypto.wallets.map((wallet, idx) => (
+                                                        <div key={idx} className="flex items-center justify-between bg-gray-900 p-3 rounded-lg border border-gray-700">
+                                                            <div className="min-w-0 flex-1">
+                                                                <p className="text-white font-medium">{wallet.coinName} <span className="text-xs text-orange-400">({wallet.network})</span></p>
+                                                                <p className="text-sm text-gray-400 font-mono truncate">{wallet.walletAddress}</p>
+                                                            </div>
+                                                            <button
+                                                                onClick={() => removeCryptoWallet(idx)}
+                                                                className="text-red-400 hover:text-red-300 p-1 ml-2 flex-shrink-0"
+                                                            >
+                                                                <TrashIcon className="h-5 w-5" />
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p className="text-yellow-400 text-sm">⚠️ No wallets added yet. Add at least one wallet for users to see.</p>
+                                            )}
+
+                                            {/* Add New Wallet */}
+                                            <div className="bg-gray-900 p-4 rounded-lg border border-gray-700 space-y-3">
+                                                <h5 className="text-gray-300 font-medium text-sm">Add Crypto Wallet</h5>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                    <select
+                                                        value={newWallet.coinName}
+                                                        onChange={(e) => setNewWallet({ ...newWallet, coinName: e.target.value })}
+                                                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                    >
+                                                        <option value="">Select Coin</option>
+                                                        <option value="USDT">USDT (Tether)</option>
+                                                        <option value="USDC">USDC (USD Coin)</option>
+                                                        <option value="BTC">BTC (Bitcoin)</option>
+                                                        <option value="ETH">ETH (Ethereum)</option>
+                                                        <option value="BNB">BNB (Binance Coin)</option>
+                                                        <option value="TRX">TRX (Tron)</option>
+                                                        <option value="Other">Other</option>
+                                                    </select>
+                                                    <select
+                                                        value={newWallet.network}
+                                                        onChange={(e) => setNewWallet({ ...newWallet, network: e.target.value })}
+                                                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                    >
+                                                        <option value="">Select Network</option>
+                                                        <option value="TRC20">TRC20 (Tron)</option>
+                                                        <option value="ERC20">ERC20 (Ethereum)</option>
+                                                        <option value="BEP20">BEP20 (BSC)</option>
+                                                        <option value="Bitcoin">Bitcoin</option>
+                                                        <option value="Polygon">Polygon</option>
+                                                        <option value="Solana">Solana</option>
+                                                    </select>
+                                                </div>
+                                                <input
+                                                    type="text"
+                                                    placeholder="Wallet Address"
+                                                    value={newWallet.walletAddress}
+                                                    onChange={(e) => setNewWallet({ ...newWallet, walletAddress: e.target.value })}
+                                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                />
+                                                <button
+                                                    onClick={addCryptoWallet}
+                                                    className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg text-sm transition"
+                                                >
+                                                    <PlusIcon className="h-4 w-4" /> Add Wallet
                                                 </button>
                                             </div>
                                         </div>

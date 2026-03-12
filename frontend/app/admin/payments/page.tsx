@@ -19,7 +19,9 @@ interface ManualPayment {
     planName: string;
     amount: number;
     currency: string;
+    paymentType?: 'bank' | 'crypto';
     bankAccount: { bankName: string; accountTitle: string; accountNumber: string };
+    cryptoWallet?: { coinName: string; network: string; walletAddress: string };
     senderName: string;
     senderAccount: string;
     transactionId: string;
@@ -105,6 +107,23 @@ export default function AdminPaymentsPage() {
         }
     };
 
+    const paymentTypeBadge = (payment: ManualPayment) => {
+        const isCrypto = payment.paymentType === 'crypto';
+        return isCrypto
+            ? <span className="px-2 py-0.5 bg-orange-500/10 text-orange-400 rounded-full text-xs font-medium">🪙 Crypto</span>
+            : <span className="px-2 py-0.5 bg-blue-500/10 text-blue-400 rounded-full text-xs font-medium">🏦 Bank</span>;
+    };
+
+    const currencySymbol = (currency: string) => {
+        const symbols: Record<string, string> = { PKR: 'Rs ', USD: '$', EUR: '€', GBP: '£', USDT: '', USDC: '', BTC: '', ETH: '', CRYPTO: '' };
+        return symbols[currency] ?? '';
+    };
+
+    const formatPaymentAmount = (payment: ManualPayment) => {
+        const sym = currencySymbol(payment.currency);
+        return `${sym}${payment.amount} ${payment.currency}`;
+    };
+
     const backendUrl = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:5000';
 
     return (
@@ -113,7 +132,7 @@ export default function AdminPaymentsPage() {
                 <div>
                     <h1 className="text-3xl font-bold text-white">Payment Verifications</h1>
                     <p className="text-gray-400 mt-1">
-                        Manage manual bank transfer payment submissions
+                        Manage manual bank transfer & crypto payment submissions
                         {pendingCount > 0 && (
                             <span className="ml-2 px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded-full text-xs font-bold">
                                 {pendingCount} pending
@@ -159,6 +178,7 @@ export default function AdminPaymentsPage() {
                                             {payment.user?.username || payment.user?.email || 'Unknown User'}
                                         </span>
                                         {statusBadge(payment.status)}
+                                        {paymentTypeBadge(payment)}
                                     </div>
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                                         <div>
@@ -167,21 +187,29 @@ export default function AdminPaymentsPage() {
                                         </div>
                                         <div>
                                             <p className="text-gray-500">Amount</p>
-                                            <p className="text-green-400 font-bold">{payment.currency === 'PKR' ? '₨' : '$'}{payment.amount}</p>
+                                            <p className="text-green-400 font-bold">{formatPaymentAmount(payment)}</p>
                                         </div>
                                         <div>
-                                            <p className="text-gray-500">Bank</p>
-                                            <p className="text-white">{payment.bankAccount?.bankName}</p>
+                                            <p className="text-gray-500">{payment.paymentType === 'crypto' ? 'Wallet' : 'Bank'}</p>
+                                            <p className="text-white">
+                                                {payment.paymentType === 'crypto'
+                                                    ? `${payment.cryptoWallet?.coinName || '?'} (${payment.cryptoWallet?.network || '?'})`
+                                                    : payment.bankAccount?.bankName || '-'
+                                                }
+                                            </p>
                                         </div>
                                         <div>
                                             <p className="text-gray-500">Submitted</p>
                                             <p className="text-white">{new Date(payment.createdAt).toLocaleDateString()}</p>
                                         </div>
                                     </div>
+                                    {payment.paymentType === 'crypto' && payment.cryptoWallet?.walletAddress && (
+                                        <p className="text-xs text-gray-500 font-mono truncate">Wallet: {payment.cryptoWallet.walletAddress}</p>
+                                    )}
                                     {payment.senderName && (
                                         <p className="text-sm text-gray-400">
                                             Sender: <span className="text-white">{payment.senderName}</span>
-                                            {payment.transactionId && <> | TxID: <span className="text-white">{payment.transactionId}</span></>}
+                                            {payment.transactionId && <> | TxID: <span className="text-white font-mono">{payment.transactionId}</span></>}
                                         </p>
                                     )}
                                 </div>
@@ -230,8 +258,15 @@ export default function AdminPaymentsPage() {
                         <div className="space-y-2 text-sm">
                             <p className="text-gray-400">User: <span className="text-white">{selectedPayment.user?.username || selectedPayment.user?.email}</span></p>
                             <p className="text-gray-400">Plan: <span className="text-white font-semibold">{selectedPayment.planName}</span></p>
-                            <p className="text-gray-400">Amount: <span className="text-green-400 font-bold">{selectedPayment.currency === 'PKR' ? '₨' : '$'}{selectedPayment.amount}</span></p>
-                            <p className="text-gray-400">Bank: <span className="text-white">{selectedPayment.bankAccount?.bankName}</span></p>
+                            <p className="text-gray-400">Amount: <span className="text-green-400 font-bold">{formatPaymentAmount(selectedPayment)}</span></p>
+                            {selectedPayment.paymentType === 'crypto' ? (
+                                <>
+                                    <p className="text-gray-400">Wallet: <span className="text-orange-400 font-medium">{selectedPayment.cryptoWallet?.coinName} ({selectedPayment.cryptoWallet?.network})</span></p>
+                                    <p className="text-gray-400 text-xs font-mono">Address: <span className="text-white">{selectedPayment.cryptoWallet?.walletAddress}</span></p>
+                                </>
+                            ) : (
+                                <p className="text-gray-400">Bank: <span className="text-white">{selectedPayment.bankAccount?.bankName}</span></p>
+                            )}
                             <p className="text-gray-400">Sender: <span className="text-white">{selectedPayment.senderName}</span></p>
                             {selectedPayment.transactionId && (
                                 <p className="text-gray-400">Transaction ID: <span className="text-white">{selectedPayment.transactionId}</span></p>

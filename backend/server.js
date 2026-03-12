@@ -181,6 +181,15 @@ try {
   logger.error('Failed to start cron jobs:', error);
 }
 
+// Start exchange rate auto-update cron (every 6 hours)
+const { startExchangeRateCron } = require('./cron/exchangeRateCron');
+try {
+  startExchangeRateCron();
+  logger.info('✅ Exchange rate cron started');
+} catch (error) {
+  logger.error('Failed to start exchange rate cron:', error);
+}
+
 // Start resource monitoring
 const resourceMonitoring = require('./services/resourceMonitoring');
 setInterval(async () => {

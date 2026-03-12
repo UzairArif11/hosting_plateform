@@ -26,7 +26,7 @@ const paymentSchema = new mongoose.Schema({
         type: String,
         required: true,
         default: 'USD',
-        enum: ['USD', 'PKR', 'EUR', 'GBP']
+        enum: ['USD', 'PKR', 'EUR', 'GBP', 'USDT', 'USDC', 'BTC', 'ETH', 'CRYPTO']
     },
 
     // Status

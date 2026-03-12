@@ -132,8 +132,32 @@ const settingsSchema = new mongoose.Schema({
                 accountTitle: { type: String, required: true },
                 accountNumber: { type: String, required: true },
                 iban: { type: String, default: '' },
+                currency: { type: String, default: 'PKR' },
                 isActive: { type: Boolean, default: true }
             }]
+        },
+        crypto: {
+            enabled: { type: Boolean, default: false },
+            wallets: [{
+                coinName: { type: String, required: true },   // e.g. USDT, USDC, BTC
+                network: { type: String, required: true },    // e.g. TRC20, ERC20, BEP20
+                walletAddress: { type: String, required: true },
+                isActive: { type: Boolean, default: true }
+            }]
+        }
+    },
+
+    // Currency Configuration
+    currencyConfig: {
+        displayCurrency: {
+            type: String,
+            enum: ['usd', 'pkr', 'eur', 'gbp'],
+            default: 'usd'
+        },
+        exchangeRates: {
+            usdToPkr: { type: Number, default: 278 },
+            usdToEur: { type: Number, default: 0.92 },
+            usdToGbp: { type: Number, default: 0.79 }
         }
     },
 
