@@ -26,11 +26,13 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
                 clientID: process.env.GOOGLE_CLIENT_ID,
                 clientSecret: process.env.GOOGLE_CLIENT_SECRET,
                 callbackURL: `${process.env.API_URL || 'http://localhost:5000'}/api/auth/google/callback`,
+                passReqToCallback: true,
             },
-            async (accessToken, refreshToken, profile, done) => {
+            async (req, accessToken, refreshToken, profile, done) => {
                 try {
                     const Plan = require('../models/Plan');
                     const logger = require('../utils/logger');
+                    const ipAddress = req?.ip || req?.connection?.remoteAddress || 'unknown';
 
                     // 1. Check if user already exists by Google ID
                     let user = await User.findOne({ googleId: profile.id });
@@ -38,6 +40,15 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
                         user.lastLogin = new Date();
                         user.loginCount = (user.loginCount || 0) + 1;
                         await user.save();
+
+                        // Track login IP
+                        try {
+                            const ipRestrictions = require('../services/ipRestrictions');
+                            await ipRestrictions.trackIP(user._id, ipAddress, 'login');
+                        } catch (ipErr) {
+                            logger.warn('Google IP tracking failed (non-fatal):', ipErr.message);
+                        }
+
                         return done(null, user);
                     }
 
@@ -50,11 +61,47 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
                         user.lastLogin = new Date();
                         user.loginCount = (user.loginCount || 0) + 1;
                         await user.save();
+
+                        // Track login IP
+                        try {
+                            const ipRestrictions = require('../services/ipRestrictions');
+                            await ipRestrictions.trackIP(user._id, ipAddress, 'login');
+                        } catch (ipErr) {
+                            logger.warn('Google IP tracking failed (non-fatal):', ipErr.message);
+                        }
+
                         logger.info('Google account linked to existing user', { email: user.email });
                         return done(null, user);
                     }
 
-                    // 3. Create new user with proper plan setup
+                    // 3. Check signup restrictions before creating new user
+                    try {
+                        const ipRestrictions = require('../services/ipRestrictions');
+                        const signupCheck = await ipRestrictions.canSignup(googleEmail, ipAddress);
+                        if (!signupCheck.allowed) {
+                            logger.warn('Google signup blocked - restriction', { email: googleEmail, ip: ipAddress, reason: signupCheck.reason });
+                            return done(new Error(signupCheck.reason), null);
+                        }
+                    } catch (restrictErr) {
+                        logger.warn('Signup restriction check failed (allowing signup):', restrictErr.message);
+                    }
+
+                    // 4. Check platform capacity (alert admin only, never block signups)
+                    try {
+                        const resourceMonitoring = require('../services/resourceMonitoring');
+                        const capacityCheck = await resourceMonitoring.canSignupForPlan('free');
+                        if (!capacityCheck.allowed) {
+                            logger.warn('⚠️ ADMIN ALERT: Platform capacity reached - new Google signup allowed but resources may need attention', {
+                                reason: capacityCheck.reason,
+                                email: googleEmail,
+                                action: 'Admin should review server resources'
+                            });
+                        }
+                    } catch (capErr) {
+                        logger.warn('Capacity check failed (allowing signup):', capErr.message);
+                    }
+
+                    // 5. Create new user with proper plan setup
                     let defaultPlan = await Plan.findTrialPlan();
                     if (!defaultPlan) {
                         await Plan.createDefaultPlans();
@@ -107,6 +154,15 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
                         throw saveError;
                     }
 
+                    // Track signup IP
+                    try {
+                        user.signupIP = ipAddress;
+                        user.ipHistory = [{ ip: ipAddress, timestamp: new Date(), action: 'signup' }];
+                        await user.save();
+                    } catch (ipSaveErr) {
+                        logger.warn('Google IP save failed (non-fatal):', ipSaveErr.message);
+                    }
+
                     // Assign to container server
                     try {
                         const { assignUserToServer } = require('../services/containerOrchestrator');
@@ -115,6 +171,18 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
                         }
                     } catch (containerErr) {
                         logger.warn('Container assignment deferred:', containerErr.message);
+                    }
+
+                    // Create Payoneer customer
+                    try {
+                        const payoneerService = require('../services/payoneer');
+                        await payoneerService.createCustomer({
+                            userId: user._id,
+                            email: user.email,
+                            name: user.displayName
+                        });
+                    } catch (payErr) {
+                        logger.warn('Payoneer customer creation failed (non-fatal):', payErr.message);
                     }
 
                     logger.info('New Google user created', { email: user.email, userId: user._id });
@@ -205,13 +273,16 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                         logger.warn('Signup restriction check failed (allowing signup):', restrictErr.message);
                     }
 
-                    // Check platform capacity before creating new user
+                    // Check platform capacity (alert admin only, never block signups)
                     try {
                         const resourceMonitoring = require('../services/resourceMonitoring');
                         const capacityCheck = await resourceMonitoring.canSignupForPlan('free');
                         if (!capacityCheck.allowed) {
-                            logger.warn('GitHub signup blocked - capacity reached', { reason: capacityCheck.reason });
-                            return done(new Error(capacityCheck.reason), null);
+                            logger.warn('⚠️ ADMIN ALERT: Platform capacity reached - new GitHub signup allowed but resources may need attention', {
+                                reason: capacityCheck.reason,
+                                email: email,
+                                action: 'Admin should review server resources'
+                            });
                         }
                     } catch (capErr) {
                         logger.warn('Capacity check failed (allowing signup):', capErr.message);

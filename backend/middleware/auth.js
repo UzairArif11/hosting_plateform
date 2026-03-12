@@ -160,6 +160,20 @@ const requireAuth = async (req, res, next) => {
         logger.warn(`Admin account ${user.email} is marked as suspended - allowing access anyway`);
         // Continue to next() below
       } else {
+        // Allow suspended users to access billing routes (so they can upgrade),
+        // their own profile (so dashboard layout loads), and auth routes (logout)
+        const allowedPaths = ['/api/billing/', '/api/users/me', '/api/auth/'];
+        const isAllowedPath = allowedPaths.some(path => req.originalUrl.startsWith(path));
+
+        if (isAllowedPath) {
+          logger.info(`Suspended user ${user.email} accessing allowed path: ${req.originalUrl}`);
+          // Allow through — attach user and continue
+          req.user = user;
+          req.userId = user._id;
+          req.isSuspended = true;
+          return next();
+        }
+
         // Block suspended non-admin users with detailed response
         return res.status(403).json({
           success: false,
