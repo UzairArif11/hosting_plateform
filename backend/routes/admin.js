@@ -1926,7 +1926,7 @@ router.post('/manual-payments/:id/reject', requireAuth, requireAdmin, async (req
 });
 
 // Get system health for all servers
-router.get('/servers/health', auth, isAdmin, async (req, res) => {
+router.get('/servers/health', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { ORACLE_SERVERS } = require('../services/containerOrchestrator');
     const { testSSHConnection } = require('../services/remoteBuild');
@@ -1971,7 +1971,7 @@ router.get('/servers/health', auth, isAdmin, async (req, res) => {
 });
 
 // Run a manual test deployment on a specific server
-router.post('/servers/:serverKey/test-deploy', auth, isAdmin, async (req, res) => {
+router.post('/servers/:serverKey/test-deploy', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { serverKey } = req.params;
     const { ORACLE_SERVERS } = require('../services/containerOrchestrator');
@@ -2068,7 +2068,7 @@ rm -rf /tmp/pm2-image
 });
 
 // Get recent server logs and stats
-router.get('/servers/:serverKey/logs', auth, isAdmin, async (req, res) => {
+router.get('/servers/:serverKey/logs', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { serverKey } = req.params;
     const { ORACLE_SERVERS } = require('../services/containerOrchestrator');
