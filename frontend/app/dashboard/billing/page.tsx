@@ -112,12 +112,19 @@ export default function BillingPage() {
         return `${symbol}${price}`;
     };
 
-    const getConvertedAmount = (plan: any, targetCurrency: string) => {
-        const planUsdPrice = typeof plan.price === 'object' ? plan.price.usd || plan.price : plan.price;
+    // Get the correct price for the selected billing period
+    const getSelectedPeriodPrice = (plan: any, period: number) => {
+        if (!plan?.billingPeriods) return { total: plan?.price || 0, monthly: plan?.price || 0, label: 'Monthly' };
+        const found = plan.billingPeriods.find((p: any) => p.months === period);
+        if (found) return { total: found.totalPrice, monthly: found.monthlyPrice, label: found.label, savings: found.savings || 0 };
+        return { total: plan.price * period, monthly: plan.price, label: 'Monthly' };
+    };
+
+    const getConvertedAmount = (usdAmount: number, targetCurrency: string) => {
         const rates = paymentConfig?.currencyConfig?.exchangeRates || {};
         const rateMap: Record<string, number> = { pkr: rates.usdToPkr || 278, eur: rates.usdToEur || 0.92, gbp: rates.usdToGbp || 0.79, usd: 1 };
         const rate = rateMap[targetCurrency.toLowerCase()] || 1;
-        return Math.round(planUsdPrice * rate);
+        return Math.round(usdAmount * rate);
     };
 
     useEffect(() => {
@@ -571,7 +578,18 @@ export default function BillingPage() {
                         <div className="flex items-center justify-between">
                             <div>
                                 <h2 className="text-xl font-bold text-white">Upgrade to {selectedPlan.displayName}</h2>
-                                <p className="text-gray-400 text-sm">{formatPrice(selectedPlan)}/month</p>
+                                {(() => {
+                                    const pp = getSelectedPeriodPrice(selectedPlan, selectedBillingPeriod);
+                                    const sym = getCurrencySymbol(getDisplayCurrency());
+                                    return (
+                                        <p className="text-gray-400 text-sm">
+                                            {selectedBillingPeriod > 1
+                                                ? <>{sym}{pp.total} total ({pp.label} — {sym}{pp.monthly}/mo)</>
+                                                : <>{sym}{pp.total}/month</>
+                                            }
+                                        </p>
+                                    );
+                                })()}
                             </div>
                             <button onClick={() => { setShowPaymentModal(false); resetForm(); }} className="text-gray-400 hover:text-white">
                                 <XMarkIcon className="h-6 w-6" />
@@ -693,7 +711,7 @@ export default function BillingPage() {
                                     disabled={paymentLoading}
                                     className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold transition disabled:opacity-50"
                                 >
-                                    {paymentLoading ? 'Redirecting...' : `Pay ${formatPrice(selectedPlan)} with Payoneer`}
+                                    {paymentLoading ? 'Redirecting...' : `Pay ${getCurrencySymbol(getDisplayCurrency())}${getSelectedPeriodPrice(selectedPlan, selectedBillingPeriod).total} with Payoneer`}
                                 </button>
                             </div>
                         )}
@@ -780,7 +798,7 @@ export default function BillingPage() {
                                                     {acc.iban && <p className="text-xs text-gray-500">IBAN: {acc.iban}</p>}
                                                     {showConversion && (
                                                         <p className="text-xs text-yellow-400 mt-1">
-                                                            {formatPrice(selectedPlan)} ≈ {getCurrencySymbol(accCurrency)}{getConvertedAmount(selectedPlan, accCurrency).toLocaleString()} {accCurrency}
+                                                            {getCurrencySymbol(getDisplayCurrency())}{getSelectedPeriodPrice(selectedPlan, selectedBillingPeriod).total} ≈ {getCurrencySymbol(accCurrency)}{getConvertedAmount(getSelectedPeriodPrice(selectedPlan, selectedBillingPeriod).total, accCurrency).toLocaleString()} {accCurrency}
                                                         </p>
                                                     )}
                                                 </div>
@@ -893,7 +911,7 @@ export default function BillingPage() {
                                                         <p className="text-xs text-gray-400 font-mono truncate">{wallet.walletAddress}</p>
                                                         {isStable && (
                                                             <p className="text-xs text-green-400 mt-1">
-                                                                Send exactly <strong>${selectedPlan.price} {wallet.coinName}</strong>
+                                                                Send exactly <strong>${getSelectedPeriodPrice(selectedPlan, selectedBillingPeriod).total} {wallet.coinName}</strong>
                                                             </p>
                                                         )}
                                                     </div>
@@ -916,8 +934,8 @@ export default function BillingPage() {
                                     const wallet = paymentConfig.crypto.wallets.find((w: any) => w.id === selectedCryptoWallet);
                                     return wallet ? (
                                     <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-4 space-y-3">
-                                        <p className="text-orange-300 text-sm font-medium text-center">💰 Amount to send: <strong>${selectedPlan.price} USD</strong></p>
-                                        <p className="text-xs text-gray-400 text-center">For stablecoins (USDT/USDC), send exactly ${selectedPlan.price}. For other coins, send the equivalent USD value.</p>
+                                        <p className="text-orange-300 text-sm font-medium text-center">💰 Amount to send: <strong>${getSelectedPeriodPrice(selectedPlan, selectedBillingPeriod).total} USD</strong>{selectedBillingPeriod > 1 && <span className="text-xs"> ({getSelectedPeriodPrice(selectedPlan, selectedBillingPeriod).label})</span>}</p>
+                                        <p className="text-xs text-gray-400 text-center">For stablecoins (USDT/USDC), send exactly ${getSelectedPeriodPrice(selectedPlan, selectedBillingPeriod).total}. For other coins, send the equivalent USD value.</p>
                                         <div className="flex justify-center">
                                             <div className="bg-white p-3 rounded-xl">
                                                 <QRCodeSVG value={wallet.walletAddress} size={160} level="H" />
