@@ -44,21 +44,38 @@ async function createUserContainer(user, serverKey, server, resources) {
 
             if (!checkImage.stdout || checkImage.stdout.trim() === '') {
                 logger.info('📦 [CREATE_CONTAINER] PM2 image not found on ' + serverKey + ', building it now...');
-                logger.info('⏱️  [CREATE_CONTAINER] This is a one-time build (~30s). Image will be cached for future users.');
+                logger.info('⏱️  [CREATE_CONTAINER] This is a one-time build (~60-90s). Image will be cached for future users.');
 
-                // Create Dockerfile content
+                // Write Dockerfile using heredoc — reliable multi-line over SSH
                 // openssl is baked in so Prisma can detect the runtime version on any server
-                const dockerfile = `FROM node:18-alpine\\nRUN apk add --no-cache openssl\\nRUN npm install -g pm2@latest --no-audit --no-fund --silent --prefer-offline --no-optional\\nRUN pm2 --version\\nWORKDIR /app\\nENV NODE_ENV=production\\nEXPOSE 3000\\nCMD [\"pm2-runtime\", \"start\", \"ecosystem.config.js\"]`;
+                const writeDockerfile = `mkdir -p /tmp/pm2-image && cat > /tmp/pm2-image/Dockerfile << 'DOCKERFILE_EOF'
+FROM node:18-alpine
+RUN apk add --no-cache openssl
+RUN npm install -g pm2@latest --no-audit --no-fund --silent --prefer-offline --no-optional
+RUN pm2 --version
+WORKDIR /app
+ENV NODE_ENV=production
+EXPOSE 3000
+CMD ["pm2-runtime", "start", "ecosystem.config.js"]
+DOCKERFILE_EOF`;
 
-                // Write Dockerfile to remote server
-                await ssh.execCommand(`mkdir -p /tmp/pm2-image && echo '${dockerfile}' > /tmp/pm2-image/Dockerfile`);
+                const writeResult = await ssh.execCommand(writeDockerfile);
+                if (writeResult.stderr && writeResult.code !== 0) {
+                    logger.error('❌ Failed to write Dockerfile:', writeResult.stderr);
+                    throw new Error('Dockerfile write failed: ' + writeResult.stderr);
+                }
 
                 // Build image (tagged and persisted in Docker on this server)
-                const buildResult = await ssh.execCommand('cd /tmp/pm2-image && docker build -t node-pm2-alpine:v2 .');
+                logger.info('🔨 [CREATE_CONTAINER] Building Docker image on ' + serverKey + '...');
+                const buildResult = await ssh.execCommand('cd /tmp/pm2-image && docker build -t node-pm2-alpine:v2 .', {
+                    onStdout: (chunk) => logger.info('[DOCKER_BUILD] ' + chunk.toString().trim()),
+                    onStderr: (chunk) => logger.warn('[DOCKER_BUILD] ' + chunk.toString().trim())
+                });
 
                 if (buildResult.code !== 0) {
-                    logger.error('❌ Failed to build PM2 image:', buildResult.stderr);
-                    throw new Error('PM2 image build failed: ' + buildResult.stderr);
+                    logger.error('❌ Failed to build PM2 image. stdout:', buildResult.stdout);
+                    logger.error('❌ Failed to build PM2 image. stderr:', buildResult.stderr);
+                    throw new Error('PM2 image build failed: ' + (buildResult.stderr || buildResult.stdout));
                 }
 
                 logger.info('✅ [CREATE_CONTAINER] PM2 image built and cached on ' + serverKey);
