@@ -205,7 +205,8 @@ export default function BillingPage() {
         try {
             const res = await api.post('/billing/create-session-jazzcash', {
                 planId: selectedPlan.id,
-                mobileNumber
+                mobileNumber,
+                billingPeriod: selectedBillingPeriod
             });
             if (res.data.success && res.data.session?.checkoutUrl) {
                 window.location.href = res.data.session.checkoutUrl;
@@ -224,7 +225,8 @@ export default function BillingPage() {
         try {
             const res = await api.post('/billing/create-session-easypaisa', {
                 planId: selectedPlan.id,
-                mobileNumber: mobileNumber || ''
+                mobileNumber: mobileNumber || '',
+                billingPeriod: selectedBillingPeriod
             });
             if (res.data.success && res.data.session?.checkoutUrl) {
                 window.location.href = res.data.session.checkoutUrl;
