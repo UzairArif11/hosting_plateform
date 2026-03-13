@@ -30,6 +30,13 @@ export default function ServerManagement() {
     const [loading, setLoading] = useState(true);
     const [verifying, setVerifying] = useState<string | null>(null);
     const [verificationResults, setVerificationResults] = useState<Record<string, any>>({});
+    
+    // New Feature State
+    const [healthStatus, setHealthStatus] = useState<Record<string, any>>({});
+    const [testingServer, setTestingServer] = useState<string | null>(null);
+    const [testLogs, setTestLogs] = useState<Record<string, string[]>>({});
+    const [serverLogs, setServerLogs] = useState<Record<string, any>>({});
+    const [loadingLogs, setLoadingLogs] = useState<string | null>(null);
 
     useEffect(() => {
         fetchServers();
@@ -41,9 +48,59 @@ export default function ServerManagement() {
             setServers(res.data.servers || {});
             setDnsInstructions(res.data.dnsInstructions || {});
             setLoading(false);
+            
+            // Background fetch health
+            fetchHealth();
         } catch (error) {
             console.error('Failed to fetch servers:', error);
             setLoading(false);
+        }
+    };
+
+    const fetchHealth = async () => {
+        try {
+            const res = await api.get('/admin/servers/health');
+            if (res.data.success) {
+                setHealthStatus(res.data.servers);
+            }
+        } catch (error) {
+            console.error('Failed to fetch server health:', error);
+        }
+    };
+
+    const runTestDeployment = async (serverKey: string) => {
+        if (!confirm(`Are you sure you want to run a test deployment on ${serverKey}? This will install PM2 (if missing) and create a temporary Docker container.`)) return;
+        
+        setTestingServer(serverKey);
+        setTestLogs({ ...testLogs, [serverKey]: ['Initiating test deployment...'] });
+        
+        try {
+            const res = await api.post(`/admin/servers/${serverKey}/test-deploy`);
+            setTestLogs({ ...testLogs, [serverKey]: res.data.logs || ['Test deployment completed successfully!'] });
+        } catch (error: any) {
+            setTestLogs({ 
+                ...testLogs, 
+                [serverKey]: [
+                    '❌ Test deployment failed.', 
+                    error.response?.data?.error || error.message
+                ] 
+            });
+        } finally {
+            setTestingServer(null);
+        }
+    };
+
+    const fetchServerLogs = async (serverKey: string) => {
+        setLoadingLogs(serverKey);
+        try {
+            const res = await api.get(`/admin/servers/${serverKey}/logs`);
+            if (res.data.success) {
+                setServerLogs({ ...serverLogs, [serverKey]: res.data.stats });
+            }
+        } catch (error) {
+            alert('Failed to fetch server logs');
+        } finally {
+            setLoadingLogs(null);
         }
     };
 
@@ -141,7 +198,7 @@ export default function ServerManagement() {
                             )}
 
                             {/* DNS Verification */}
-                            <div className="flex items-center space-x-4">
+                            <div className="flex flex-wrap items-center gap-4">
                                 <button
                                     onClick={() => verifyDNS(serverKey, server.domain)}
                                     disabled={verifying === serverKey}
@@ -149,10 +206,34 @@ export default function ServerManagement() {
                                 >
                                     {verifying === serverKey ? 'Verifying...' : '🔍 Verify DNS'}
                                 </button>
+                                
+                                {serverKey !== 'EC1' && (
+                                    <>
+                                        <button
+                                            onClick={() => runTestDeployment(serverKey)}
+                                            disabled={testingServer === serverKey}
+                                            className="bg-purple-500 hover:bg-purple-600 border border-purple-400 disabled:bg-gray-600 text-white px-6 py-2 rounded-lg transition flex items-center gap-2"
+                                        >
+                                            {testingServer === serverKey ? (
+                                                <><span className="animate-spin">⚙️</span> Deploying...</>
+                                            ) : (
+                                                <>🚀 Run Test Deploy</>
+                                            )}
+                                        </button>
+                                        
+                                        <button
+                                            onClick={() => fetchServerLogs(serverKey)}
+                                            disabled={loadingLogs === serverKey}
+                                            className="bg-gray-700 hover:bg-gray-600 border border-gray-500 disabled:bg-gray-800 text-white px-6 py-2 rounded-lg transition"
+                                        >
+                                            {loadingLogs === serverKey ? 'Loading...' : '📋 View Logs & Stats'}
+                                        </button>
+                                    </>
+                                )}
 
                                 {verificationResults[serverKey] && (
                                     <div
-                                        className={`flex-1 px-4 py-2 rounded-lg border ${verificationResults[serverKey].verified
+                                        className={`px-4 py-2 rounded-lg border ${verificationResults[serverKey].verified
                                             ? 'bg-green-500/10 border-green-500/30 text-green-400'
                                             : 'bg-red-500/10 border-red-500/30 text-red-400'
                                             }`}
@@ -162,6 +243,77 @@ export default function ServerManagement() {
                                     </div>
                                 )}
                             </div>
+                            
+                            {/* Health Indicators */}
+                            {healthStatus[serverKey] && serverKey !== 'EC1' && (
+                                <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    <div className="bg-black/20 border border-white/5 rounded p-3 text-center">
+                                        <div className="text-gray-400 text-xs mb-1">SSH Connection</div>
+                                        <div className="text-xl">{healthStatus[serverKey].ssh ? '✅' : '❌'}</div>
+                                    </div>
+                                    <div className="bg-black/20 border border-white/5 rounded p-3 text-center">
+                                        <div className="text-gray-400 text-xs mb-1">Docker Daemon</div>
+                                        <div className="text-xl">{healthStatus[serverKey].dockerVersion ? '✅' : '❌'}</div>
+                                    </div>
+                                    <div className="bg-black/20 border border-white/5 rounded p-3 text-center">
+                                        <div className="text-gray-400 text-xs mb-1">Tunnel Active</div>
+                                        <div className="text-xl">{healthStatus[serverKey].tunnelActive ? '✅' : '❌'}</div>
+                                    </div>
+                                    <div className="bg-black/20 border border-white/5 rounded p-3 text-center">
+                                        <div className="text-gray-400 text-xs mb-1">Server Type</div>
+                                        <div className="text-white text-sm font-semibold mt-1">{healthStatus[serverKey].type}</div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Test Deployment Logs */}
+                            {testLogs[serverKey] && (
+                                <div className="mt-4 bg-black/40 border border-purple-500/30 rounded-lg p-4 font-mono text-sm">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <h5 className="text-purple-400 font-semibold">Test Deployment Status</h5>
+                                        {testingServer === serverKey && <span className="text-xs text-purple-300 animate-pulse">Running...</span>}
+                                    </div>
+                                    <div className="h-48 overflow-y-auto space-y-1 text-gray-300">
+                                        {testLogs[serverKey].map((log, i) => (
+                                            <div key={i}>{log}</div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Server Logs & Stats */}
+                            {serverLogs[serverKey] && (
+                                <div className="mt-4 bg-black/40 border border-blue-500/30 rounded-lg p-4 font-mono text-sm">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h5 className="text-blue-400 font-semibold">System Statistics</h5>
+                                        <button 
+                                            onClick={() => setServerLogs({...serverLogs, [serverKey]: null})}
+                                            className="text-gray-400 hover:text-white"
+                                        >
+                                            ✕ Close
+                                        </button>
+                                    </div>
+                                    
+                                    <div className="space-y-4">
+                                        <div>
+                                            <div className="text-gray-500 text-xs uppercase mb-1">Uptime</div>
+                                            <div className="text-white bg-black/50 p-2 rounded">{serverLogs[serverKey].uptime}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-gray-500 text-xs uppercase mb-1">Memory Usage (MB)</div>
+                                            <pre className="text-green-400 bg-black/50 p-2 rounded overflow-x-auto text-xs">{serverLogs[serverKey].memory}</pre>
+                                        </div>
+                                        <div>
+                                            <div className="text-gray-500 text-xs uppercase mb-1">Disk Space</div>
+                                            <pre className="text-yellow-400 bg-black/50 p-2 rounded overflow-x-auto text-xs">{serverLogs[serverKey].disk}</pre>
+                                        </div>
+                                        <div>
+                                            <div className="text-gray-500 text-xs uppercase mb-1">Running Containers</div>
+                                            <pre className="text-blue-300 bg-black/50 p-2 rounded overflow-x-auto text-xs">{serverLogs[serverKey].containers || 'No containers running'}</pre>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Verification Details */}
                             {verificationResults[serverKey] && !verificationResults[serverKey].verified && (

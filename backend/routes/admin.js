@@ -1925,4 +1925,187 @@ router.post('/manual-payments/:id/reject', requireAuth, requireAdmin, async (req
   }
 });
 
+// Get system health for all servers
+router.get('/servers/health', auth, isAdmin, async (req, res) => {
+  try {
+    const { ORACLE_SERVERS } = require('../services/containerOrchestrator');
+    const { testSSHConnection } = require('../services/remoteBuild');
+    const sshTunnelManager = require('../services/sshTunnelManager');
+
+    const healthStatus = {};
+
+    for (const [key, server] of Object.entries(ORACLE_SERVERS)) {
+      if (key === 'EC1') {
+        healthStatus[key] = {
+          status: 'active',
+          ssh: true,
+          docker: true,
+          type: server.type
+        };
+        continue;
+      }
+
+      // Test SSH
+      const sshResult = await testSSHConnection(server.host, key);
+      
+      // Check Tunnel
+      const tunnelActive = sshTunnelManager.isTunnelActive(key);
+
+      healthStatus[key] = {
+        status: sshResult.success ? 'active' : 'offline',
+        ssh: sshResult.success,
+        tunnelActive,
+        dockerVersion: sshResult.dockerVersion,
+        diskSpace: sshResult.diskSpace,
+        error: sshResult.error,
+        type: server.type,
+        host: server.host
+      };
+    }
+
+    res.json({ success: true, servers: healthStatus });
+  } catch (err) {
+    logger.error('Error fetching server health:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Run a manual test deployment on a specific server
+router.post('/servers/:serverKey/test-deploy', auth, isAdmin, async (req, res) => {
+  try {
+    const { serverKey } = req.params;
+    const { ORACLE_SERVERS } = require('../services/containerOrchestrator');
+    const { NodeSSH } = require('node-ssh');
+    const { getSSHConfig } = require('../services/remoteBuild');
+
+    const server = ORACLE_SERVERS[serverKey];
+    if (!server || serverKey === 'EC1') {
+      return res.status(400).json({ success: false, error: 'Invalid server for test deployment' });
+    }
+
+    const logs = [];
+    const log = (msg) => {
+      logs.push(`[${new Date().toISOString()}] ${msg}`);
+      logger.info(`[TEST_DEPLOY ${serverKey}] ${msg}`);
+    };
+
+    log(`Starting test deployment on ${serverKey} (${server.host})...`);
+
+    const ssh = new NodeSSH();
+    const config = getSSHConfig(serverKey, server.host);
+
+    log(`Connecting via SSH...`);
+    await ssh.connect(config);
+    log(`SSH connected successfully.`);
+
+    log(`Checking Docker Daemon...`);
+    const dockerCheck = await ssh.execCommand('docker info');
+    if (dockerCheck.code !== 0) throw new Error('Docker daemon not running');
+    log(`Docker is running.`);
+
+    log(`Checking for node-pm2-alpine image...`);
+    const imageCheck = await ssh.execCommand('docker images node-pm2-alpine:v2 -q');
+    if (!imageCheck.stdout.trim()) {
+      log(`Image node-pm2-alpine:v2 not found. Building it now (~60s)...`);
+      const buildDocker = `
+mkdir -p /tmp/pm2-image
+cat > /tmp/pm2-image/Dockerfile << 'EOF'
+FROM node:18-alpine
+RUN apk add --no-cache openssl
+RUN npm install -g pm2@latest --no-audit --no-fund --silent --prefer-offline --no-optional
+RUN pm2 --version
+WORKDIR /app
+ENV NODE_ENV=production
+EXPOSE 3000
+CMD ["pm2-runtime", "start", "ecosystem.config.js"]
+EOF
+cd /tmp/pm2-image && docker build -t node-pm2-alpine:v2 .
+rm -rf /tmp/pm2-image
+`;
+      const buildRes = await ssh.execCommand(buildDocker);
+      if (buildRes.code !== 0) throw new Error(`Image build failed: ${buildRes.stderr}`);
+      log(`PM2 image built successfully.`);
+    } else {
+      log(`PM2 image found in cache.`);
+    }
+
+    const testContainerName = `test-deploy-${Date.now()}`;
+    log(`Creating test container: ${testContainerName}...`);
+    
+    // Create actual container using Docker CLI over SSH
+    const runCmd = `docker run -d --name ${testContainerName} -m 256m --cpus 0.5 node-pm2-alpine:v2 pm2-runtime start /dev/null --name keepalive`;
+    const runRes = await ssh.execCommand(runCmd);
+    
+    if (runRes.code !== 0) {
+      throw new Error(`Failed to create test container: ${runRes.stderr}`);
+    }
+    log(`Container created. ID: ${runRes.stdout.trim().substring(0, 12)}`);
+
+    log(`Verifying container is running...`);
+    await new Promise(r => setTimeout(r, 2000)); // wait 2s
+    const statusCheck = await ssh.execCommand(`docker inspect -f '{{.State.Running}}' ${testContainerName}`);
+    if (statusCheck.stdout.trim() !== 'true') {
+      throw new Error('Test container failed to stay running');
+    }
+    log(`Container is RUNNING! Test deployment successful.`);
+
+    log(`Cleaning up test container...`);
+    await ssh.execCommand(`docker rm -f ${testContainerName}`);
+    log(`Cleanup complete.`);
+
+    ssh.dispose();
+
+    res.json({
+      success: true,
+      message: `Test deployment on ${serverKey} completed successfully`,
+      logs
+    });
+
+  } catch (err) {
+    logger.error(`Test deploy error:`, err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Get recent server logs and stats
+router.get('/servers/:serverKey/logs', auth, isAdmin, async (req, res) => {
+  try {
+    const { serverKey } = req.params;
+    const { ORACLE_SERVERS } = require('../services/containerOrchestrator');
+    const { NodeSSH } = require('node-ssh');
+    const { getSSHConfig } = require('../services/remoteBuild');
+
+    const server = ORACLE_SERVERS[serverKey];
+    if (!server || serverKey === 'EC1') {
+      return res.status(400).json({ success: false, error: 'Invalid server' });
+    }
+
+    const ssh = new NodeSSH();
+    const config = getSSHConfig(serverKey, server.host);
+    await ssh.connect(config);
+
+    // Run a bunch of diagnostic commands
+    const cmds = [
+      { name: 'uptime', cmd: 'uptime -p' },
+      { name: 'memory', cmd: 'free -m' },
+      { name: 'disk', cmd: 'df -h /' },
+      { name: 'containers', cmd: 'docker ps --format "table {{.Names}}\\t{{.Status}}\\t{{.Size}}"' }
+    ];
+
+    const results = {};
+    for (const item of cmds) {
+      const exec = await ssh.execCommand(item.cmd);
+      results[item.name] = exec.stdout.trim() || exec.stderr.trim();
+    }
+
+    ssh.dispose();
+
+    res.json({ success: true, server: serverKey, stats: results });
+
+  } catch (err) {
+    logger.error(`Server logs error:`, err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
