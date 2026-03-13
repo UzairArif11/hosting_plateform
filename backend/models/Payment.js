@@ -116,7 +116,6 @@ const paymentSchema = new mongoose.Schema({
 // Indexes
 paymentSchema.index({ user: 1, createdAt: -1 });
 paymentSchema.index({ status: 1, createdAt: -1 });
-paymentSchema.index({ invoiceNumber: 1 });
 
 // Virtual: formatted amount
 paymentSchema.virtual('formattedAmount').get(function () {
