@@ -38,7 +38,8 @@ router.put('/', requireAuth, requireAdmin, async (req, res) => {
             alertConfig,
             resourceLimits,
             paymentConfig,
-            currencyConfig
+            currencyConfig,
+            accountDeletion
         } = req.body;
 
         const updates = {};
@@ -54,6 +55,7 @@ router.put('/', requireAuth, requireAdmin, async (req, res) => {
         if (resourceLimits) updates.resourceLimits = resourceLimits;
         if (paymentConfig) updates.paymentConfig = paymentConfig;
         if (currencyConfig) updates.currencyConfig = currencyConfig;
+        if (accountDeletion) updates.accountDeletion = accountDeletion;
 
         const settings = await Settings.updateSettings(updates, req.user._id);
 
