@@ -63,14 +63,31 @@ class SSHTunnelManager {
 
             logger.info(`[SSH Tunnel] ✅ SSH connected to ${serverKey} (${remoteHost})`);
 
-            // Set up tunnel using forwardOut
-            // This creates: localhost:localPort → remote:localhost:remotePort
-            const server = await ssh.forwardOut(
-                '127.0.0.1',     // Source address (this machine)
-                localPort,       // Source port
-                '127.0.0.1',     // Destination address (on remote)
-                remotePort       // Destination port (Docker API)
-            );
+            // Create a local TCP server that forwards connections through the SSH tunnel
+            const net = require('net');
+            const tcpServer = net.createServer((socket) => {
+                ssh.connection.forwardOut(
+                    '127.0.0.1',
+                    socket.remotePort,
+                    '127.0.0.1',
+                    remotePort,
+                    (err, stream) => {
+                        if (err) {
+                            logger.error(`[SSH Tunnel] Forwarding error for ${serverKey}:`, err);
+                            return socket.end();
+                        }
+                        socket.pipe(stream).pipe(socket);
+                    }
+                );
+            });
+
+            await new Promise((resolve, reject) => {
+                tcpServer.on('error', reject);
+                tcpServer.listen(localPort, '127.0.0.1', () => {
+                    tcpServer.removeListener('error', reject);
+                    resolve();
+                });
+            });
 
             // Store connection and tunnel info
             this.connections.set(serverKey, ssh);
@@ -79,6 +96,7 @@ class SSHTunnelManager {
                 remoteHost,
                 remotePort,
                 status: 'active',
+                server: tcpServer, // Store the server so we can close it later
                 createdAt: new Date()
             });
 
@@ -123,6 +141,13 @@ class SSHTunnelManager {
         const tunnel = this.tunnels.get(serverKey);
         if (tunnel) {
             tunnel.status = 'disconnected';
+            if (tunnel.server) {
+                try {
+                    tunnel.server.close();
+                } catch (e) {
+                    // Ignore close errors
+                }
+            }
         }
 
         // Clean up connection
@@ -160,6 +185,13 @@ class SSHTunnelManager {
      * Close tunnel for specific server
      */
     async closeTunnel(serverKey) {
+        const tunnel = this.tunnels.get(serverKey);
+        if (tunnel && tunnel.server) {
+            try {
+                tunnel.server.close();
+            } catch (e) {}
+        }
+
         const ssh = this.connections.get(serverKey);
 
         if (ssh) {
@@ -182,6 +214,12 @@ class SSHTunnelManager {
      */
     async closeAllTunnels() {
         logger.info('[SSH Tunnel] Closing all tunnels...');
+
+        for (const [serverKey, tunnel] of this.tunnels) {
+            if (tunnel && tunnel.server) {
+                try { tunnel.server.close(); } catch (e) {}
+            }
+        }
 
         for (const [serverKey, ssh] of this.connections) {
             try {
