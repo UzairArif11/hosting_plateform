@@ -253,6 +253,14 @@ const planSchema = new mongoose.Schema({
     enum: ['monthly', 'yearly', 'one-time'],
     default: 'monthly'
   },
+  // Multi-month billing periods with discounts
+  billingPeriods: [{
+    months: { type: Number, enum: [1, 3, 6, 12], required: true },
+    discountPercent: { type: Number, default: 0, min: 0, max: 100 },
+    gracePeriodDays: { type: Number, default: 10, min: 1, max: 90 },
+    enabled: { type: Boolean, default: true }
+  }],
+
   trialDays: {
     type: Number,
     default: 0

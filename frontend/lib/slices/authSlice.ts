@@ -37,6 +37,10 @@ interface User {
     suspensionReason?: string;
     autoSuspended?: boolean;
     planType?: string;
+    // Subscription lifecycle
+    planExpiresAt?: string;
+    billingPeriod?: number;
+    gracePeriodEndsAt?: string;
 }
 
 interface AuthState {

@@ -73,8 +73,28 @@ export default function BillingPage() {
     // Crypto payment state
     const [selectedCryptoWallet, setSelectedCryptoWallet] = useState('');
 
+    // Billing period selector
+    const [selectedBillingPeriod, setSelectedBillingPeriod] = useState(1);
+
     // Manual payment history
     const [manualPayments, setManualPayments] = useState<any[]>([]);
+
+    // Subscription days left helper
+    const getDaysLeft = () => {
+        if (!user?.planExpiresAt) return null;
+        const now = new Date();
+        const expiry = new Date(user.planExpiresAt);
+        const diff = Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+        return diff;
+    };
+
+    const getGraceDaysLeft = () => {
+        if (!user?.gracePeriodEndsAt) return null;
+        const now = new Date();
+        const grace = new Date(user.gracePeriodEndsAt);
+        const diff = Math.ceil((grace.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+        return diff > 0 ? diff : 0;
+    };
 
     // Currency helpers
     const getCurrencySymbol = (currency: string) => {
@@ -223,6 +243,7 @@ export default function BillingPage() {
             formData.append('senderName', senderName);
             formData.append('senderAccount', senderAccount);
             formData.append('transactionId', transactionId);
+            formData.append('billingPeriod', String(selectedBillingPeriod));
             formData.append('screenshot', screenshot);
 
             const res = await api.post('/billing/manual-payment', formData, {
@@ -255,6 +276,7 @@ export default function BillingPage() {
             formData.append('senderName', senderName || 'Crypto Payment');
             formData.append('transactionId', transactionId);
             formData.append('paymentType', 'crypto');
+            formData.append('billingPeriod', String(selectedBillingPeriod));
             formData.append('screenshot', screenshot);
 
             const res = await api.post('/billing/manual-payment', formData, {
@@ -308,11 +330,30 @@ export default function BillingPage() {
 
                 <div className="relative z-10 grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
                     <div>
-                        <div className="flex items-center space-x-2 mb-2">
+                        <div className="flex items-center space-x-2 mb-2 flex-wrap gap-2">
                             <span className="bg-white/20 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider backdrop-blur-sm">
-                                {user?.subscriptionStatus === 'trial' ? 'Free Trial' : 'Active Subscription'}
+                                {user?.subscriptionStatus === 'trial' ? 'Free Trial' : user?.subscriptionStatus === 'past_due' ? '⚠️ Grace Period' : 'Active Subscription'}
                             </span>
+                            {getDaysLeft() !== null && user?.subscriptionStatus !== 'trial' && (
+                                <span className={`px-3 py-1 rounded-full text-xs font-bold backdrop-blur-sm ${
+                                    (getDaysLeft() || 0) <= 0 ? 'bg-red-500/30 text-red-200' :
+                                    (getDaysLeft() || 0) <= 10 ? 'bg-yellow-500/30 text-yellow-200' :
+                                    'bg-green-500/30 text-green-200'
+                                }`}>
+                                    {(getDaysLeft() || 0) <= 0 ? '❌ Expired' : `⏰ ${getDaysLeft()} days left`}
+                                </span>
+                            )}
+                            {user?.billingPeriod && user.billingPeriod > 1 && (
+                                <span className="bg-blue-500/20 px-3 py-1 rounded-full text-xs font-bold text-blue-200">
+                                    {user.billingPeriod === 3 ? 'Quarterly' : user.billingPeriod === 6 ? 'Semi-Annual' : user.billingPeriod === 12 ? 'Annual' : `${user.billingPeriod}mo`}
+                                </span>
+                            )}
                         </div>
+                        {user?.subscriptionStatus === 'past_due' && getGraceDaysLeft() !== null && (
+                            <div className="bg-red-500/20 border border-red-400/30 rounded-xl px-4 py-2 mb-3">
+                                <p className="text-sm text-red-200">⚠️ Your subscription has expired. <strong>{getGraceDaysLeft()} days left</strong> in grace period. Renew now to avoid suspension.</p>
+                            </div>
+                        )}
                         <h2 className="text-4xl font-bold mb-2">
                             {user?.plan?.displayName || user?.plan?.name || 'Free'} Plan
                         </h2>
@@ -535,6 +576,40 @@ export default function BillingPage() {
                                 <XMarkIcon className="h-6 w-6" />
                             </button>
                         </div>
+
+                        {/* Billing Period Selector */}
+                        {selectedPlan.billingPeriods && selectedPlan.billingPeriods.length > 1 && (
+                            <div className="space-y-2">
+                                <p className="text-gray-300 text-sm font-medium">Select billing period:</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {selectedPlan.billingPeriods.map((period: any) => (
+                                        <button
+                                            key={period.months}
+                                            onClick={() => setSelectedBillingPeriod(period.months)}
+                                            className={`relative p-3 rounded-xl border text-left transition-all ${
+                                                selectedBillingPeriod === period.months
+                                                    ? 'border-purple-500 bg-purple-500/10 ring-1 ring-purple-500'
+                                                    : 'border-gray-700 bg-gray-800 hover:border-gray-600'
+                                            }`}
+                                        >
+                                            {period.discountPercent > 0 && (
+                                                <span className="absolute -top-2 -right-2 bg-green-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                                                    -{period.discountPercent}%
+                                                </span>
+                                            )}
+                                            <p className="text-white font-medium text-sm">{period.label}</p>
+                                            <p className="text-purple-400 font-bold text-lg">{getCurrencySymbol(getDisplayCurrency())}{period.totalPrice}</p>
+                                            {period.months > 1 && (
+                                                <p className="text-gray-500 text-xs">{getCurrencySymbol(getDisplayCurrency())}{period.monthlyPrice}/mo</p>
+                                            )}
+                                            {period.savings > 0 && (
+                                                <p className="text-green-400 text-xs font-medium">Save {getCurrencySymbol(getDisplayCurrency())}{period.savings}</p>
+                                            )}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
                         {/* Payment Method Selection */}
                         {!paymentMethod && (

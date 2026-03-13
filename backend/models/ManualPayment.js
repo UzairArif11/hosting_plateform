@@ -26,8 +26,13 @@ const manualPaymentSchema = new mongoose.Schema({
     },
     currency: {
         type: String,
-        default: 'PKR',
-        enum: ['PKR', 'USD', 'EUR', 'GBP', 'USDT', 'USDC', 'BTC', 'ETH', 'CRYPTO']
+        default: 'USD',
+        enum: ['USD', 'PKR', 'EUR', 'GBP', 'USDT', 'USDC', 'BTC', 'ETH']
+    },
+    billingPeriod: {
+        type: Number,
+        default: 1,
+        enum: [1, 3, 6, 12]
     },
 
     // Payment type

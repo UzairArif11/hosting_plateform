@@ -231,6 +231,11 @@ const getCurrentUser = async (req, res) => {
         resourceUsagePercentage: showResources ? user.resourceUsagePercentage : null,
         displayedResources: user.displayedResources || user.resourceAllocation, // Always show limits
 
+        // Subscription lifecycle
+        planExpiresAt: user.planExpiresAt || null,
+        billingPeriod: user.billingPeriod || 1,
+        gracePeriodEndsAt: user.gracePeriodEndsAt || null,
+
         createdAt: user.createdAt
       }
     });

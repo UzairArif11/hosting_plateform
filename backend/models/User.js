@@ -434,6 +434,30 @@ const userSchema = new mongoose.Schema({
     default: null
   },
 
+  // Subscription lifecycle for manual payments
+  planExpiresAt: {
+    type: Date,
+    default: null,
+    index: true
+  },
+  billingPeriod: {
+    type: Number,
+    default: 1, // months (1, 3, 6, 12)
+    enum: [1, 3, 6, 12]
+  },
+  gracePeriodEndsAt: {
+    type: Date,
+    default: null
+  },
+  lastRenewalReminder: {
+    type: Date,
+    default: null
+  },
+  lastGracePeriodReminder: {
+    type: Date,
+    default: null
+  },
+
 }, {
   timestamps: true,
   toJSON: {

@@ -64,20 +64,45 @@ router.get('/plans', async (req, res) => {
     const plans = await Plan.findActivePlans();
 
     // Format plans with pricing for requested currency
-    const formattedPlans = plans.map(plan => ({
-      id: plan._id,
-      name: plan.name,
-      displayName: plan.displayName,
-      description: plan.description,
-      price: plan.getPricingForCurrency(currency),
-      formattedPrice: plan.formattedPricing[currency.toLowerCase()],
-      resources: plan.displayResources || plan.resources, // Use display resources for frontend
-      actualResources: plan.resources, // Keep actual resources if needed for debugging
-      features: plan.features.filter(f => f.enabled),
-      billingCycle: plan.billingCycle,
-      isDefault: plan.isDefault,
-      isTrial: plan.isTrial
-    }));
+    const formattedPlans = plans.map(plan => {
+      const basePrice = plan.getPricingForCurrency(currency);
+      // Build billing period options with calculated prices
+      const defaultPeriods = [
+        { months: 1, discountPercent: 0, gracePeriodDays: 10, enabled: true },
+        { months: 3, discountPercent: 5, gracePeriodDays: 15, enabled: true },
+        { months: 6, discountPercent: 10, gracePeriodDays: 20, enabled: true },
+        { months: 12, discountPercent: 20, gracePeriodDays: 30, enabled: true }
+      ];
+      const periods = (plan.billingPeriods && plan.billingPeriods.length > 0)
+        ? plan.billingPeriods.filter(p => p.enabled)
+        : defaultPeriods;
+
+      const billingPeriods = periods.map(p => ({
+        months: p.months,
+        discountPercent: p.discountPercent || 0,
+        gracePeriodDays: p.gracePeriodDays || 10,
+        monthlyPrice: Math.round(basePrice * (1 - (p.discountPercent || 0) / 100) * 100) / 100,
+        totalPrice: Math.round(basePrice * p.months * (1 - (p.discountPercent || 0) / 100) * 100) / 100,
+        savings: Math.round(basePrice * p.months * (p.discountPercent || 0) / 100 * 100) / 100,
+        label: p.months === 1 ? 'Monthly' : p.months === 3 ? 'Quarterly' : p.months === 6 ? 'Semi-Annual' : 'Annual'
+      }));
+
+      return {
+        id: plan._id,
+        name: plan.name,
+        displayName: plan.displayName,
+        description: plan.description,
+        price: basePrice,
+        formattedPrice: plan.formattedPricing[currency.toLowerCase()],
+        resources: plan.displayResources || plan.resources,
+        actualResources: plan.resources,
+        features: plan.features.filter(f => f.enabled),
+        billingCycle: plan.billingCycle,
+        billingPeriods,
+        isDefault: plan.isDefault,
+        isTrial: plan.isTrial
+      };
+    });
 
     res.json({
       success: true,
@@ -543,9 +568,10 @@ router.get('/payment-config', async (req, res) => {
 // Submit manual bank transfer or crypto payment
 router.post('/manual-payment', upload.single('screenshot'), async (req, res) => {
   try {
-    const { planId, bankAccountId, cryptoWalletId, senderName, senderAccount, transactionId, paymentType } = req.body;
+    const { planId, bankAccountId, cryptoWalletId, senderName, senderAccount, transactionId, paymentType, billingPeriod: billingPeriodStr } = req.body;
     const user = req.user;
     const isCrypto = paymentType === 'crypto' || !!cryptoWalletId;
+    const billingPeriod = parseInt(billingPeriodStr) || 1;
 
     if (!req.file) {
       return res.status(400).json({ success: false, error: 'Screenshot is required' });
@@ -590,7 +616,10 @@ router.post('/manual-payment', upload.single('screenshot'), async (req, res) => 
         return res.status(404).json({ success: false, error: 'Crypto wallet not found' });
       }
 
-      const amount = plan.getPricingForCurrency('usd') || plan.pricing.usd;
+      const baseAmount = plan.getPricingForCurrency('usd') || plan.pricing.usd;
+      const periodConfig = (plan.billingPeriods || []).find(p => p.months === billingPeriod);
+      const discount = periodConfig?.discountPercent || 0;
+      const amount = Math.round(baseAmount * billingPeriod * (1 - discount / 100) * 100) / 100;
 
       paymentRecord = await ManualPayment.create({
         user: user._id,
@@ -598,6 +627,7 @@ router.post('/manual-payment', upload.single('screenshot'), async (req, res) => 
         planName: plan.displayName,
         amount: amount,
         currency: cryptoWallet.coinName || 'CRYPTO',
+        billingPeriod: billingPeriod,
         paymentType: 'crypto',
         cryptoWallet: {
           coinName: cryptoWallet.coinName,
@@ -616,7 +646,10 @@ router.post('/manual-payment', upload.single('screenshot'), async (req, res) => 
       }
 
       const bankCurrency = bankAccount.currency || 'PKR';
-      const amount = plan.getPricingForCurrency(bankCurrency.toLowerCase()) || plan.getPricingForCurrency('usd');
+      const baseAmount = plan.getPricingForCurrency(bankCurrency.toLowerCase()) || plan.getPricingForCurrency('usd');
+      const periodConfig = (plan.billingPeriods || []).find(p => p.months === billingPeriod);
+      const discount = periodConfig?.discountPercent || 0;
+      const amount = Math.round(baseAmount * billingPeriod * (1 - discount / 100) * 100) / 100;
 
       paymentRecord = await ManualPayment.create({
         user: user._id,
@@ -624,6 +657,7 @@ router.post('/manual-payment', upload.single('screenshot'), async (req, res) => 
         planName: plan.displayName,
         amount: amount,
         currency: bankCurrency,
+        billingPeriod: billingPeriod,
         paymentType: 'bank',
         bankAccount: {
           bankName: bankAccount.bankName,

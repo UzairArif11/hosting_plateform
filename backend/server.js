@@ -304,6 +304,10 @@ const PORT = process.env.PORT || 5000;
       // Start User Resource Enforcement (RAM/Storage Limits)
       const resourceEnforcer = require('./services/resourceEnforcer');
       resourceEnforcer.startEnforcement();
+
+      // Start Subscription Lifecycle Cron (expiry warnings, grace period, auto-suspend)
+      const { startSubscriptionCron } = require('./cron/subscriptionCron');
+      startSubscriptionCron();
     });
   } catch (error) {
     logger.error('Server startup failed:', error);

@@ -49,7 +49,7 @@ export default function TemplatesPage() {
             if (debouncedSearch) params.append('search', debouncedSearch);
             if (category !== 'all') params.append('category', category);
 
-            const res = await fetch(`/api/templates?${params.toString()}`);
+            const res = await fetch(`/api/templates/published?${params.toString()}`);
             const data = await res.json();
 
             if (data.success) {

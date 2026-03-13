@@ -1781,6 +1781,34 @@ router.post('/manual-payments/:id/verify', requireAuth, requireAdmin, async (req
       user.suspendedAt = null;
       user.suspensionReason = null;
       user.autoSuspended = false;
+
+      // Update resource allocation to match new plan
+      if (plan.resources) {
+        user.resourceAllocation = {
+          cpu: plan.resources.cpu,
+          ram: plan.resources.ram,
+          storage: plan.resources.storage,
+          bandwidth: plan.resources.bandwidth || 1024,
+          projects: plan.resources.projects || 10
+        };
+        user.displayedResources = {
+          cpu: plan.displayResources?.cpu || plan.resources.cpu,
+          ram: plan.displayResources?.ram || plan.resources.ram,
+          storage: plan.displayResources?.storage || plan.resources.storage,
+          bandwidth: plan.displayResources?.bandwidth || plan.resources.bandwidth || 1024,
+          projects: plan.displayResources?.projects || plan.resources.projects || 10
+        };
+      }
+
+      // Set subscription expiry based on billing period
+      const billingPeriodMonths = payment.billingPeriod || 1;
+      const expiresAt = new Date();
+      expiresAt.setMonth(expiresAt.getMonth() + billingPeriodMonths);
+      user.planExpiresAt = expiresAt;
+      user.billingPeriod = billingPeriodMonths;
+      user.gracePeriodEndsAt = null;
+      user.lastRenewalReminder = null;
+
       await user.save();
 
       // Also create a formal Payment record for billing history

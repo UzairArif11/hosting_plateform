@@ -18,8 +18,10 @@ import ProjectCardSkeleton from '@/components/ProjectCardSkeleton';
 export default function ProjectsPage() {
     const dispatch = useDispatch<AppDispatch>();
     const { projects, loading } = useSelector((state: RootState) => state.projects);
+    const { user } = useSelector((state: RootState) => state.auth);
     const [searchQuery, setSearchQuery] = useState('');
     const [showCreateModal, setShowCreateModal] = useState(false);
+    const [showGitHubConnect, setShowGitHubConnect] = useState(false);
     const [newProject, setNewProject] = useState({
         name: '',
         repository: '',
@@ -44,6 +46,13 @@ export default function ProjectsPage() {
 
     const handleCreateProject = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        // Check if GitHub is connected
+        if (!user?.githubId) {
+            setShowCreateModal(false);
+            setShowGitHubConnect(true);
+            return;
+        }
 
         if (!newProject.name || !newProject.repository) {
             toast.error('Please fill in all fields');
@@ -139,7 +148,13 @@ export default function ProjectsPage() {
                     <p className="text-gray-400 mt-1">Manage your deployed projects</p>
                 </div>
                 <button
-                    onClick={() => setShowCreateModal(true)}
+                    onClick={() => {
+                        if (!user?.githubId) {
+                            setShowGitHubConnect(true);
+                        } else {
+                            setShowCreateModal(true);
+                        }
+                    }}
                     className="inline-flex items-center space-x-2 bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg transition-colors"
                 >
                     <PlusIcon className="h-5 w-5" />
@@ -327,6 +342,36 @@ export default function ProjectsPage() {
                 </div >
             )
             }
+            {/* GitHub Connect Popup */}
+            {showGitHubConnect && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-md w-full text-center space-y-4">
+                        <div className="mx-auto w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center">
+                            <svg className="h-8 w-8 text-white" fill="currentColor" viewBox="0 0 24 24">
+                                <path fillRule="evenodd" d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0012 2z" clipRule="evenodd" />
+                            </svg>
+                        </div>
+                        <h3 className="text-xl font-bold text-white">Connect GitHub</h3>
+                        <p className="text-gray-400 text-sm">To deploy projects, you need to connect your GitHub account. This allows us to access your repositories for deployment.</p>
+                        <div className="flex gap-3 pt-2">
+                            <button
+                                onClick={() => setShowGitHubConnect(false)}
+                                className="flex-1 bg-gray-800 hover:bg-gray-700 text-white px-4 py-3 rounded-xl transition-colors font-medium"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => {
+                                    window.location.href = '/api/auth/github';
+                                }}
+                                className="flex-1 bg-purple-600 hover:bg-purple-700 text-white px-4 py-3 rounded-xl transition-colors font-medium"
+                            >
+                                Connect GitHub
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div >
     );
 }
