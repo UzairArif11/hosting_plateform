@@ -129,6 +129,10 @@ router.get('/info', async (req, res) => {
         features: user.plan.features.filter(f => f.enabled)
       } : null,
       subscriptionStatus: user.subscriptionStatus,
+      // Subscription lifecycle
+      planExpiresAt: user.planExpiresAt || null,
+      billingPeriod: user.billingPeriod || 1,
+      gracePeriodEndsAt: user.gracePeriodEndsAt || null,
       trialInfo: {
         isActive: user.isTrialActive,
         daysRemaining: user.trialDaysRemaining,

@@ -64,7 +64,7 @@ const checkSubscriptions = async () => {
             </a>
           </p>
           <p style="color: #6b7280; font-size: 12px; margin-top: 30px;">
-            After expiry, you'll have a 10-day grace period before your account is suspended.
+            After expiry, you'll have a grace period before your account is suspended.
           </p>
         </div>`
       );
@@ -98,11 +98,11 @@ const checkSubscriptions = async () => {
 
       await sendEmail(
         user.email,
-        `🔴 Your subscription has expired — 10-day grace period started`,
+        `🔴 Your subscription has expired — ${graceDays}-day grace period started`,
         `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <h2 style="color: #ef4444;">🔴 Subscription Expired</h2>
           <p>Hi ${user.displayName || user.username},</p>
-          <p>Your subscription has expired. You have a <strong>10-day grace period</strong> (until ${gracePeriodEnd.toLocaleDateString()}) to renew.</p>
+          <p>Your subscription has expired. You have a <strong>${graceDays}-day grace period</strong> (until ${gracePeriodEnd.toLocaleDateString()}) to renew.</p>
           <p><strong>After the grace period, your account will be suspended</strong> and your projects will be stopped.</p>
           <p style="margin-top: 20px;">
             <a href="${process.env.FRONTEND_URL}/dashboard/billing" 

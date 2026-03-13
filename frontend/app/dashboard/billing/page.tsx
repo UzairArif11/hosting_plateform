@@ -169,6 +169,7 @@ export default function BillingPage() {
 
         setSelectedPlan(plan);
         setPaymentMethod('');
+        setSelectedBillingPeriod(1);
         setShowPaymentModal(true);
     };
 

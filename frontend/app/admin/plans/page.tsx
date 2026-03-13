@@ -752,6 +752,84 @@ export default function PlanManagement() {
                                 </div>
                             </div>
 
+                            {/* Billing Periods & Discounts */}
+                            <div>
+                                <h3 className="text-lg font-semibold text-white mb-3">
+                                    Billing Periods & Discounts
+                                    <span className="block text-xs text-gray-400 font-normal mt-1">
+                                        Configure multi-month billing options with discounts and grace periods
+                                    </span>
+                                </h3>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    {[
+                                        { months: 1, label: 'Monthly', defaultDiscount: 0, defaultGrace: 10 },
+                                        { months: 3, label: 'Quarterly', defaultDiscount: 5, defaultGrace: 15 },
+                                        { months: 6, label: 'Semi-Annual', defaultDiscount: 10, defaultGrace: 20 },
+                                        { months: 12, label: 'Annual', defaultDiscount: 20, defaultGrace: 30 }
+                                    ].map(period => {
+                                        const existing = (editingPlan as any).billingPeriods?.find((p: any) => p.months === period.months);
+                                        const isEnabled = existing?.enabled ?? (period.months === 1);
+                                        const discount = existing?.discountPercent ?? period.defaultDiscount;
+                                        const graceDays = existing?.gracePeriodDays ?? period.defaultGrace;
+
+                                        const updateBillingPeriod = (field: string, value: any) => {
+                                            const currentPeriods = (editingPlan as any).billingPeriods || [];
+                                            const idx = currentPeriods.findIndex((p: any) => p.months === period.months);
+                                            let newPeriods = [...currentPeriods];
+                                            if (idx >= 0) {
+                                                newPeriods[idx] = { ...newPeriods[idx], [field]: value };
+                                            } else {
+                                                newPeriods.push({ months: period.months, discountPercent: discount, gracePeriodDays: graceDays, enabled: true, [field]: value });
+                                            }
+                                            setEditingPlan({ ...editingPlan, billingPeriods: newPeriods } as any);
+                                        };
+
+                                        return (
+                                            <div key={period.months} className={`bg-gray-800/50 border rounded-xl p-4 transition ${isEnabled ? 'border-purple-500/40' : 'border-gray-700 opacity-60'}`}>
+                                                <div className="flex items-center justify-between mb-3">
+                                                    <span className="text-white font-medium text-sm">{period.label} ({period.months}mo)</span>
+                                                    <label className="relative inline-flex items-center cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            className="sr-only peer"
+                                                            checked={isEnabled}
+                                                            onChange={(e) => updateBillingPeriod('enabled', e.target.checked)}
+                                                        />
+                                                        <div className="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                                                    </label>
+                                                </div>
+                                                {isEnabled && (
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        <div>
+                                                            <label className="block text-xs text-gray-400 mb-1">Discount %</label>
+                                                            <input
+                                                                type="number"
+                                                                min="0"
+                                                                max="100"
+                                                                value={discount}
+                                                                onChange={(e) => updateBillingPeriod('discountPercent', parseFloat(e.target.value) || 0)}
+                                                                className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-white"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-xs text-gray-400 mb-1">Grace Days</label>
+                                                            <input
+                                                                type="number"
+                                                                min="1"
+                                                                max="90"
+                                                                value={graceDays}
+                                                                onChange={(e) => updateBillingPeriod('gracePeriodDays', parseInt(e.target.value) || 10)}
+                                                                className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-white"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
                             {/* Settings */}
                             <div>
                                 <h3 className="text-lg font-semibold text-white mb-3">Settings</h3>
