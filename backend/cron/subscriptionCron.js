@@ -241,9 +241,9 @@ const checkSubscriptions = async () => {
         // Remove Docker container and all data
         await removeUserContainer(user);
 
-        // Delete all projects
-        await Project.deleteMany({ user: user._id });
-        await Deployment.deleteMany({ user: user._id });
+        // Delete all projects and deployments
+        await Project.deleteMany({ owner: user._id });
+        await Deployment.deleteMany({ userId: user._id });
 
         // Mark user as deleted (soft delete — keep email for records)
         user.status = 'deleted';

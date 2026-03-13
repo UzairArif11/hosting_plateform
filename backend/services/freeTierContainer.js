@@ -677,8 +677,8 @@ async function suspendUserContainer(user) {
         // Update all user's projects to 'suspended' status
         const Project = require('../models/Project');
         await Project.updateMany(
-            { user: userId, status: { $in: ['active', 'deploying'] } },
-            { $set: { status: 'suspended', suspendedAt: new Date() } }
+            { owner: userId, status: { $in: ['active', 'deploying'] } },
+            { $set: { status: 'suspended' } }
         );
 
         logger.info(`✅ [SUSPEND] User ${user.email} container suspended, projects marked suspended`);
@@ -753,8 +753,8 @@ async function reactivateUserContainer(user) {
         // Update all user's projects back to 'active' status
         const Project = require('../models/Project');
         await Project.updateMany(
-            { user: userId, status: 'suspended' },
-            { $set: { status: 'active', suspendedAt: null } }
+            { owner: userId, status: 'suspended' },
+            { $set: { status: 'active' } }
         );
 
         logger.info(`✅ [REACTIVATE] User ${user.email} container reactivated, projects set to active`);
