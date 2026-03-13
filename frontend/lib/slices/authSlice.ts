@@ -41,6 +41,9 @@ interface User {
     planExpiresAt?: string;
     billingPeriod?: number;
     gracePeriodEndsAt?: string;
+    scheduledDowngradeTo?: string;
+    scheduledDowngradeAt?: string;
+    scheduledDeletionAt?: string;
 }
 
 interface AuthState {

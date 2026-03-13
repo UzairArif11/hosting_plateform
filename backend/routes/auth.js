@@ -236,6 +236,11 @@ const getCurrentUser = async (req, res) => {
         billingPeriod: user.billingPeriod || 1,
         gracePeriodEndsAt: user.gracePeriodEndsAt || null,
 
+        // Plan downgrade/deletion scheduling
+        scheduledDowngradeTo: user.scheduledDowngradeTo || null,
+        scheduledDowngradeAt: user.scheduledDowngradeAt || null,
+        scheduledDeletionAt: user.scheduledDeletionAt || null,
+
         createdAt: user.createdAt
       }
     });
@@ -421,13 +426,33 @@ const refreshToken = async (req, res) => {
 // GitHub OAuth
 router.get('/github', oauthLimiter, handleGitHubOAuthStart);
 
-router.get('/github/callback',
-  passport.authenticate('github', {
-    failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login?error=auth_failed`,
-    session: false // OAuth doesn't need sessions
-  }),
-  handleGitHubCallback
-);
+router.get('/github/callback', (req, res, next) => {
+  passport.authenticate('github', { session: false }, (err, user, info) => {
+    const frontendURL = process.env.FRONTEND_URL || 'http://localhost:3000';
+    
+    if (err) {
+      logger.error('🔴 GitHub OAuth error:', {
+        error: err.message,
+        stack: err.stack?.substring(0, 500),
+        query: req.query,
+        info: info
+      });
+      return res.redirect(`${frontendURL}/login?error=${encodeURIComponent(err.message || 'auth_failed')}`);
+    }
+
+    if (!user) {
+      logger.error('🔴 GitHub OAuth: No user returned', {
+        info: info,
+        query: req.query
+      });
+      return res.redirect(`${frontendURL}/login?error=no_user_returned`);
+    }
+
+    // Attach user to request and proceed to callback handler
+    req.user = user;
+    handleGitHubCallback(req, res);
+  })(req, res, next);
+});
 
 // Google OAuth
 router.get('/google', oauthLimiter, passport.authenticate('google', {

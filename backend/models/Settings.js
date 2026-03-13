@@ -147,6 +147,13 @@ const settingsSchema = new mongoose.Schema({
         }
     },
 
+    // Account Deletion Settings (admin-configurable)
+    accountDeletion: {
+        enabled: { type: Boolean, default: false },        // false = never auto-delete suspended accounts
+        daysAfterSuspension: { type: Number, default: 30 }, // days after suspension before deletion
+        warningEmailDays: { type: Number, default: 10 }     // start warnings X days before scheduled deletion
+    },
+
     // Currency Configuration
     currencyConfig: {
         displayCurrency: {

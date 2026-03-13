@@ -1782,6 +1782,12 @@ router.post('/manual-payments/:id/verify', requireAuth, requireAdmin, async (req
       user.suspensionReason = null;
       user.autoSuspended = false;
 
+      // Clear deletion scheduling on reactivation
+      user.scheduledDeletionAt = null;
+      user.lastDeletionWarning = null;
+      user.scheduledDowngradeTo = null;
+      user.scheduledDowngradeAt = null;
+
       // Update resource allocation to match new plan
       if (plan.resources) {
         user.resourceAllocation = {
@@ -1810,6 +1816,18 @@ router.post('/manual-payments/:id/verify', requireAuth, requireAdmin, async (req
       user.lastRenewalReminder = null;
 
       await user.save();
+
+      // Reactivate Docker container if user was suspended (restart container + PM2 processes)
+      if (user.resourcesDeleted !== true) {
+        try {
+          const { reactivateUserContainer } = require('../services/freeTierContainer');
+          await reactivateUserContainer(user);
+          logger.info(`[VERIFY] Reactivated container for ${user.email}`);
+        } catch (reactivateErr) {
+          logger.warn(`[VERIFY] Container reactivation failed for ${user.email}: ${reactivateErr.message}`);
+          // Don't fail the verify — container will be auto-created on next deploy
+        }
+      }
 
       // Also create a formal Payment record for billing history
       try {

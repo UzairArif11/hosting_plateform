@@ -458,6 +458,28 @@ const userSchema = new mongoose.Schema({
     default: null
   },
 
+  // Account deletion scheduling
+  scheduledDeletionAt: {
+    type: Date,
+    default: null,
+    index: true
+  },
+  lastDeletionWarning: {
+    type: Date,
+    default: null
+  },
+
+  // Plan downgrade scheduling
+  scheduledDowngradeTo: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Plan',
+    default: null
+  },
+  scheduledDowngradeAt: {
+    type: Date,
+    default: null
+  },
+
 }, {
   timestamps: true,
   toJSON: {

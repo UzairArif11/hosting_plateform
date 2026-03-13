@@ -853,4 +853,54 @@ router.post('/create-session-easypaisa', [
   }
 });
 
+// Schedule plan downgrade at period end
+router.post('/schedule-downgrade', async (req, res) => {
+  try {
+    const { planId } = req.body;
+    if (!planId) return res.status(400).json({ success: false, error: 'Plan ID required' });
+
+    const Plan = require('../models/Plan');
+    const newPlan = await Plan.findById(planId);
+    if (!newPlan) return res.status(404).json({ success: false, error: 'Plan not found' });
+
+    const user = await User.findById(req.user._id);
+    if (!user.planExpiresAt) {
+      return res.status(400).json({ success: false, error: 'No active subscription period found' });
+    }
+
+    // Check it's actually a downgrade (lower price)
+    const currentPlan = await Plan.findById(user.plan);
+    if (currentPlan && newPlan.pricing.usd >= currentPlan.pricing.usd) {
+      return res.status(400).json({ success: false, error: 'This is not a downgrade. Use upgrade instead.' });
+    }
+
+    user.scheduledDowngradeTo = newPlan._id;
+    user.scheduledDowngradeAt = user.planExpiresAt; // Downgrade at period end
+    await user.save();
+
+    res.json({
+      success: true,
+      message: `Plan will be downgraded to ${newPlan.displayName} on ${user.planExpiresAt.toLocaleDateString()}`,
+      downgradeDate: user.planExpiresAt,
+      newPlan: newPlan.displayName
+    });
+  } catch (error) {
+    logger.error('Schedule downgrade error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to schedule downgrade' });
+  }
+});
+
+// Cancel scheduled downgrade
+router.delete('/cancel-downgrade', async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    user.scheduledDowngradeTo = null;
+    user.scheduledDowngradeAt = null;
+    await user.save();
+    res.json({ success: true, message: 'Scheduled downgrade cancelled' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to cancel downgrade' });
+  }
+});
+
 module.exports = router;

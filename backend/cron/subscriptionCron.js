@@ -1,6 +1,8 @@
 const cron = require('node-cron');
 const User = require('../models/User');
+const Settings = require('../models/Settings');
 const logger = require('../utils/logger');
+const { loadTemplate } = require('../utils/emailTemplates');
 
 // Email sender helper
 const sendEmail = async (to, subject, html) => {
@@ -29,66 +31,60 @@ const sendEmail = async (to, subject, html) => {
   }
 };
 
+const platformName = process.env.PLATFORM_NAME || 'RevsCore';
+const renewUrl = `${process.env.FRONTEND_URL}/dashboard/billing`;
+
 const checkSubscriptions = async () => {
   const now = new Date();
   logger.info('[SUBSCRIPTION] Running subscription lifecycle check...');
 
   try {
-    // 1. Send warning emails 10 days before expiry
+    const settings = await Settings.getSettings();
+
+    // ──────────────────────────────────────────────
+    // STEP 1: Warning emails 10 days before expiry
+    // ──────────────────────────────────────────────
     const tenDaysFromNow = new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000);
     const warningUsers = await User.find({
       subscriptionStatus: 'active',
       planExpiresAt: { $lte: tenDaysFromNow, $gt: now },
       $or: [
         { lastRenewalReminder: null },
-        { lastRenewalReminder: { $lt: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000) } } // Don't spam — wait 3 days between reminders
+        { lastRenewalReminder: { $lt: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000) } }
       ]
     }).populate('plan');
 
     for (const user of warningUsers) {
       const daysLeft = Math.ceil((user.planExpiresAt - now) / (1000 * 60 * 60 * 24));
-      const planName = user.plan?.displayName || 'your plan';
+      const html = loadTemplate('renewalWarning', {
+        platformName,
+        userName: user.displayName || user.username,
+        planName: user.plan?.displayName || 'your plan',
+        daysLeft: String(daysLeft),
+        expiryDate: user.planExpiresAt.toLocaleDateString(),
+        renewUrl
+      });
 
-      await sendEmail(
-        user.email,
-        `⚠️ Your ${planName} subscription expires in ${daysLeft} days`,
-        `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #f59e0b;">⚠️ Subscription Renewal Reminder</h2>
-          <p>Hi ${user.displayName || user.username},</p>
-          <p>Your <strong>${planName}</strong> subscription will expire in <strong>${daysLeft} days</strong> (${user.planExpiresAt.toLocaleDateString()}).</p>
-          <p>To continue using your resources without interruption, please renew your subscription before the expiry date.</p>
-          <p style="margin-top: 20px;">
-            <a href="${process.env.FRONTEND_URL}/dashboard/billing" 
-               style="background: #7c3aed; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold;">
-              Renew Now
-            </a>
-          </p>
-          <p style="color: #6b7280; font-size: 12px; margin-top: 30px;">
-            After expiry, you'll have a grace period before your account is suspended.
-          </p>
-        </div>`
-      );
-
+      await sendEmail(user.email, `⚠️ Your subscription expires in ${daysLeft} days`, html);
       user.lastRenewalReminder = now;
       await user.save();
-      logger.info(`[SUBSCRIPTION] Warning email sent to ${user.email} — ${daysLeft} days left`);
+      logger.info(`[SUBSCRIPTION] Warning sent to ${user.email} — ${daysLeft} days left`);
     }
 
-    // 2. Handle expired subscriptions — enter grace period
+    // ──────────────────────────────────────────────
+    // STEP 2: Expired subscriptions → enter grace period
+    // ──────────────────────────────────────────────
     const expiredUsers = await User.find({
       subscriptionStatus: 'active',
       planExpiresAt: { $lte: now },
-      gracePeriodEndsAt: null // Not yet in grace period
+      gracePeriodEndsAt: null
     }).populate('plan');
 
     for (const user of expiredUsers) {
-      // Get admin-configured grace period days from the plan's billing periods
-      let graceDays = 10; // default
+      let graceDays = 10;
       if (user.plan?.billingPeriods?.length > 0 && user.billingPeriod) {
         const periodConfig = user.plan.billingPeriods.find(p => p.months === user.billingPeriod);
-        if (periodConfig?.gracePeriodDays) {
-          graceDays = periodConfig.gracePeriodDays;
-        }
+        if (periodConfig?.gracePeriodDays) graceDays = periodConfig.gracePeriodDays;
       }
       const gracePeriodEnd = new Date(now.getTime() + graceDays * 24 * 60 * 60 * 1000);
       user.subscriptionStatus = 'past_due';
@@ -96,27 +92,21 @@ const checkSubscriptions = async () => {
       user.lastGracePeriodReminder = null;
       await user.save();
 
-      await sendEmail(
-        user.email,
-        `🔴 Your subscription has expired — ${graceDays}-day grace period started`,
-        `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #ef4444;">🔴 Subscription Expired</h2>
-          <p>Hi ${user.displayName || user.username},</p>
-          <p>Your subscription has expired. You have a <strong>${graceDays}-day grace period</strong> (until ${gracePeriodEnd.toLocaleDateString()}) to renew.</p>
-          <p><strong>After the grace period, your account will be suspended</strong> and your projects will be stopped.</p>
-          <p style="margin-top: 20px;">
-            <a href="${process.env.FRONTEND_URL}/dashboard/billing" 
-               style="background: #ef4444; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold;">
-              Renew Now
-            </a>
-          </p>
-        </div>`
-      );
+      const html = loadTemplate('subscriptionExpired', {
+        platformName,
+        userName: user.displayName || user.username,
+        graceDays: String(graceDays),
+        gracePeriodEnd: gracePeriodEnd.toLocaleDateString(),
+        renewUrl
+      });
 
+      await sendEmail(user.email, `🔴 Subscription expired — ${graceDays}-day grace period started`, html);
       logger.info(`[SUBSCRIPTION] Grace period started for ${user.email} — ends ${gracePeriodEnd.toLocaleDateString()}`);
     }
 
-    // 3. Send grace period reminders every 3 days
+    // ──────────────────────────────────────────────
+    // STEP 3: Grace period reminders every 3 days
+    // ──────────────────────────────────────────────
     const gracePeriodUsers = await User.find({
       subscriptionStatus: 'past_due',
       gracePeriodEndsAt: { $gt: now },
@@ -128,63 +118,202 @@ const checkSubscriptions = async () => {
 
     for (const user of gracePeriodUsers) {
       const daysLeft = Math.ceil((user.gracePeriodEndsAt - now) / (1000 * 60 * 60 * 24));
+      const html = loadTemplate('gracePeriodReminder', {
+        platformName,
+        userName: user.displayName || user.username,
+        daysLeft: String(daysLeft),
+        renewUrl
+      });
 
-      await sendEmail(
-        user.email,
-        `⏰ Grace period: ${daysLeft} days left to renew`,
-        `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #f59e0b;">⏰ Grace Period Reminder</h2>
-          <p>Hi ${user.displayName || user.username},</p>
-          <p>You have <strong>${daysLeft} days</strong> left in your grace period. After that, your account will be suspended.</p>
-          <p style="margin-top: 20px;">
-            <a href="${process.env.FRONTEND_URL}/dashboard/billing" 
-               style="background: #f59e0b; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold;">
-              Renew Now
-            </a>
-          </p>
-        </div>`
-      );
-
+      await sendEmail(user.email, `⏰ Grace period: ${daysLeft} days left to renew`, html);
       user.lastGracePeriodReminder = now;
       await user.save();
       logger.info(`[SUBSCRIPTION] Grace reminder sent to ${user.email} — ${daysLeft} days left`);
     }
 
-    // 4. Suspend accounts after grace period ends
+    // ──────────────────────────────────────────────
+    // STEP 4: Suspend accounts after grace period ends
+    //         Docker STOP (not remove) — data preserved
+    // ──────────────────────────────────────────────
+    const { suspendUserContainer } = require('../services/freeTierContainer');
+
     const suspendUsers = await User.find({
       subscriptionStatus: 'past_due',
       gracePeriodEndsAt: { $lte: now }
     });
 
     for (const user of suspendUsers) {
+      // Stop Docker container (preserve data)
+      await suspendUserContainer(user);
+
       user.status = 'suspended';
       user.subscriptionStatus = 'expired';
       user.suspendedAt = now;
       user.suspensionReason = 'Subscription expired — grace period ended';
       user.autoSuspended = true;
+
+      // Schedule deletion if admin has configured it
+      if (settings.accountDeletion?.enabled && settings.accountDeletion?.daysAfterSuspension > 0) {
+        const deletionDate = new Date(now.getTime() + settings.accountDeletion.daysAfterSuspension * 24 * 60 * 60 * 1000);
+        user.scheduledDeletionAt = deletionDate;
+        user.lastDeletionWarning = null;
+      }
+
+      await user.save();
+
+      let deletionNotice = 'Your data will be preserved indefinitely. Renew anytime to reactivate.';
+      if (user.scheduledDeletionAt) {
+        const delDays = settings.accountDeletion.daysAfterSuspension;
+        deletionNotice = `If not renewed within ${delDays} days, your account and data will be permanently deleted on ${user.scheduledDeletionAt.toLocaleDateString()}.`;
+      }
+
+      const html = loadTemplate('accountSuspended', {
+        platformName,
+        userName: user.displayName || user.username,
+        renewUrl,
+        deletionNotice
+      });
+
+      await sendEmail(user.email, `🚫 Account Suspended — Subscription not renewed`, html);
+      logger.info(`[SUBSCRIPTION] Account suspended: ${user.email}${user.scheduledDeletionAt ? ` (deletion: ${user.scheduledDeletionAt.toLocaleDateString()})` : ' (no auto-delete)'}`);
+    }
+
+    // ──────────────────────────────────────────────
+    // STEP 5: Deletion warning emails (3 emails, every 3 days)
+    //         Only for accounts with scheduledDeletionAt set
+    // ──────────────────────────────────────────────
+    if (settings.accountDeletion?.enabled) {
+      const warningDays = settings.accountDeletion.warningEmailDays || 10;
+      const warningThreshold = new Date(now.getTime() + warningDays * 24 * 60 * 60 * 1000);
+
+      const deletionWarningUsers = await User.find({
+        status: 'suspended',
+        scheduledDeletionAt: { $lte: warningThreshold, $gt: now },
+        $or: [
+          { lastDeletionWarning: null },
+          { lastDeletionWarning: { $lt: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000) } }
+        ]
+      });
+
+      for (const user of deletionWarningUsers) {
+        const daysLeft = Math.ceil((user.scheduledDeletionAt - now) / (1000 * 60 * 60 * 24));
+        const html = loadTemplate('deletionWarning', {
+          platformName,
+          userName: user.displayName || user.username,
+          daysLeft: String(daysLeft),
+          deletionDate: user.scheduledDeletionAt.toLocaleDateString(),
+          renewUrl
+        });
+
+        await sendEmail(user.email, `⚠️ URGENT: Account will be deleted in ${daysLeft} days`, html);
+        user.lastDeletionWarning = now;
+        await user.save();
+        logger.info(`[SUBSCRIPTION] Deletion warning sent to ${user.email} — ${daysLeft} days until deletion`);
+      }
+    }
+
+    // ──────────────────────────────────────────────
+    // STEP 6: Auto-delete accounts after scheduled date
+    //         Remove Docker container + all project data
+    // ──────────────────────────────────────────────
+    if (settings.accountDeletion?.enabled) {
+      const { removeUserContainer } = require('../services/freeTierContainer');
+      const Project = require('../models/Project');
+      const Deployment = require('../models/Deployment');
+
+      const deleteUsers = await User.find({
+        status: 'suspended',
+        scheduledDeletionAt: { $lte: now }
+      });
+
+      for (const user of deleteUsers) {
+        logger.info(`[SUBSCRIPTION] Auto-deleting account: ${user.email}`);
+
+        // Remove Docker container and all data
+        await removeUserContainer(user);
+
+        // Delete all projects
+        await Project.deleteMany({ user: user._id });
+        await Deployment.deleteMany({ user: user._id });
+
+        // Mark user as deleted (soft delete — keep email for records)
+        user.status = 'deleted';
+        user.subscriptionStatus = 'cancelled';
+        user.resourcesDeleted = true;
+        user.resourcesDeletedAt = now;
+        user.containerName = null;
+        user.containerId = null;
+        user.assignedServer = null;
+        user.assignedPort = null;
+        await user.save();
+
+        await sendEmail(
+          user.email,
+          `Account Deleted — ${platformName}`,
+          loadTemplate('deletionWarning', {
+            platformName,
+            userName: user.displayName || user.username,
+            daysLeft: '0',
+            deletionDate: now.toLocaleDateString(),
+            renewUrl
+          })
+        );
+
+        logger.info(`[SUBSCRIPTION] Account deleted: ${user.email}`);
+      }
+    }
+
+    // ──────────────────────────────────────────────
+    // STEP 7: Plan downgrades at period end
+    // ──────────────────────────────────────────────
+    const Plan = require('../models/Plan');
+    const downgradeUsers = await User.find({
+      scheduledDowngradeTo: { $ne: null },
+      scheduledDowngradeAt: { $lte: now }
+    }).populate('scheduledDowngradeTo');
+
+    for (const user of downgradeUsers) {
+      const newPlan = user.scheduledDowngradeTo;
+      if (!newPlan) continue;
+
+      logger.info(`[SUBSCRIPTION] Downgrading ${user.email} to ${newPlan.displayName}`);
+
+      user.plan = newPlan._id;
+      user.resourceAllocation = {
+        cpu: newPlan.resources.cpu,
+        ram: newPlan.resources.ram,
+        storage: newPlan.resources.storage,
+        bandwidth: newPlan.resources.bandwidth || 1024,
+        projects: newPlan.resources.projects || 10
+      };
+      user.displayedResources = {
+        cpu: newPlan.displayResources?.cpu || newPlan.resources.cpu,
+        ram: newPlan.displayResources?.ram || newPlan.resources.ram,
+        storage: newPlan.displayResources?.storage || newPlan.resources.storage,
+        bandwidth: newPlan.displayResources?.bandwidth || newPlan.resources.bandwidth || 1024,
+        projects: newPlan.displayResources?.projects || newPlan.resources.projects || 10
+      };
+      user.scheduledDowngradeTo = null;
+      user.scheduledDowngradeAt = null;
       await user.save();
 
       await sendEmail(
         user.email,
-        `🚫 Account Suspended — Subscription not renewed`,
-        `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #ef4444;">🚫 Account Suspended</h2>
-          <p>Hi ${user.displayName || user.username},</p>
-          <p>Your account has been suspended because your subscription was not renewed during the grace period.</p>
-          <p>Your projects are currently stopped. To reactivate your account, please renew your subscription.</p>
-          <p style="margin-top: 20px;">
-            <a href="${process.env.FRONTEND_URL}/dashboard/billing" 
-               style="background: #7c3aed; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold;">
-              Reactivate Account
-            </a>
-          </p>
-        </div>`
+        `Plan changed to ${newPlan.displayName}`,
+        loadTemplate('renewalWarning', {
+          platformName,
+          userName: user.displayName || user.username,
+          planName: newPlan.displayName,
+          daysLeft: 'N/A',
+          expiryDate: 'Your plan has been changed as requested.',
+          renewUrl
+        })
       );
 
-      logger.info(`[SUBSCRIPTION] Account suspended: ${user.email}`);
+      logger.info(`[SUBSCRIPTION] Downgrade complete: ${user.email} → ${newPlan.displayName}`);
     }
 
-    logger.info(`[SUBSCRIPTION] Check complete: ${warningUsers.length} warnings, ${expiredUsers.length} new grace, ${gracePeriodUsers.length} grace reminders, ${suspendUsers.length} suspended`);
+    logger.info(`[SUBSCRIPTION] Check complete: ${warningUsers.length} warnings, ${expiredUsers.length} new grace, ${gracePeriodUsers.length} grace reminders, ${suspendUsers.length} suspended${settings.accountDeletion?.enabled ? `, deletion checks ran` : ''}`);
   } catch (error) {
     logger.error('[SUBSCRIPTION] Subscription check error:', error.message);
   }

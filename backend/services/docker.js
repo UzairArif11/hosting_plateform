@@ -232,6 +232,38 @@ const runContainer = async (imageName, containerName, options = {}) => {
   }
 };
 
+// Stop container only (no remove) — used for account suspension
+const pauseContainer = async (containerName, host = null) => {
+  try {
+    const docker = createDockerClient(host);
+    const container = docker.getContainer(containerName);
+
+    // Check if running first
+    const info = await container.inspect();
+    if (info.State.Running) {
+      await container.stop();
+      logger.info('Container stopped (preserved)', { containerName });
+    } else {
+      logger.info('Container already stopped', { containerName });
+    }
+
+    return {
+      success: true,
+      containerName: containerName
+    };
+  } catch (error) {
+    if (error.statusCode === 404) {
+      logger.warn('Container not found for pause:', { containerName });
+      return { success: true, containerName }; // Not found is OK
+    }
+    logger.error('Failed to pause container:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
 // Stop and remove container
 const stopContainer = async (containerName, host = null) => {
   try {
@@ -856,6 +888,7 @@ module.exports = {
   runContainer,
   runContainerWithVolumes,
   stopContainer,
+  pauseContainer,
   startContainer,
   removeContainer,
   getContainerStatus,

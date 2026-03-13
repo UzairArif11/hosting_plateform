@@ -638,6 +638,133 @@ async function removeUserContainer(user) {
         return { success: false, error: error.message };
     }
 }
+/**
+ * Suspend user container (stop Docker, but DON'T remove — data preserved)
+ * Used when account is suspended due to non-payment
+ * Resources are freed but all project data stays intact inside the stopped container
+ */
+async function suspendUserContainer(user) {
+    try {
+        const userId = user._id || user.id;
+        let serversToTry = [];
+
+        if (user.assignedServer) {
+            serversToTry.push(user.assignedServer);
+        } else {
+            serversToTry = ['EC2', 'EC3'];
+        }
+
+        let suspended = false;
+
+        for (const serverKey of serversToTry) {
+            const containerName = user.containerName || `${serverKey}-user-${userId}`;
+            const host = process.env[`${serverKey}_SERVER_IP`] || (serverKey === 'EC3' ? '129.154.255.90' : '129.154.255.90');
+
+            try {
+                logger.info(`[SUSPEND] Stopping container ${containerName} on ${serverKey} (${host})...`);
+                const result = await docker.pauseContainer(containerName, host);
+                if (result.success) {
+                    logger.info(`✅ [SUSPEND] Container ${containerName} stopped (data preserved) on ${serverKey}`);
+                    suspended = true;
+                }
+            } catch (e) {
+                if (!e.message?.includes('404')) {
+                    logger.warn(`[SUSPEND] Error on ${serverKey}: ${e.message}`);
+                }
+            }
+        }
+
+        // Update all user's projects to 'suspended' status
+        const Project = require('../models/Project');
+        await Project.updateMany(
+            { user: userId, status: { $in: ['active', 'deploying'] } },
+            { $set: { status: 'suspended', suspendedAt: new Date() } }
+        );
+
+        logger.info(`✅ [SUSPEND] User ${user.email} container suspended, projects marked suspended`);
+        return { success: true, suspended };
+
+    } catch (error) {
+        logger.error('[SUSPEND] Failed to suspend user container:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Reactivate suspended user container (start Docker, restart PM2 processes)
+ * Used when a suspended user renews their subscription
+ * All deployments go live again with zero data loss
+ */
+async function reactivateUserContainer(user) {
+    try {
+        const userId = user._id || user.id;
+        let serversToTry = [];
+
+        if (user.assignedServer) {
+            serversToTry.push(user.assignedServer);
+        } else {
+            serversToTry = ['EC2', 'EC3'];
+        }
+
+        let reactivated = false;
+
+        for (const serverKey of serversToTry) {
+            const containerName = user.containerName || `${serverKey}-user-${userId}`;
+            const host = process.env[`${serverKey}_SERVER_IP`] || (serverKey === 'EC3' ? '129.154.255.90' : '129.154.255.90');
+
+            try {
+                logger.info(`[REACTIVATE] Starting container ${containerName} on ${serverKey} (${host})...`);
+                const result = await docker.startContainer(containerName, host);
+                if (result.success) {
+                    logger.info(`✅ [REACTIVATE] Container ${containerName} started on ${serverKey}`);
+
+                    // Wait for container to fully start
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+
+                    // Restart all PM2 processes inside the container
+                    const ssh = new NodeSSH();
+                    const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
+                        : serverKey === 'EC3' ? process.env.SSH_EC3_KEY
+                            : process.env.SSH_EC3_KEY;
+                    const keyContent = fs.readFileSync(keyPath, 'utf8');
+
+                    await ssh.connect({
+                        host: host,
+                        username: process.env.SSH_USERNAME || 'ubuntu',
+                        privateKey: keyContent
+                    });
+
+                    // Restart all PM2 processes (they were saved before suspension)
+                    const restartResult = await ssh.execCommand(`docker exec ${containerName} pm2 resurrect`);
+                    logger.info(`[REACTIVATE] PM2 resurrect result: ${restartResult.stdout || restartResult.stderr || 'OK'}`);
+
+                    // Start all stopped processes
+                    await ssh.execCommand(`docker exec ${containerName} pm2 restart all`);
+                    await ssh.execCommand(`docker exec ${containerName} pm2 save`);
+
+                    ssh.dispose();
+                    reactivated = true;
+                }
+            } catch (e) {
+                logger.warn(`[REACTIVATE] Error on ${serverKey}: ${e.message}`);
+            }
+        }
+
+        // Update all user's projects back to 'active' status
+        const Project = require('../models/Project');
+        await Project.updateMany(
+            { user: userId, status: 'suspended' },
+            { $set: { status: 'active', suspendedAt: null } }
+        );
+
+        logger.info(`✅ [REACTIVATE] User ${user.email} container reactivated, projects set to active`);
+        return { success: true, reactivated };
+
+    } catch (error) {
+        logger.error('[REACTIVATE] Failed to reactivate user container:', error);
+        return { success: false, error: error.message };
+    }
+}
 
 
 module.exports = {
@@ -647,5 +774,7 @@ module.exports = {
     removeProjectFromUserContainer,
     listProjectsInUserContainer,
     removeUserContainer,
+    suspendUserContainer,
+    reactivateUserContainer,
     getAvailablePort
 };

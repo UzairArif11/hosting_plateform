@@ -85,6 +85,13 @@ export default function AdminSettingsPage() {
         exchangeRates: { usdToPkr: 278, usdToEur: 0.92, usdToGbp: 0.79 }
     });
 
+    // Account Deletion Settings
+    const [accountDeletion, setAccountDeletion] = useState({
+        enabled: false,
+        daysAfterSuspension: 30,
+        warningEmailDays: 10
+    });
+
     const [newAccount, setNewAccount] = useState<BankAccount>({
         bankName: '',
         accountTitle: '',
@@ -129,6 +136,9 @@ export default function AdminSettingsPage() {
                 if (data.currencyConfig) {
                     setCurrencyConfig(data.currencyConfig);
                 }
+                if (data.accountDeletion) {
+                    setAccountDeletion(data.accountDeletion);
+                }
             }
             setLoading(false);
         } catch (error) {
@@ -145,7 +155,8 @@ export default function AdminSettingsPage() {
                 alertConfig: alertSettings,
                 resourceLimits,
                 paymentConfig,
-                currencyConfig
+                currencyConfig,
+                accountDeletion
             };
 
             await api.put('/settings', payload);
@@ -692,6 +703,55 @@ export default function AdminSettingsPage() {
                                 <p className="text-gray-500">This section is for future platform email configuration.</p>
                             </div>
                         )}
+
+                        {/* Account Deletion Settings — always visible */}
+                        <div className="bg-gray-900/50 border border-gray-800 rounded-2xl p-6 space-y-4 mt-6">
+                            <h2 className="text-xl font-semibold text-white">Account Deletion Policy</h2>
+                            <p className="text-sm text-gray-400">Configure when suspended accounts are automatically deleted. If disabled, accounts are never auto-deleted.</p>
+                            <div className="flex items-center justify-between bg-gray-800/50 p-4 rounded-xl">
+                                <div>
+                                    <p className="text-white font-medium">Auto-Delete Suspended Accounts</p>
+                                    <p className="text-xs text-gray-500">Automatically delete data after suspension period</p>
+                                </div>
+                                <label className="relative inline-flex items-center cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        className="sr-only peer"
+                                        checked={accountDeletion.enabled}
+                                        onChange={(e) => setAccountDeletion({ ...accountDeletion, enabled: e.target.checked })}
+                                    />
+                                    <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
+                                </label>
+                            </div>
+                            {accountDeletion.enabled && (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm text-gray-300 mb-2">Days After Suspension Before Deletion</label>
+                                        <input
+                                            type="number"
+                                            min="7"
+                                            max="365"
+                                            value={accountDeletion.daysAfterSuspension}
+                                            onChange={(e) => setAccountDeletion({ ...accountDeletion, daysAfterSuspension: parseInt(e.target.value) || 30 })}
+                                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">Minimum 7 days. Account & all data permanently deleted after this.</p>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm text-gray-300 mb-2">Start Warning Emails (Days Before Deletion)</label>
+                                        <input
+                                            type="number"
+                                            min="3"
+                                            max="30"
+                                            value={accountDeletion.warningEmailDays}
+                                            onChange={(e) => setAccountDeletion({ ...accountDeletion, warningEmailDays: parseInt(e.target.value) || 10 })}
+                                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">Warning emails sent every 3 days starting this many days before deletion.</p>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
 
                         {/* Save Button */}
                         <div className="flex justify-end pt-6 border-t border-gray-800 mt-6">
