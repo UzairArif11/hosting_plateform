@@ -154,7 +154,7 @@ const projectSchema = new mongoose.Schema({
   // Project status and settings
   status: {
     type: String,
-    enum: ['active', 'paused', 'archived', 'error'],
+    enum: ['active', 'paused', 'archived', 'error', 'suspended', 'deploying'],
     default: 'active'
   },
   isPublic: {

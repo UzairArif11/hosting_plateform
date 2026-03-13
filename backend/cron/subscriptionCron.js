@@ -4,21 +4,30 @@ const Settings = require('../models/Settings');
 const logger = require('../utils/logger');
 const { loadTemplate } = require('../utils/emailTemplates');
 
-// Email sender helper
+// Email sender helper — uses Settings.alertConfig (same as resourceEnforcer.js)
 const sendEmail = async (to, subject, html) => {
   try {
     const nodemailer = require('nodemailer');
+    const settings = await Settings.getSettings();
+
+    if (!settings.alertConfig?.enabled || !settings.alertConfig?.email || !settings.alertConfig?.password) {
+      logger.warn(`[SUBSCRIPTION] Email alerts not configured — skipping email to ${to}`);
+      return false;
+    }
+
     const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || '465'),
+      host: process.env.SMTP_HOST || undefined,
+      port: process.env.SMTP_PORT || undefined,
       secure: process.env.SMTP_SECURE === 'true',
+      service: !process.env.SMTP_HOST ? 'gmail' : undefined,
       auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
+        user: settings.alertConfig.email,
+        pass: settings.alertConfig.password
       }
     });
+
     await transporter.sendMail({
-      from: `"${process.env.PLATFORM_NAME || 'RevsCore'}" <${process.env.SMTP_USER}>`,
+      from: `"${process.env.PLATFORM_NAME || 'RevsCore'}" <${settings.alertConfig.email}>`,
       to,
       subject,
       html
@@ -250,12 +259,10 @@ const checkSubscriptions = async () => {
         await sendEmail(
           user.email,
           `Account Deleted — ${platformName}`,
-          loadTemplate('deletionWarning', {
+          loadTemplate('accountDeleted', {
             platformName,
             userName: user.displayName || user.username,
-            daysLeft: '0',
-            deletionDate: now.toLocaleDateString(),
-            renewUrl
+            signupUrl: `${process.env.FRONTEND_URL}/register`
           })
         );
 
