@@ -3,6 +3,9 @@ const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const GitHubStrategy = require('passport-github2').Strategy;
 const User = require('../models/User');
 
+// Helper to escape special regex characters in strings
+const escapeRegex = (str) => str ? str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '';
+
 // Serialize user for session
 passport.serializeUser((user, done) => {
     done(null, user.id);
@@ -54,7 +57,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
 
                     // 2. Check if user exists with same email (link accounts)
                     const googleEmail = profile.emails?.[0]?.value;
-                    user = await User.findOne({ email: googleEmail });
+                    user = await User.findOne({ email: { $regex: new RegExp(`^${escapeRegex(googleEmail)}$`, 'i') } });
                     if (user) {
                         user.googleId = profile.id;
                         user.avatar = profile.photos?.[0]?.value || user.avatar;
@@ -77,7 +80,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
                     // 3. Check signup restrictions before creating new user
                     try {
                         const ipRestrictions = require('../services/ipRestrictions');
-                        const signupCheck = await ipRestrictions.canSignup(googleEmail, ipAddress);
+                        const signupCheck = await ipRestrictions.canSignup(googleEmail, ipAddress, true); // true = isOAuthLinking
                         if (!signupCheck.allowed) {
                             logger.warn('Google signup blocked - restriction', { email: googleEmail, ip: ipAddress, reason: signupCheck.reason });
                             return done(new Error(signupCheck.reason), null);
@@ -151,7 +154,10 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
                         if (saveError.code === 11000) {
                             logger.info('Google OAuth race condition detected, retrying lookup');
                             const existingUser = await User.findOne({
-                                $or: [{ googleId: profile.id }, { email: googleEmail }]
+                                $or: [
+                                    { googleId: profile.id },
+                                    { email: { $regex: new RegExp(`^${escapeRegex(googleEmail)}$`, 'i') } }
+                                ]
                             });
                             if (existingUser) {
                                 if (!existingUser.googleId) existingUser.googleId = profile.id;
@@ -275,7 +281,7 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
 
                     try {
                         const ipRestrictions = require('../services/ipRestrictions');
-                        const signupCheck = await ipRestrictions.canSignup(email, ipAddress);
+                        const signupCheck = await ipRestrictions.canSignup(email, ipAddress, true); // true = isOAuthLinking
                         if (!signupCheck.allowed) {
                             logger.warn('GitHub signup blocked - restriction', { email, ip: ipAddress, reason: signupCheck.reason });
                             return done(new Error(signupCheck.reason), null);
@@ -316,7 +322,7 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
 
                     // Check if username or email already exists
                     let usernameExists = await User.findOne({ username });
-                    let emailExists = await User.findOne({ email });
+                    let emailExists = await User.findOne({ email: { $regex: new RegExp(`^${escapeRegex(email)}$`, 'i') } });
 
                     // CRITICAL: If email exists, LINK the GitHub account instead of creating duplicate
                     if (emailExists) {

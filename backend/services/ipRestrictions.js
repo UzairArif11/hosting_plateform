@@ -109,13 +109,18 @@ async function canUseFreeResources(ipAddress, userId) {
 }
 
 /**
- * Check if signup is allowed (only email check, no IP limit for account creation)
+ * Check if signup is allowed
+ * @param {string} email - The email to check
+ * @param {string} ipAddress - The IP address
+ * @param {boolean} isOAuthLinking - If true, bypasses the "email already exists" check for linking accounts
  */
-async function canSignup(email, ipAddress) {
+async function canSignup(email, ipAddress, isOAuthLinking = false) {
     try {
         // Only check email, allow account creation
         const emailCheck = await isEmailBlocked(email);
-        if (emailCheck.blocked) {
+        
+        // If OAuth linking, we EXPECT the email to exist, so bypass the check unless it's a deleted account
+        if (emailCheck.blocked && (!isOAuthLinking || emailCheck.reason.includes('previously used'))) {
             return {
                 allowed: false,
                 reason: emailCheck.reason,
