@@ -1,6 +1,7 @@
 const { NodeSSH } = require('node-ssh');
 const fs = require('fs');
 const path = require('path');
+const net = require('net');
 const logger = require('../utils/logger');
 
 /**
@@ -11,11 +12,55 @@ const logger = require('../utils/logger');
  */
 class SSHTunnelManager {
     constructor() {
-        this.tunnels = new Map(); // serverKey → { localPort, remoteHost, status }
+        this.tunnels = new Map(); // serverKey → { localPort, remoteHost, status, server }
         this.connections = new Map(); // serverKey → SSH connection
         this.reconnectAttempts = new Map(); // serverKey → attempt count
         this.maxReconnectAttempts = 5;
         this.reconnectDelay = 5000; // 5 seconds
+
+        // Register process exit handlers for graceful cleanup
+        const cleanup = () => {
+            logger.info('[SSH Tunnel] Process exiting, cleaning up tunnels...');
+            this.closeAllTunnelsSync();
+        };
+        process.on('exit', cleanup);
+        process.on('SIGINT', () => { cleanup(); process.exit(0); });
+        process.on('SIGTERM', () => { cleanup(); process.exit(0); });
+    }
+
+    /**
+     * Force-kill any process listening on a specific port
+     * This handles the EADDRINUSE scenario when PM2 restarts the backend
+     */
+    async killPortIfInUse(port) {
+        return new Promise((resolve) => {
+            const testServer = net.createServer();
+            testServer.once('error', (err) => {
+                if (err.code === 'EADDRINUSE') {
+                    logger.warn(`[SSH Tunnel] Port ${port} is in use. Attempting to free it...`);
+                    
+                    // Try connecting to force the old server to release
+                    const client = new net.Socket();
+                    client.once('connect', () => {
+                        client.destroy();
+                        // Small delay to let OS reclaim the port
+                        setTimeout(() => resolve(true), 1000);
+                    });
+                    client.once('error', () => {
+                        // Port is stuck (zombie), wait a bit and resolve
+                        setTimeout(() => resolve(true), 2000);
+                    });
+                    client.connect(port, '127.0.0.1');
+                } else {
+                    resolve(false);
+                }
+            });
+            testServer.once('listening', () => {
+                // Port is free, close the test server
+                testServer.close(() => resolve(false));
+            });
+            testServer.listen(port, '127.0.0.1');
+        });
     }
 
     /**
@@ -33,6 +78,15 @@ class SSHTunnelManager {
                 localPort,
                 remotePort
             });
+
+            // STEP 0: Close any existing tunnel for this server key first
+            const existingTunnel = this.tunnels.get(serverKey);
+            if (existingTunnel) {
+                logger.info(`[SSH Tunnel] Closing existing tunnel for ${serverKey} before recreating...`);
+                await this.closeTunnel(serverKey);
+                // Small delay to let OS reclaim the port
+                await new Promise(r => setTimeout(r, 500));
+            }
 
             // Get SSH key path from environment
             const keyPath = serverKey === 'EC2'
@@ -64,8 +118,11 @@ class SSHTunnelManager {
             logger.info(`[SSH Tunnel] ✅ SSH connected to ${serverKey} (${remoteHost})`);
 
             // Create a local TCP server that forwards connections through the SSH tunnel
-            const net = require('net');
             const tcpServer = net.createServer((socket) => {
+                if (!ssh.connection) {
+                    logger.error(`[SSH Tunnel] SSH connection lost for ${serverKey}, rejecting incoming connection`);
+                    return socket.end();
+                }
                 ssh.connection.forwardOut(
                     '127.0.0.1',
                     socket.remotePort,
@@ -73,21 +130,80 @@ class SSHTunnelManager {
                     remotePort,
                     (err, stream) => {
                         if (err) {
-                            logger.error(`[SSH Tunnel] Forwarding error for ${serverKey}:`, err);
+                            logger.error(`[SSH Tunnel] Forwarding error for ${serverKey}:`, err.message);
                             return socket.end();
                         }
                         socket.pipe(stream).pipe(socket);
+                        
+                        // Clean up on close
+                        stream.on('close', () => socket.destroy());
+                        socket.on('close', () => stream.destroy());
                     }
                 );
             });
 
-            await new Promise((resolve, reject) => {
-                tcpServer.on('error', reject);
-                tcpServer.listen(localPort, '127.0.0.1', () => {
-                    tcpServer.removeListener('error', reject);
-                    resolve();
-                });
+            // Allow the port to be reused immediately after the server closes
+            tcpServer.on('error', (err) => {
+                logger.error(`[SSH Tunnel] TCP server error for ${serverKey}:`, err.message);
             });
+
+            // Try to listen, with EADDRINUSE retry logic
+            try {
+                await this._listenWithRetry(tcpServer, localPort, serverKey);
+            } catch (listenError) {
+                // If we still can't bind, try to force-free the port
+                if (listenError.code === 'EADDRINUSE') {
+                    logger.warn(`[SSH Tunnel] Port ${localPort} in use, attempting to force-free...`);
+                    await this.killPortIfInUse(localPort);
+                    
+                    // Create a new TCP server (the old one is broken after listen error)
+                    const retryServer = net.createServer((socket) => {
+                        if (!ssh.connection) {
+                            return socket.end();
+                        }
+                        ssh.connection.forwardOut(
+                            '127.0.0.1',
+                            socket.remotePort,
+                            '127.0.0.1',
+                            remotePort,
+                            (err, stream) => {
+                                if (err) {
+                                    logger.error(`[SSH Tunnel] Forwarding error for ${serverKey}:`, err.message);
+                                    return socket.end();
+                                }
+                                socket.pipe(stream).pipe(socket);
+                                stream.on('close', () => socket.destroy());
+                                socket.on('close', () => stream.destroy());
+                            }
+                        );
+                    });
+
+                    await this._listenWithRetry(retryServer, localPort, serverKey);
+                    
+                    // Use the retry server instead
+                    this.connections.set(serverKey, ssh);
+                    this.tunnels.set(serverKey, {
+                        localPort,
+                        remoteHost,
+                        remotePort,
+                        status: 'active',
+                        server: retryServer,
+                        createdAt: new Date()
+                    });
+                    this.reconnectAttempts.set(serverKey, 0);
+                    this._setupSSHHandlers(ssh, serverKey, remoteHost, localPort, remotePort);
+
+                    logger.info(`[SSH Tunnel] ✅ Tunnel established (after retry): ${serverKey}`, {
+                        localPort,
+                        remoteHost,
+                        remotePort,
+                        mapping: `localhost:${localPort} → ${remoteHost}:${remotePort}`
+                    });
+
+                    return { success: true, localPort };
+                }
+                throw listenError;
+            }
 
             // Store connection and tunnel info
             this.connections.set(serverKey, ssh);
@@ -96,23 +212,15 @@ class SSHTunnelManager {
                 remoteHost,
                 remotePort,
                 status: 'active',
-                server: tcpServer, // Store the server so we can close it later
+                server: tcpServer,
                 createdAt: new Date()
             });
 
             // Reset reconnect attempts on success
             this.reconnectAttempts.set(serverKey, 0);
 
-            // Set up error handlers
-            ssh.connection.on('error', (error) => {
-                logger.error(`[SSH Tunnel] Connection error for ${serverKey}:`, error);
-                this.handleDisconnect(serverKey, remoteHost, localPort, remotePort);
-            });
-
-            ssh.connection.on('end', () => {
-                logger.warn(`[SSH Tunnel] Connection ended for ${serverKey}`);
-                this.handleDisconnect(serverKey, remoteHost, localPort, remotePort);
-            });
+            // Set up SSH error/end handlers
+            this._setupSSHHandlers(ssh, serverKey, remoteHost, localPort, remotePort);
 
             logger.info(`[SSH Tunnel] ✅ Tunnel established: ${serverKey}`, {
                 localPort,
@@ -132,6 +240,46 @@ class SSHTunnelManager {
 
             return { success: false, error: error.message };
         }
+    }
+
+    /**
+     * Helper: listen on port with a retry after 2 seconds
+     */
+    async _listenWithRetry(server, port, serverKey, retries = 2) {
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+                await new Promise((resolve, reject) => {
+                    server.once('error', reject);
+                    server.listen(port, '127.0.0.1', () => {
+                        server.removeListener('error', reject);
+                        resolve();
+                    });
+                });
+                return; // Success
+            } catch (err) {
+                if (err.code === 'EADDRINUSE' && attempt < retries) {
+                    logger.warn(`[SSH Tunnel] Port ${port} busy for ${serverKey}, retrying in 2s... (attempt ${attempt + 1}/${retries})`);
+                    await new Promise(r => setTimeout(r, 2000));
+                } else {
+                    throw err;
+                }
+            }
+        }
+    }
+
+    /**
+     * Helper: set up SSH connection error & disconnect handlers
+     */
+    _setupSSHHandlers(ssh, serverKey, remoteHost, localPort, remotePort) {
+        ssh.connection.on('error', (error) => {
+            logger.error(`[SSH Tunnel] Connection error for ${serverKey}:`, error.message);
+            this.handleDisconnect(serverKey, remoteHost, localPort, remotePort);
+        });
+
+        ssh.connection.on('end', () => {
+            logger.warn(`[SSH Tunnel] Connection ended for ${serverKey}`);
+            this.handleDisconnect(serverKey, remoteHost, localPort, remotePort);
+        });
     }
 
     /**
@@ -160,6 +308,8 @@ class SSHTunnelManager {
             }
             this.connections.delete(serverKey);
         }
+
+        this.tunnels.delete(serverKey);
 
         // Attempt reconnection
         const attempts = this.reconnectAttempts.get(serverKey) || 0;
@@ -228,6 +378,25 @@ class SSHTunnelManager {
             } catch (error) {
                 logger.error(`[SSH Tunnel] Error closing tunnel for ${serverKey}:`, error);
             }
+        }
+
+        this.connections.clear();
+        this.tunnels.clear();
+        this.reconnectAttempts.clear();
+    }
+
+    /**
+     * Synchronous cleanup for process exit handler
+     */
+    closeAllTunnelsSync() {
+        for (const [serverKey, tunnel] of this.tunnels) {
+            if (tunnel && tunnel.server) {
+                try { tunnel.server.close(); } catch (e) {}
+            }
+        }
+
+        for (const [serverKey, ssh] of this.connections) {
+            try { ssh.dispose(); } catch (e) {}
         }
 
         this.connections.clear();
