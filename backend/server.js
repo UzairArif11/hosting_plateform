@@ -90,16 +90,16 @@ app.use('/api/', limiter);
 
 
 // Session configuration
-// Note: Using MemoryStore for development. For production, uncomment MongoStore.
+// Using connect-mongo for production-ready persistent sessions
 app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
-  // store: MongoStore.create({
-  //   mongoUrl: process.env.MONGODB_URI || 'mongodb://localhost:27017/vercel-clone',
-  //   touchAfter: 24 * 3600, // lazy session update
-  //   autoRemove: 'native' // Default
-  // }),
+  store: MongoStore.create({
+    mongoUrl: process.env.MONGODB_URI || 'mongodb://localhost:27017/vercel-clone',
+    touchAfter: 24 * 3600, // lazy session update
+    autoRemove: 'native' // Default
+  }),
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,

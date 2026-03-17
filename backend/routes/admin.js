@@ -7,9 +7,32 @@ const Project = require('../models/Project');
 const Deployment = require('../models/Deployment');
 const Plan = require('../models/Plan');
 const ServerCapacity = require('../models/ServerCapacity');
+const EmailService = require('../services/email');
 const docker = require('../services/docker');
 const logger = require('../utils/logger');
+const rateLimit = require('express-rate-limit');
 const { getRemoteSystemStats, getServerUtilization, getRemoteDockerStats, getRemoteContainerLogs, ORACLE_SERVERS } = require('../services/containerOrchestrator');
+
+const router = express.Router();
+
+// --- Rate Limiters ---
+// Strict limiter for test deployments to prevent Docker container spam
+const testDeployLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: 5, // restrict to 5 test deployments per 10 minutes
+  message: { error: 'Too many test deployments. Please wait 10 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Moderate limiter for fetching server logs/health
+const serverLogsLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 30, // restrict to 30 requests per minute
+  message: { error: 'Too many log requests. Please wait a minute.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // ... imports remain the same ...
 
@@ -1926,7 +1949,7 @@ router.post('/manual-payments/:id/reject', requireAuth, requireAdmin, async (req
 });
 
 // Get system health for all servers
-router.get('/servers/health', requireAuth, requireAdmin, async (req, res) => {
+router.get('/servers/health', requireAuth, requireAdmin, serverLogsLimiter, async (req, res) => {
   try {
     const { ORACLE_SERVERS } = require('../services/containerOrchestrator');
     const { testSSHConnection } = require('../services/remoteBuild');
@@ -1971,7 +1994,7 @@ router.get('/servers/health', requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Run a manual test deployment on a specific server
-router.post('/servers/:serverKey/test-deploy', requireAuth, requireAdmin, async (req, res) => {
+router.post('/servers/:serverKey/test-deploy', requireAuth, requireAdmin, testDeployLimiter, async (req, res) => {
   try {
     const { serverKey } = req.params;
     const { ORACLE_SERVERS } = require('../services/containerOrchestrator');
@@ -2068,7 +2091,7 @@ rm -rf /tmp/pm2-image
 });
 
 // Get recent server logs and stats
-router.get('/servers/:serverKey/logs', requireAuth, requireAdmin, async (req, res) => {
+router.get('/servers/:serverKey/logs', requireAuth, requireAdmin, serverLogsLimiter, async (req, res) => {
   try {
     const { serverKey } = req.params;
     const { ORACLE_SERVERS } = require('../services/containerOrchestrator');

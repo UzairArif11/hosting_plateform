@@ -459,10 +459,33 @@ router.get('/google', oauthLimiter, passport.authenticate('google', {
   scope: ['profile', 'email']
 }));
 
-router.get('/google/callback',
-  passport.authenticate('google', { failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login?error=auth_failed` }),
-  handleGitHubCallback // Reuse same callback handler
-);
+router.get('/google/callback', (req, res, next) => {
+  passport.authenticate('google', { session: false }, (err, user, info) => {
+    const frontendURL = process.env.FRONTEND_URL || 'http://localhost:3000';
+    
+    if (err) {
+      logger.error('🔴 Google OAuth error:', {
+        error: err.message,
+        stack: err.stack?.substring(0, 500),
+        query: req.query,
+        info: info
+      });
+      return res.redirect(`${frontendURL}/login?error=${encodeURIComponent(err.message || 'auth_failed')}`);
+    }
+
+    if (!user) {
+      logger.error('🔴 Google OAuth: No user returned', {
+        info: info,
+        query: req.query
+      });
+      return res.redirect(`${frontendURL}/login?error=no_user_returned`);
+    }
+
+    // Attach user to request and proceed to callback handler
+    req.user = user;
+    handleGitHubCallback(req, res); // Reuse same callback handler
+  })(req, res, next);
+});
 
 // Direct registration route for testing
 const handleDirectRegistration = async (req, res) => {

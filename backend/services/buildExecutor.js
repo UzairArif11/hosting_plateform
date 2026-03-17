@@ -481,6 +481,28 @@ async function cloneRepository(deployment, project, user, onLog) {
                 break;
             } catch (error) {
                 lastError = error;
+                
+                // Detect GitHub token expiry or unauthorized access
+                if (error.message.includes('Authentication failed') || 
+                    error.message.includes('401') || 
+                    error.message.includes('repository not found') ||
+                    (stderr && (stderr.includes('Authentication failed') || stderr.includes('Repository not found')))) {
+                    
+                    await onLog('error', `❌ GitHub authentication failed. Your token may have expired or been revoked.`);
+                    
+                    if (githubToken && user && !isTemplateDeployment) {
+                        try {
+                            const User = require('../models/User');
+                            await User.findByIdAndUpdate(user._id, { $unset: { githubAccessToken: "" } });
+                            await onLog('warn', `⚠️ Cleared expired GitHub token. Please reconnect your GitHub account in Settings.`);
+                        } catch (dbErr) {
+                            logger.error('Failed to clear expired github token:', dbErr);
+                        }
+                    }
+                    
+                    throw new Error('GitHub authentication failed. Please reconnect your GitHub account in Dashboard -> Settings.');
+                }
+
                 retries--;
                 if (retries > 0) {
                     await onLog('warn', `Git clone failed: ${error.message}. Retrying... (${retries} attempts left)`);

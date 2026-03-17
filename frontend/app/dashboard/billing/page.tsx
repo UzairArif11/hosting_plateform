@@ -183,7 +183,10 @@ export default function BillingPage() {
     const handlePayoneerCheckout = async () => {
         setPaymentLoading(true);
         try {
-            const res = await api.post('/billing/create-session', { planId: selectedPlan.id });
+            const res = await api.post('/billing/create-session', { 
+                planId: selectedPlan.id,
+                billingPeriod: selectedBillingPeriod 
+            });
             if (res.data.success && res.data.session?.checkoutUrl) {
                 window.location.href = res.data.session.checkoutUrl;
             } else {
