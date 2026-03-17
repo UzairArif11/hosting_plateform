@@ -22,8 +22,11 @@ const buildQueue = new Queue('deployments', {
     }
 });
 
-// Job processor
-buildQueue.process(async (job) => {
+// Configurable build concurrency (default: 2 parallel builds)
+const BUILD_CONCURRENCY = parseInt(process.env.BUILD_CONCURRENCY, 10) || 2;
+
+// Job processor with configurable concurrency
+buildQueue.process(BUILD_CONCURRENCY, async (job) => {
     const { deploymentId, projectId, userId } = job.data;
 
     logger.info(`Processing deployment job: ${deploymentId}`, {

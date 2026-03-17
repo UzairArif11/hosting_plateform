@@ -23,11 +23,38 @@ function verifyGitHubSignature(req, secret) {
 
 /**
  * POST /api/webhooks/github - Handle GitHub webhooks
+ * Supports per-project webhook secrets with global fallback
  */
 router.post('/github', express.json(), async (req, res) => {
   try {
     const event = req.headers['x-github-event'];
     const payload = req.body;
+
+    // Identify the repository from the payload
+    const repoFullName = payload.repository?.full_name;
+
+    // Look up the project to get per-project webhook secret
+    let projectSecret = null;
+    if (repoFullName) {
+      const project = await Project.findOne({ 'repository.fullName': repoFullName }).select('webhookSecret');
+      if (project?.webhookSecret) {
+        projectSecret = project.webhookSecret;
+      }
+    }
+
+    // Verify signature: prefer per-project secret, fall back to global
+    const secret = projectSecret || process.env.GITHUB_WEBHOOK_SECRET;
+    if (secret) {
+      if (!verifyGitHubSignature(req, secret)) {
+        // If per-project secret failed, also try global as fallback
+        // (in case project was recently migrated but GitHub still uses old secret)
+        const globalSecret = process.env.GITHUB_WEBHOOK_SECRET;
+        if (!projectSecret || !globalSecret || !verifyGitHubSignature(req, globalSecret)) {
+          logger.error('GitHub webhook: Invalid signature', { repo: repoFullName });
+          return res.status(401).json({ error: 'Invalid signature' });
+        }
+      }
+    }
 
     // Quick acknowledgment
     res.status(200).json({ received: true });
@@ -73,7 +100,7 @@ async function handlePullRequest(payload) {
 
   // Handle different PR actions
   if (action === 'opened' || action === 'synchronize') {
-    await createPreviewDeployment(project, pr);
+    await createPreviewDeployment(project, pr, action);
   } else if (action === 'closed') {
     await cleanupPreviewDeployment(project, pr);
   }
@@ -82,7 +109,7 @@ async function handlePullRequest(payload) {
 /**
  * Create preview deployment for PR
  */
-async function createPreviewDeployment(project, pr) {
+async function createPreviewDeployment(project, pr, action) {
   try {
     const prNumber = pr.number;
     const branch = pr.head.ref;
@@ -180,9 +207,17 @@ async function cleanupPreviewDeployment(project, pr) {
       // Stop and remove container
       if (deployment.containerId) {
         const docker = require('../services/docker');
+        const { ORACLE_SERVERS } = require('../services/containerOrchestrator');
+        
+        // Resolve target host for remote deployments (EC2/EC3)
+        let host = null;
+        if (deployment.serverKey && ORACLE_SERVERS[deployment.serverKey]) {
+          host = ORACLE_SERVERS[deployment.serverKey].host;
+        }
+
         try {
-          await docker.stopContainer(deployment.containerId);
-          await docker.removeContainer(deployment.containerId);
+          await docker.stopContainer(deployment.containerId, host);
+          await docker.removeContainer(deployment.containerId, host);
         } catch (err) {
           logger.warn(`Failed to cleanup container: ${err.message}`);
         }

@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const crypto = require('crypto');
 
 const projectSchema = new mongoose.Schema({
   name: {
@@ -302,6 +303,12 @@ const projectSchema = new mongoose.Schema({
       },
       trackingId: String
     }
+  },
+
+  // Per-project webhook secret for GitHub signature verification
+  webhookSecret: {
+    type: String,
+    default: null
   }
 }, {
   timestamps: true,
@@ -390,6 +397,11 @@ projectSchema.pre('save', async function (next) {
     }
 
     this.slug = slug;
+  }
+
+  // Auto-generate webhook secret for new projects
+  if (this.isNew && !this.webhookSecret) {
+    this.webhookSecret = crypto.randomBytes(32).toString('hex');
   }
 
   // Update last activity

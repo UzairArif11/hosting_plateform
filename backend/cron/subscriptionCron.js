@@ -54,16 +54,17 @@ const checkSubscriptions = async () => {
     // STEP 1: Warning emails 10 days before expiry
     // ──────────────────────────────────────────────
     const tenDaysFromNow = new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000);
-    const warningUsers = await User.find({
+    const warningCursor = User.find({
       subscriptionStatus: 'active',
       planExpiresAt: { $lte: tenDaysFromNow, $gt: now },
       $or: [
         { lastRenewalReminder: null },
         { lastRenewalReminder: { $lt: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000) } }
       ]
-    }).populate('plan');
+    }).populate('plan').cursor();
 
-    for (const user of warningUsers) {
+    let warningCount = 0;
+    for await (const user of warningCursor) {
       try {
         const daysLeft = Math.ceil((user.planExpiresAt - now) / (1000 * 60 * 60 * 24));
         const html = loadTemplate('renewalWarning', {
@@ -79,6 +80,7 @@ const checkSubscriptions = async () => {
         user.lastRenewalReminder = now;
         await user.save();
         logger.info(`[SUBSCRIPTION] Warning sent to ${user.email} — ${daysLeft} days left`);
+        warningCount++;
       } catch (err) {
         logger.error(`[SUBSCRIPTION] Error processing warning for ${user.email}:`, err.message);
       }
@@ -87,13 +89,14 @@ const checkSubscriptions = async () => {
     // ──────────────────────────────────────────────
     // STEP 2: Expired subscriptions → enter grace period
     // ──────────────────────────────────────────────
-    const expiredUsers = await User.find({
+    const expiredCursor = User.find({
       subscriptionStatus: 'active',
       planExpiresAt: { $lte: now },
       gracePeriodEndsAt: null
-    }).populate('plan');
+    }).populate('plan').cursor();
 
-    for (const user of expiredUsers) {
+    let expiredCount = 0;
+    for await (const user of expiredCursor) {
       try {
         let graceDays = 10;
         if (user.plan?.billingPeriods?.length > 0 && user.billingPeriod) {
@@ -116,6 +119,7 @@ const checkSubscriptions = async () => {
 
         await sendEmail(user.email, `🔴 Subscription expired — ${graceDays}-day grace period started`, html);
         logger.info(`[SUBSCRIPTION] Grace period started for ${user.email} — ends ${gracePeriodEnd.toLocaleDateString()}`);
+        expiredCount++;
       } catch (err) {
         logger.error(`[SUBSCRIPTION] Error processing expired user ${user.email}:`, err.message);
       }
@@ -124,16 +128,17 @@ const checkSubscriptions = async () => {
     // ──────────────────────────────────────────────
     // STEP 3: Grace period reminders every 3 days
     // ──────────────────────────────────────────────
-    const gracePeriodUsers = await User.find({
+    const graceCursor = User.find({
       subscriptionStatus: 'past_due',
       gracePeriodEndsAt: { $gt: now },
       $or: [
         { lastGracePeriodReminder: null },
         { lastGracePeriodReminder: { $lt: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000) } }
       ]
-    });
+    }).cursor();
 
-    for (const user of gracePeriodUsers) {
+    let graceCount = 0;
+    for await (const user of graceCursor) {
       try {
         const daysLeft = Math.ceil((user.gracePeriodEndsAt - now) / (1000 * 60 * 60 * 24));
         const html = loadTemplate('gracePeriodReminder', {
@@ -147,6 +152,7 @@ const checkSubscriptions = async () => {
         user.lastGracePeriodReminder = now;
         await user.save();
         logger.info(`[SUBSCRIPTION] Grace reminder sent to ${user.email} — ${daysLeft} days left`);
+        graceCount++;
       } catch (err) {
         logger.error(`[SUBSCRIPTION] Error processing grace reminder for ${user.email}:`, err.message);
       }
@@ -158,12 +164,13 @@ const checkSubscriptions = async () => {
     // ──────────────────────────────────────────────
     const { suspendUserContainer } = require('../services/freeTierContainer');
 
-    const suspendUsers = await User.find({
+    const suspendCursor = User.find({
       subscriptionStatus: 'past_due',
       gracePeriodEndsAt: { $lte: now }
-    });
+    }).cursor();
 
-    for (const user of suspendUsers) {
+    let suspendCount = 0;
+    for await (const user of suspendCursor) {
       try {
         // Stop Docker container (preserve data)
         await suspendUserContainer(user);
@@ -198,6 +205,7 @@ const checkSubscriptions = async () => {
 
         await sendEmail(user.email, `🚫 Account Suspended — Subscription not renewed`, html);
         logger.info(`[SUBSCRIPTION] Account suspended: ${user.email}${user.scheduledDeletionAt ? ` (deletion: ${user.scheduledDeletionAt.toLocaleDateString()})` : ' (no auto-delete)'}`);
+        suspendCount++;
       } catch (err) {
         logger.error(`[SUBSCRIPTION] Error suspending user ${user.email}:`, err.message);
       }
@@ -211,16 +219,16 @@ const checkSubscriptions = async () => {
       const warningDays = settings.accountDeletion.warningEmailDays || 10;
       const warningThreshold = new Date(now.getTime() + warningDays * 24 * 60 * 60 * 1000);
 
-      const deletionWarningUsers = await User.find({
+      const deletionWarningCursor = User.find({
         status: 'suspended',
         scheduledDeletionAt: { $lte: warningThreshold, $gt: now },
         $or: [
           { lastDeletionWarning: null },
           { lastDeletionWarning: { $lt: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000) } }
         ]
-      });
+      }).cursor();
 
-      for (const user of deletionWarningUsers) {
+      for await (const user of deletionWarningCursor) {
         try {
           const daysLeft = Math.ceil((user.scheduledDeletionAt - now) / (1000 * 60 * 60 * 24));
           const html = loadTemplate('deletionWarning', {
@@ -235,6 +243,7 @@ const checkSubscriptions = async () => {
           user.lastDeletionWarning = now;
           await user.save();
           logger.info(`[SUBSCRIPTION] Deletion warning sent to ${user.email} — ${daysLeft} days until deletion`);
+          deletionWarningCount++;
         } catch (err) {
           logger.error(`[SUBSCRIPTION] Error sending deletion warning to ${user.email}:`, err.message);
         }
@@ -250,12 +259,13 @@ const checkSubscriptions = async () => {
       const Project = require('../models/Project');
       const Deployment = require('../models/Deployment');
 
-      const deleteUsers = await User.find({
+      const deleteCursor = User.find({
         status: 'suspended',
         scheduledDeletionAt: { $lte: now }
-      });
+      }).cursor();
 
-      for (const user of deleteUsers) {
+      let deletedCount = 0;
+      for await (const user of deleteCursor) {
         try {
           logger.info(`[SUBSCRIPTION] Auto-deleting account: ${user.email}`);
 
@@ -288,6 +298,7 @@ const checkSubscriptions = async () => {
           );
 
           logger.info(`[SUBSCRIPTION] Account deleted: ${user.email}`);
+          deletedCount++;
         } catch (err) {
           logger.error(`[SUBSCRIPTION] Error auto-deleting user ${user.email}:`, err.message);
         }
@@ -298,12 +309,12 @@ const checkSubscriptions = async () => {
     // STEP 7: Plan downgrades at period end
     // ──────────────────────────────────────────────
     const Plan = require('../models/Plan');
-    const downgradeUsers = await User.find({
+    const downgradeCursor = User.find({
       scheduledDowngradeTo: { $ne: null },
       scheduledDowngradeAt: { $lte: now }
-    }).populate('scheduledDowngradeTo');
+    }).populate('scheduledDowngradeTo').cursor();
 
-    for (const user of downgradeUsers) {
+    for await (const user of downgradeCursor) {
       try {
         const newPlan = user.scheduledDowngradeTo;
         if (!newPlan) continue;
@@ -348,7 +359,7 @@ const checkSubscriptions = async () => {
       }
     }
 
-    logger.info(`[SUBSCRIPTION] Check complete: ${warningUsers.length} warnings, ${expiredUsers.length} new grace, ${gracePeriodUsers.length} grace reminders, ${suspendUsers.length} suspended${settings.accountDeletion?.enabled ? `, deletion checks ran` : ''}`);
+    logger.info(`[SUBSCRIPTION] Check complete: ${warningCount} warnings, ${expiredCount} new grace, ${graceCount} grace reminders, ${suspendCount} suspended${settings.accountDeletion?.enabled ? `, deletion checks ran` : ''}`);
   } catch (error) {
     logger.error('[SUBSCRIPTION] Subscription check error:', error.message);
   }

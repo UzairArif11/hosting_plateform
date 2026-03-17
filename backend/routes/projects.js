@@ -568,6 +568,42 @@ router.delete('/:id', requireProjectAccess('admin'), async (req, res) => {
   }
 });
 
+// Get webhook secret for a project (so user can configure it in GitHub)
+router.get('/:id/webhook-secret', requireProjectAccess('admin'), async (req, res) => {
+  try {
+    const project = req.project;
+    res.json({
+      success: true,
+      webhookSecret: project.webhookSecret || null,
+      webhookUrl: `${process.env.BACKEND_URL || process.env.API_URL}/api/webhooks/github`
+    });
+  } catch (error) {
+    logger.error('Get webhook secret error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to get webhook secret' });
+  }
+});
+
+// Regenerate webhook secret for a project
+router.post('/:id/regenerate-webhook-secret', requireProjectAccess('admin'), async (req, res) => {
+  try {
+    const crypto = require('crypto');
+    const project = req.project;
+    project.webhookSecret = crypto.randomBytes(32).toString('hex');
+    await project.save();
+
+    logger.info(`Webhook secret regenerated for project ${project._id}`);
+
+    res.json({
+      success: true,
+      webhookSecret: project.webhookSecret,
+      message: 'Webhook secret regenerated. Update this in your GitHub repository webhook settings.'
+    });
+  } catch (error) {
+    logger.error('Regenerate webhook secret error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to regenerate webhook secret' });
+  }
+});
+
 // Add domain to project
 router.post('/:id/domains', requireProjectAccess('admin'), async (req, res) => {
   try {
