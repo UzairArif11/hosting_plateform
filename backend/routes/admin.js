@@ -13,7 +13,6 @@ const logger = require('../utils/logger');
 const rateLimit = require('express-rate-limit');
 const { getRemoteSystemStats, getServerUtilization, getRemoteDockerStats, getRemoteContainerLogs, ORACLE_SERVERS } = require('../services/containerOrchestrator');
 
-const router = express.Router();
 
 // --- Rate Limiters ---
 // Strict limiter for test deployments to prevent Docker container spam
