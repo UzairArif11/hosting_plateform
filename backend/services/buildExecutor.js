@@ -481,12 +481,13 @@ async function cloneRepository(deployment, project, user, onLog) {
                 break;
             } catch (error) {
                 lastError = error;
+                const errorStderr = error.stderr || '';
                 
                 // Detect GitHub token expiry or unauthorized access
                 if (error.message.includes('Authentication failed') || 
                     error.message.includes('401') || 
                     error.message.includes('repository not found') ||
-                    (stderr && (stderr.includes('Authentication failed') || stderr.includes('Repository not found')))) {
+                    (errorStderr.includes('Authentication failed') || errorStderr.includes('Repository not found'))) {
                     
                     await onLog('error', `❌ GitHub authentication failed. Your token may have expired or been revoked.`);
                     
