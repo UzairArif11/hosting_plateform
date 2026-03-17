@@ -64,20 +64,24 @@ const checkSubscriptions = async () => {
     }).populate('plan');
 
     for (const user of warningUsers) {
-      const daysLeft = Math.ceil((user.planExpiresAt - now) / (1000 * 60 * 60 * 24));
-      const html = loadTemplate('renewalWarning', {
-        platformName,
-        userName: user.displayName || user.username,
-        planName: user.plan?.displayName || 'your plan',
-        daysLeft: String(daysLeft),
-        expiryDate: user.planExpiresAt.toLocaleDateString(),
-        renewUrl
-      });
+      try {
+        const daysLeft = Math.ceil((user.planExpiresAt - now) / (1000 * 60 * 60 * 24));
+        const html = loadTemplate('renewalWarning', {
+          platformName,
+          userName: user.displayName || user.username,
+          planName: user.plan?.displayName || 'your plan',
+          daysLeft: String(daysLeft),
+          expiryDate: user.planExpiresAt.toLocaleDateString(),
+          renewUrl
+        });
 
-      await sendEmail(user.email, `⚠️ Your subscription expires in ${daysLeft} days`, html);
-      user.lastRenewalReminder = now;
-      await user.save();
-      logger.info(`[SUBSCRIPTION] Warning sent to ${user.email} — ${daysLeft} days left`);
+        await sendEmail(user.email, `⚠️ Your subscription expires in ${daysLeft} days`, html);
+        user.lastRenewalReminder = now;
+        await user.save();
+        logger.info(`[SUBSCRIPTION] Warning sent to ${user.email} — ${daysLeft} days left`);
+      } catch (err) {
+        logger.error(`[SUBSCRIPTION] Error processing warning for ${user.email}:`, err.message);
+      }
     }
 
     // ──────────────────────────────────────────────
@@ -90,27 +94,31 @@ const checkSubscriptions = async () => {
     }).populate('plan');
 
     for (const user of expiredUsers) {
-      let graceDays = 10;
-      if (user.plan?.billingPeriods?.length > 0 && user.billingPeriod) {
-        const periodConfig = user.plan.billingPeriods.find(p => p.months === user.billingPeriod);
-        if (periodConfig?.gracePeriodDays) graceDays = periodConfig.gracePeriodDays;
+      try {
+        let graceDays = 10;
+        if (user.plan?.billingPeriods?.length > 0 && user.billingPeriod) {
+          const periodConfig = user.plan.billingPeriods.find(p => p.months === user.billingPeriod);
+          if (periodConfig?.gracePeriodDays) graceDays = periodConfig.gracePeriodDays;
+        }
+        const gracePeriodEnd = new Date(now.getTime() + graceDays * 24 * 60 * 60 * 1000);
+        user.subscriptionStatus = 'past_due';
+        user.gracePeriodEndsAt = gracePeriodEnd;
+        user.lastGracePeriodReminder = null;
+        await user.save();
+
+        const html = loadTemplate('subscriptionExpired', {
+          platformName,
+          userName: user.displayName || user.username,
+          graceDays: String(graceDays),
+          gracePeriodEnd: gracePeriodEnd.toLocaleDateString(),
+          renewUrl
+        });
+
+        await sendEmail(user.email, `🔴 Subscription expired — ${graceDays}-day grace period started`, html);
+        logger.info(`[SUBSCRIPTION] Grace period started for ${user.email} — ends ${gracePeriodEnd.toLocaleDateString()}`);
+      } catch (err) {
+        logger.error(`[SUBSCRIPTION] Error processing expired user ${user.email}:`, err.message);
       }
-      const gracePeriodEnd = new Date(now.getTime() + graceDays * 24 * 60 * 60 * 1000);
-      user.subscriptionStatus = 'past_due';
-      user.gracePeriodEndsAt = gracePeriodEnd;
-      user.lastGracePeriodReminder = null;
-      await user.save();
-
-      const html = loadTemplate('subscriptionExpired', {
-        platformName,
-        userName: user.displayName || user.username,
-        graceDays: String(graceDays),
-        gracePeriodEnd: gracePeriodEnd.toLocaleDateString(),
-        renewUrl
-      });
-
-      await sendEmail(user.email, `🔴 Subscription expired — ${graceDays}-day grace period started`, html);
-      logger.info(`[SUBSCRIPTION] Grace period started for ${user.email} — ends ${gracePeriodEnd.toLocaleDateString()}`);
     }
 
     // ──────────────────────────────────────────────
@@ -126,18 +134,22 @@ const checkSubscriptions = async () => {
     });
 
     for (const user of gracePeriodUsers) {
-      const daysLeft = Math.ceil((user.gracePeriodEndsAt - now) / (1000 * 60 * 60 * 24));
-      const html = loadTemplate('gracePeriodReminder', {
-        platformName,
-        userName: user.displayName || user.username,
-        daysLeft: String(daysLeft),
-        renewUrl
-      });
+      try {
+        const daysLeft = Math.ceil((user.gracePeriodEndsAt - now) / (1000 * 60 * 60 * 24));
+        const html = loadTemplate('gracePeriodReminder', {
+          platformName,
+          userName: user.displayName || user.username,
+          daysLeft: String(daysLeft),
+          renewUrl
+        });
 
-      await sendEmail(user.email, `⏰ Grace period: ${daysLeft} days left to renew`, html);
-      user.lastGracePeriodReminder = now;
-      await user.save();
-      logger.info(`[SUBSCRIPTION] Grace reminder sent to ${user.email} — ${daysLeft} days left`);
+        await sendEmail(user.email, `⏰ Grace period: ${daysLeft} days left to renew`, html);
+        user.lastGracePeriodReminder = now;
+        await user.save();
+        logger.info(`[SUBSCRIPTION] Grace reminder sent to ${user.email} — ${daysLeft} days left`);
+      } catch (err) {
+        logger.error(`[SUBSCRIPTION] Error processing grace reminder for ${user.email}:`, err.message);
+      }
     }
 
     // ──────────────────────────────────────────────
@@ -152,39 +164,43 @@ const checkSubscriptions = async () => {
     });
 
     for (const user of suspendUsers) {
-      // Stop Docker container (preserve data)
-      await suspendUserContainer(user);
+      try {
+        // Stop Docker container (preserve data)
+        await suspendUserContainer(user);
 
-      user.status = 'suspended';
-      user.subscriptionStatus = 'expired';
-      user.suspendedAt = now;
-      user.suspensionReason = 'Subscription expired — grace period ended';
-      user.autoSuspended = true;
+        user.status = 'suspended';
+        user.subscriptionStatus = 'expired';
+        user.suspendedAt = now;
+        user.suspensionReason = 'Subscription expired — grace period ended';
+        user.autoSuspended = true;
 
-      // Schedule deletion if admin has configured it
-      if (settings.accountDeletion?.enabled && settings.accountDeletion?.daysAfterSuspension > 0) {
-        const deletionDate = new Date(now.getTime() + settings.accountDeletion.daysAfterSuspension * 24 * 60 * 60 * 1000);
-        user.scheduledDeletionAt = deletionDate;
-        user.lastDeletionWarning = null;
+        // Schedule deletion if admin has configured it
+        if (settings.accountDeletion?.enabled && settings.accountDeletion?.daysAfterSuspension > 0) {
+          const deletionDate = new Date(now.getTime() + settings.accountDeletion.daysAfterSuspension * 24 * 60 * 60 * 1000);
+          user.scheduledDeletionAt = deletionDate;
+          user.lastDeletionWarning = null;
+        }
+
+        await user.save();
+
+        let deletionNotice = 'Your data will be preserved indefinitely. Renew anytime to reactivate.';
+        if (user.scheduledDeletionAt) {
+          const delDays = settings.accountDeletion.daysAfterSuspension;
+          deletionNotice = `If not renewed within ${delDays} days, your account and data will be permanently deleted on ${user.scheduledDeletionAt.toLocaleDateString()}.`;
+        }
+
+        const html = loadTemplate('accountSuspended', {
+          platformName,
+          userName: user.displayName || user.username,
+          renewUrl,
+          deletionNotice
+        });
+
+        await sendEmail(user.email, `🚫 Account Suspended — Subscription not renewed`, html);
+        logger.info(`[SUBSCRIPTION] Account suspended: ${user.email}${user.scheduledDeletionAt ? ` (deletion: ${user.scheduledDeletionAt.toLocaleDateString()})` : ' (no auto-delete)'}`);
+      } catch (err) {
+        logger.error(`[SUBSCRIPTION] Error suspending user ${user.email}:`, err.message);
       }
-
-      await user.save();
-
-      let deletionNotice = 'Your data will be preserved indefinitely. Renew anytime to reactivate.';
-      if (user.scheduledDeletionAt) {
-        const delDays = settings.accountDeletion.daysAfterSuspension;
-        deletionNotice = `If not renewed within ${delDays} days, your account and data will be permanently deleted on ${user.scheduledDeletionAt.toLocaleDateString()}.`;
-      }
-
-      const html = loadTemplate('accountSuspended', {
-        platformName,
-        userName: user.displayName || user.username,
-        renewUrl,
-        deletionNotice
-      });
-
-      await sendEmail(user.email, `🚫 Account Suspended — Subscription not renewed`, html);
-      logger.info(`[SUBSCRIPTION] Account suspended: ${user.email}${user.scheduledDeletionAt ? ` (deletion: ${user.scheduledDeletionAt.toLocaleDateString()})` : ' (no auto-delete)'}`);
     }
 
     // ──────────────────────────────────────────────
@@ -205,19 +221,23 @@ const checkSubscriptions = async () => {
       });
 
       for (const user of deletionWarningUsers) {
-        const daysLeft = Math.ceil((user.scheduledDeletionAt - now) / (1000 * 60 * 60 * 24));
-        const html = loadTemplate('deletionWarning', {
-          platformName,
-          userName: user.displayName || user.username,
-          daysLeft: String(daysLeft),
-          deletionDate: user.scheduledDeletionAt.toLocaleDateString(),
-          renewUrl
-        });
+        try {
+          const daysLeft = Math.ceil((user.scheduledDeletionAt - now) / (1000 * 60 * 60 * 24));
+          const html = loadTemplate('deletionWarning', {
+            platformName,
+            userName: user.displayName || user.username,
+            daysLeft: String(daysLeft),
+            deletionDate: user.scheduledDeletionAt.toLocaleDateString(),
+            renewUrl
+          });
 
-        await sendEmail(user.email, `⚠️ URGENT: Account will be deleted in ${daysLeft} days`, html);
-        user.lastDeletionWarning = now;
-        await user.save();
-        logger.info(`[SUBSCRIPTION] Deletion warning sent to ${user.email} — ${daysLeft} days until deletion`);
+          await sendEmail(user.email, `⚠️ URGENT: Account will be deleted in ${daysLeft} days`, html);
+          user.lastDeletionWarning = now;
+          await user.save();
+          logger.info(`[SUBSCRIPTION] Deletion warning sent to ${user.email} — ${daysLeft} days until deletion`);
+        } catch (err) {
+          logger.error(`[SUBSCRIPTION] Error sending deletion warning to ${user.email}:`, err.message);
+        }
       }
     }
 
@@ -236,37 +256,41 @@ const checkSubscriptions = async () => {
       });
 
       for (const user of deleteUsers) {
-        logger.info(`[SUBSCRIPTION] Auto-deleting account: ${user.email}`);
+        try {
+          logger.info(`[SUBSCRIPTION] Auto-deleting account: ${user.email}`);
 
-        // Remove Docker container and all data
-        await removeUserContainer(user);
+          // Remove Docker container and all data
+          await removeUserContainer(user);
 
-        // Delete all projects and deployments
-        await Project.deleteMany({ owner: user._id });
-        await Deployment.deleteMany({ userId: user._id });
+          // Delete all projects and deployments
+          await Project.deleteMany({ owner: user._id });
+          await Deployment.deleteMany({ userId: user._id });
 
-        // Mark user as deleted (soft delete — keep email for records)
-        user.status = 'deleted';
-        user.subscriptionStatus = 'cancelled';
-        user.resourcesDeleted = true;
-        user.resourcesDeletedAt = now;
-        user.containerName = null;
-        user.containerId = null;
-        user.assignedServer = null;
-        user.assignedPort = null;
-        await user.save();
+          // Mark user as deleted (soft delete — keep email for records)
+          user.status = 'deleted';
+          user.subscriptionStatus = 'cancelled';
+          user.resourcesDeleted = true;
+          user.resourcesDeletedAt = now;
+          user.containerName = null;
+          user.containerId = null;
+          user.assignedServer = null;
+          user.assignedPort = null;
+          await user.save();
 
-        await sendEmail(
-          user.email,
-          `Account Deleted — ${platformName}`,
-          loadTemplate('accountDeleted', {
-            platformName,
-            userName: user.displayName || user.username,
-            signupUrl: `${process.env.FRONTEND_URL}/register`
-          })
-        );
+          await sendEmail(
+            user.email,
+            `Account Deleted — ${platformName}`,
+            loadTemplate('accountDeleted', {
+              platformName,
+              userName: user.displayName || user.username,
+              signupUrl: `${process.env.FRONTEND_URL}/register`
+            })
+          );
 
-        logger.info(`[SUBSCRIPTION] Account deleted: ${user.email}`);
+          logger.info(`[SUBSCRIPTION] Account deleted: ${user.email}`);
+        } catch (err) {
+          logger.error(`[SUBSCRIPTION] Error auto-deleting user ${user.email}:`, err.message);
+        }
       }
     }
 
@@ -280,44 +304,48 @@ const checkSubscriptions = async () => {
     }).populate('scheduledDowngradeTo');
 
     for (const user of downgradeUsers) {
-      const newPlan = user.scheduledDowngradeTo;
-      if (!newPlan) continue;
+      try {
+        const newPlan = user.scheduledDowngradeTo;
+        if (!newPlan) continue;
 
-      logger.info(`[SUBSCRIPTION] Downgrading ${user.email} to ${newPlan.displayName}`);
+        logger.info(`[SUBSCRIPTION] Downgrading ${user.email} to ${newPlan.displayName}`);
 
-      user.plan = newPlan._id;
-      user.resourceAllocation = {
-        cpu: newPlan.resources.cpu,
-        ram: newPlan.resources.ram,
-        storage: newPlan.resources.storage,
-        bandwidth: newPlan.resources.bandwidth || 1024,
-        projects: newPlan.resources.projects || 10
-      };
-      user.displayedResources = {
-        cpu: newPlan.displayResources?.cpu || newPlan.resources.cpu,
-        ram: newPlan.displayResources?.ram || newPlan.resources.ram,
-        storage: newPlan.displayResources?.storage || newPlan.resources.storage,
-        bandwidth: newPlan.displayResources?.bandwidth || newPlan.resources.bandwidth || 1024,
-        projects: newPlan.displayResources?.projects || newPlan.resources.projects || 10
-      };
-      user.scheduledDowngradeTo = null;
-      user.scheduledDowngradeAt = null;
-      await user.save();
+        user.plan = newPlan._id;
+        user.resourceAllocation = {
+          cpu: newPlan.resources.cpu,
+          ram: newPlan.resources.ram,
+          storage: newPlan.resources.storage,
+          bandwidth: newPlan.resources.bandwidth || 1024,
+          projects: newPlan.resources.projects || 10
+        };
+        user.displayedResources = {
+          cpu: newPlan.displayResources?.cpu || newPlan.resources.cpu,
+          ram: newPlan.displayResources?.ram || newPlan.resources.ram,
+          storage: newPlan.displayResources?.storage || newPlan.resources.storage,
+          bandwidth: newPlan.displayResources?.bandwidth || newPlan.resources.bandwidth || 1024,
+          projects: newPlan.displayResources?.projects || newPlan.resources.projects || 10
+        };
+        user.scheduledDowngradeTo = null;
+        user.scheduledDowngradeAt = null;
+        await user.save();
 
-      await sendEmail(
-        user.email,
-        `Plan changed to ${newPlan.displayName}`,
-        loadTemplate('renewalWarning', {
-          platformName,
-          userName: user.displayName || user.username,
-          planName: newPlan.displayName,
-          daysLeft: 'N/A',
-          expiryDate: 'Your plan has been changed as requested.',
-          renewUrl
-        })
-      );
+        await sendEmail(
+          user.email,
+          `Plan changed to ${newPlan.displayName}`,
+          loadTemplate('renewalWarning', {
+            platformName,
+            userName: user.displayName || user.username,
+            planName: newPlan.displayName,
+            daysLeft: 'N/A',
+            expiryDate: 'Your plan has been changed as requested.',
+            renewUrl
+          })
+        );
 
-      logger.info(`[SUBSCRIPTION] Downgrade complete: ${user.email} → ${newPlan.displayName}`);
+        logger.info(`[SUBSCRIPTION] Downgrade complete: ${user.email} → ${newPlan.displayName}`);
+      } catch (err) {
+        logger.error(`[SUBSCRIPTION] Error downgrading user ${user.email}:`, err.message);
+      }
     }
 
     logger.info(`[SUBSCRIPTION] Check complete: ${warningUsers.length} warnings, ${expiredUsers.length} new grace, ${gracePeriodUsers.length} grace reminders, ${suspendUsers.length} suspended${settings.accountDeletion?.enabled ? `, deletion checks ran` : ''}`);
