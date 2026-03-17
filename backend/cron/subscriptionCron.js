@@ -243,7 +243,6 @@ const checkSubscriptions = async () => {
           user.lastDeletionWarning = now;
           await user.save();
           logger.info(`[SUBSCRIPTION] Deletion warning sent to ${user.email} — ${daysLeft} days until deletion`);
-          deletionWarningCount++;
         } catch (err) {
           logger.error(`[SUBSCRIPTION] Error sending deletion warning to ${user.email}:`, err.message);
         }
