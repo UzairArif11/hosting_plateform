@@ -7,7 +7,6 @@ const Project = require('../models/Project');
 const Deployment = require('../models/Deployment');
 const Plan = require('../models/Plan');
 const ServerCapacity = require('../models/ServerCapacity');
-const EmailService = require('../services/email');
 const docker = require('../services/docker');
 const logger = require('../utils/logger');
 const rateLimit = require('express-rate-limit');
