@@ -210,6 +210,7 @@ const getCurrentUser = async (req, res) => {
         avatar: user.avatar,
         role: user.role,
         githubId: user.githubId || null,
+        githubConnected: !!user.githubAccessToken,
         googleId: user.googleId || null,
         provider: user.provider || null,
         status: user.status,

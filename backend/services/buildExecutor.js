@@ -444,7 +444,7 @@ async function cloneRepository(deployment, project, user, onLog) {
         // Get repository URL with token
         // For template deployments, use platform token FIRST (user's token may not have access to template repos)
         const isTemplateDeployment = deployment.metadata?.isTemplateDeployment;
-        const githubToken = isTemplateDeployment
+        let githubToken = isTemplateDeployment
             ? (process.env.GITHUB_API_TOKEN || user.githubAccessToken)
             : (user.githubAccessToken || process.env.GITHUB_API_TOKEN);
 
@@ -453,6 +453,56 @@ async function cloneRepository(deployment, project, user, onLog) {
         }
 
         const repoUrl = project.repository.url;
+
+        // Validate GitHub token before cloning (only for user tokens, not platform token)
+        if (githubToken && githubToken === user.githubAccessToken) {
+            try {
+                const { execSync } = require('child_process');
+                // Quick validation: check if token can access GitHub API
+                const https = require('https');
+                const tokenValid = await new Promise((resolve) => {
+                    const req = https.get('https://api.github.com/user', {
+                        headers: {
+                            'Authorization': `Bearer ${githubToken}`,
+                            'User-Agent': 'Vercel-Clone-Platform',
+                            'Accept': 'application/vnd.github.v3+json'
+                        }
+                    }, (res) => {
+                        resolve(res.statusCode === 200);
+                    });
+                    req.on('error', () => resolve(false));
+                    req.setTimeout(5000, () => { req.destroy(); resolve(false); });
+                });
+
+                if (!tokenValid) {
+                    await onLog('warn', `⚠️ GitHub token is invalid or expired. Attempting with platform token...`);
+                    
+                    // Clear the invalid token from DB
+                    try {
+                        const User = require('../models/User');
+                        await User.findByIdAndUpdate(user._id, { $unset: { githubAccessToken: "" } });
+                        await onLog('warn', `⚠️ Cleared invalid GitHub token. Please reconnect your GitHub account in Settings.`);
+                    } catch (dbErr) {
+                        logger.error('Failed to clear invalid github token:', dbErr);
+                    }
+
+                    // Fall back to platform token
+                    if (process.env.GITHUB_API_TOKEN) {
+                        githubToken = process.env.GITHUB_API_TOKEN;
+                        await onLog('info', `Using platform token as fallback...`);
+                    } else {
+                        throw new Error('GitHub token is invalid and no platform fallback token available. Please reconnect your GitHub account in Dashboard -> Settings.');
+                    }
+                }
+            } catch (validationErr) {
+                if (validationErr.message.includes('GitHub token is invalid')) {
+                    throw validationErr; // Re-throw our own error
+                }
+                // If validation itself fails (network issue), proceed with the token anyway
+                await onLog('warn', `Token pre-validation skipped: ${validationErr.message}`);
+            }
+        }
+
         // If we have a token, use authenticated clone. Otherwise (template deploy), clone public repo without auth.
         const repoWithAuth = githubToken
             ? repoUrl.replace('https://github.com/', `https://${githubToken}@github.com/`)
@@ -460,7 +510,6 @@ async function cloneRepository(deployment, project, user, onLog) {
 
         await onLog('info', `Cloning ${project.repository.fullName}...`);
 
-        // Clone repository
         // Clone repository with retries
         let retries = 3;
         let lastError = null;
@@ -476,32 +525,37 @@ async function cloneRepository(deployment, project, user, onLog) {
                     await onLog('warn', stderr);
                 }
 
-                // If successful, break format loop
+                // If successful, break from loop
                 lastError = null;
                 break;
             } catch (error) {
                 lastError = error;
                 const errorStderr = error.stderr || '';
+                const errorMsg = (error.message + ' ' + errorStderr).toLowerCase();
                 
-                // Detect GitHub token expiry or unauthorized access
-                if (error.message.includes('Authentication failed') || 
-                    error.message.includes('401') || 
-                    error.message.includes('repository not found') ||
-                    (errorStderr.includes('Authentication failed') || errorStderr.includes('Repository not found'))) {
-                    
-                    await onLog('error', `❌ GitHub authentication failed. Your token may have expired or been revoked.`);
-                    
-                    if (githubToken && user && !isTemplateDeployment) {
-                        try {
-                            const User = require('../models/User');
-                            await User.findByIdAndUpdate(user._id, { $unset: { githubAccessToken: "" } });
-                            await onLog('warn', `⚠️ Cleared expired GitHub token. Please reconnect your GitHub account in Settings.`);
-                        } catch (dbErr) {
-                            logger.error('Failed to clear expired github token:', dbErr);
-                        }
-                    }
-                    
+                // Check for ACTUAL authentication failures (401/403 from GitHub)
+                const isAuthFailure = errorMsg.includes('authentication failed') || 
+                    errorMsg.includes('could not read username') ||
+                    errorMsg.includes('invalid credentials');
+                
+                // Check for repository access issues (NOT the same as auth failure)
+                const isRepoNotFound = errorMsg.includes('repository not found') || 
+                    errorMsg.includes('does not exist') ||
+                    errorMsg.includes('could not find remote');
+                
+                if (isAuthFailure) {
+                    // Token is truly invalid — this shouldn't happen since we validated above,
+                    // but handle it just in case
+                    await onLog('error', `❌ GitHub authentication failed. Your token may have been revoked.`);
+                    await onLog('error', `Please reconnect your GitHub account in Dashboard -> Settings.`);
                     throw new Error('GitHub authentication failed. Please reconnect your GitHub account in Dashboard -> Settings.');
+                }
+                
+                if (isRepoNotFound) {
+                    // Repo doesn't exist or user doesn't have access — DO NOT clear the token
+                    await onLog('error', `❌ Repository "${project.repository.fullName}" not found or you don't have access.`);
+                    await onLog('error', `Please check that the repository exists and your GitHub account has access to it.`);
+                    throw new Error(`Repository "${project.repository.fullName}" not found or access denied. Please verify the repository exists and you have access.`);
                 }
 
                 retries--;
