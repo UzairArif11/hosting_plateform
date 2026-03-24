@@ -75,7 +75,7 @@ export default function TemplatesPage() {
         { id: 'dashboard', label: 'Dashboards' },
     ];
 
-    const userPlan = user?.plan?.name?.toLowerCase() || 'free';
+    const userPlan = (user?.plan?.name || user?.planType || 'free').toLowerCase();
 
     return (
         <div className="min-h-screen bg-black text-white">

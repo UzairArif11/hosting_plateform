@@ -130,7 +130,7 @@ async function checkAndSuspendExpiredSubscriptions() {
 }
 
 /**
- * Delete resources for users suspended > 7 days
+ * Delete resources for users suspended > 30 days
  * Runs daily via cron job
  */
 async function deleteResourcesForLongSuspended() {

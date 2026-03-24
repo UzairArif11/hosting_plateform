@@ -49,7 +49,7 @@ export default function DeployTemplatePage() {
     const [mode, setMode] = useState<'lite' | 'pro'>('lite');
 
     // Plan check
-    const userPlan = user?.plan?.name?.toLowerCase() || 'free';
+    const userPlan = (user?.plan?.name || user?.planType || 'free').toLowerCase();
     const minPlan = template?.minPlan || (template?.isPremium ? 'pro' : 'free');
     const userLevel = PLAN_LEVELS[userPlan] || 0;
     const requiredLevel = PLAN_LEVELS[minPlan] || 0;
