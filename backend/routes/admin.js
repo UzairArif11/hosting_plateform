@@ -68,8 +68,6 @@ router.get('/servers/:serverKey/containers/:containerId/logs', requireAuth, requ
 });
 
 // ==================== SERVER CAPACITY MANAGEMENT ====================
-const containerUpgrade = require('../services/containerUpgrade');
-const buildQueue = require('../services/buildQueue');
 
 // Get dashboard aggregated stats
 router.get('/dashboard-stats', requireAuth, requireAdmin, async (req, res) => {
