@@ -170,26 +170,52 @@ router.get('/domain/:serverKey', async (req, res) => {
 });
 
 
-// Get servers configuration
+// Get servers configuration with capacity data
 router.get('/servers', requireAuth, requireAdmin, async (req, res) => {
     try {
         const settings = await Settings.getSettings();
+        const ServerCapacity = require('../models/ServerCapacity');
 
-        // Construct detailed server info from Env + Settings
-        const servers = {
-            'EC2': {
-                domain: settings.serverDomains?.EC2 || process.env.EC2_DOMAIN || 'ec2.example.com',
-                ip: process.env.EC2_SERVER_IP || '123.45.67.89', // Mock if not set
-                sshKey: process.env.SSH_EC2_KEY ? 'Configured' : 'Missing',
-                status: 'active'
-            },
-            'EC3': {
-                domain: settings.serverDomains?.EC3 || process.env.EC3_DOMAIN || 'ec3.example.com',
-                ip: process.env.EC3_SERVER_IP || '98.76.54.32',
-                sshKey: process.env.SSH_EC3_KEY ? 'Configured' : 'Missing',
-                status: 'active'
-            }
-        };
+        // Build server list with env + DB capacity data
+        const serverKeys = ['EC2', 'EC3'];
+        const servers = {};
+
+        for (const key of serverKeys) {
+            const capacity = await ServerCapacity.findOne({ serverName: key });
+
+            servers[key] = {
+                domain: settings.serverDomains?.[key] || process.env[`${key}_DOMAIN`] || `${key.toLowerCase()}.example.com`,
+                ip: process.env[`${key}_SERVER_IP`] || 'Not configured',
+                sshKey: process.env[`SSH_${key}_KEY`] ? 'Configured' : 'Missing',
+                status: process.env[`${key}_SERVER_IP`] ? 'active' : 'inactive',
+                // Capacity info from DB (ServerCapacity model) or env vars as fallback
+                capacity: capacity ? {
+                    totalCPU: capacity.totalResources.cpu,
+                    totalRAM: capacity.totalResources.ram,
+                    totalStorage: capacity.totalResources.storage,
+                    allocatedCPU: capacity.allocatedResources.cpu,
+                    allocatedRAM: capacity.allocatedResources.ram,
+                    allocatedStorage: capacity.allocatedResources.storage,
+                    maxContainers: parseInt(process.env[`${key}_MAX_CONTAINERS`]) || 200,
+                    serverType: process.env[`${key}_SERVER_TYPE`] || 'shared_users',
+                    isActive: capacity.isActive,
+                    warnings: capacity.getWarnings(),
+                    lastUpdated: capacity.lastUpdated
+                } : {
+                    totalCPU: parseFloat(process.env[`${key}_TOTAL_CPU`]) || 4,
+                    totalRAM: parseFloat(process.env[`${key}_TOTAL_RAM`]) || 24,
+                    totalStorage: 200,
+                    allocatedCPU: 0,
+                    allocatedRAM: 0,
+                    allocatedStorage: 0,
+                    maxContainers: parseInt(process.env[`${key}_MAX_CONTAINERS`]) || 200,
+                    serverType: process.env[`${key}_SERVER_TYPE`] || 'shared_users',
+                    isActive: true,
+                    warnings: [],
+                    lastUpdated: null
+                }
+            };
+        }
 
         // Construct DNS instructions
         const dnsInstructions = {};
@@ -208,6 +234,52 @@ router.get('/servers', requireAuth, requireAdmin, async (req, res) => {
     } catch (error) {
         logger.error('Get servers error:', error);
         res.status(500).json({ error: 'Failed to get server configuration' });
+    }
+});
+
+// Update server capacity settings
+router.put('/servers/:serverKey', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const { serverKey } = req.params;
+        if (!['EC2', 'EC3'].includes(serverKey)) {
+            return res.status(400).json({ error: 'Invalid server key. Must be EC2 or EC3.' });
+        }
+
+        const { totalCPU, totalRAM, totalStorage, maxContainers, serverType, isActive } = req.body;
+        const ServerCapacity = require('../models/ServerCapacity');
+
+        // Upsert the server capacity record
+        const update = {};
+        if (totalCPU !== undefined) update['totalResources.cpu'] = parseFloat(totalCPU);
+        if (totalRAM !== undefined) update['totalResources.ram'] = parseFloat(totalRAM);
+        if (totalStorage !== undefined) update['totalResources.storage'] = parseFloat(totalStorage);
+        if (isActive !== undefined) update.isActive = isActive;
+        update.lastUpdated = new Date();
+
+        const capacity = await ServerCapacity.findOneAndUpdate(
+            { serverName: serverKey },
+            { $set: update },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+
+        logger.info(`Server capacity updated for ${serverKey}`, { update, updatedBy: req.user.email });
+
+        res.json({
+            success: true,
+            message: `${serverKey} capacity updated`,
+            capacity: {
+                totalCPU: capacity.totalResources.cpu,
+                totalRAM: capacity.totalResources.ram,
+                totalStorage: capacity.totalResources.storage,
+                maxContainers: parseInt(process.env[`${serverKey}_MAX_CONTAINERS`]) || maxContainers || 200,
+                serverType: process.env[`${serverKey}_SERVER_TYPE`] || serverType || 'shared_users',
+                isActive: capacity.isActive,
+                lastUpdated: capacity.lastUpdated
+            }
+        });
+    } catch (error) {
+        logger.error('Update server capacity error:', error);
+        res.status(500).json({ error: 'Failed to update server capacity' });
     }
 });
 

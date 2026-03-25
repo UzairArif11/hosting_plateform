@@ -4,11 +4,26 @@ import { useEffect, useState } from 'react';
 import api from '@/lib/api';
 import InfraScanner from './InfraScanner';
 
+interface ServerCapacity {
+    totalCPU: number;
+    totalRAM: number;
+    totalStorage: number;
+    allocatedCPU: number;
+    allocatedRAM: number;
+    allocatedStorage: number;
+    maxContainers: number;
+    serverType: string;
+    isActive: boolean;
+    warnings: any[];
+    lastUpdated: string | null;
+}
+
 interface Server {
     domain: string;
     ip: string;
     sshKey: string;
     status: string;
+    capacity?: ServerCapacity;
 }
 
 interface DNSRecord {
@@ -37,6 +52,9 @@ export default function ServerManagement() {
     const [testLogs, setTestLogs] = useState<Record<string, string[]>>({});
     const [serverLogs, setServerLogs] = useState<Record<string, any>>({});
     const [loadingLogs, setLoadingLogs] = useState<string | null>(null);
+    const [editingServer, setEditingServer] = useState<string | null>(null);
+    const [editForm, setEditForm] = useState({ totalCPU: 4, totalRAM: 24, totalStorage: 200, isActive: true });
+    const [saving, setSaving] = useState(false);
 
     useEffect(() => {
         fetchServers();
@@ -101,6 +119,30 @@ export default function ServerManagement() {
             alert('Failed to fetch server logs');
         } finally {
             setLoadingLogs(null);
+        }
+    };
+
+    const startEdit = (serverKey: string, server: Server) => {
+        setEditForm({
+            totalCPU: server.capacity?.totalCPU || 4,
+            totalRAM: server.capacity?.totalRAM || 24,
+            totalStorage: server.capacity?.totalStorage || 200,
+            isActive: server.capacity?.isActive ?? true
+        });
+        setEditingServer(serverKey);
+    };
+
+    const saveCapacity = async () => {
+        if (!editingServer) return;
+        setSaving(true);
+        try {
+            await api.put(`/settings/servers/${editingServer}`, editForm);
+            setEditingServer(null);
+            fetchServers(); // Refresh data
+        } catch (error) {
+            alert('Failed to save server capacity');
+        } finally {
+            setSaving(false);
         }
     };
 
@@ -244,6 +286,89 @@ export default function ServerManagement() {
                                 )}
                             </div>
                             
+                            {/* Server Capacity */}
+                            {server.capacity && (
+                                <div className="mt-6 bg-black/20 border border-white/10 rounded-lg p-4">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h4 className="text-lg font-semibold text-white">📊 Server Capacity</h4>
+                                        <div className="flex items-center gap-3">
+                                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                                server.capacity.serverType === 'shared_users'
+                                                    ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                                                    : 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                                            }`}>
+                                                {server.capacity.serverType === 'shared_users' ? '👥 Shared' : '🔒 Dedicated'}
+                                            </span>
+                                            <button
+                                                onClick={() => startEdit(serverKey, server)}
+                                                className="bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded text-sm transition"
+                                            >
+                                                ✏️ Edit
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                        {/* CPU */}
+                                        <div>
+                                            <div className="flex justify-between text-sm mb-1">
+                                                <span className="text-gray-400">CPU</span>
+                                                <span className="text-white">{server.capacity.allocatedCPU}/{server.capacity.totalCPU} OCPU</span>
+                                            </div>
+                                            <div className="w-full bg-gray-700 rounded-full h-2">
+                                                <div
+                                                    className={`h-2 rounded-full transition-all ${
+                                                        (server.capacity.allocatedCPU / server.capacity.totalCPU) > 0.8 ? 'bg-red-500' :
+                                                        (server.capacity.allocatedCPU / server.capacity.totalCPU) > 0.6 ? 'bg-yellow-500' : 'bg-green-500'
+                                                    }`}
+                                                    style={{ width: `${Math.min(100, (server.capacity.allocatedCPU / server.capacity.totalCPU) * 100)}%` }}
+                                                />
+                                            </div>
+                                        </div>
+                                        {/* RAM */}
+                                        <div>
+                                            <div className="flex justify-between text-sm mb-1">
+                                                <span className="text-gray-400">RAM</span>
+                                                <span className="text-white">{server.capacity.allocatedRAM}/{server.capacity.totalRAM} GB</span>
+                                            </div>
+                                            <div className="w-full bg-gray-700 rounded-full h-2">
+                                                <div
+                                                    className={`h-2 rounded-full transition-all ${
+                                                        (server.capacity.allocatedRAM / server.capacity.totalRAM) > 0.85 ? 'bg-red-500' :
+                                                        (server.capacity.allocatedRAM / server.capacity.totalRAM) > 0.6 ? 'bg-yellow-500' : 'bg-green-500'
+                                                    }`}
+                                                    style={{ width: `${Math.min(100, (server.capacity.allocatedRAM / server.capacity.totalRAM) * 100)}%` }}
+                                                />
+                                            </div>
+                                        </div>
+                                        {/* Storage */}
+                                        <div>
+                                            <div className="flex justify-between text-sm mb-1">
+                                                <span className="text-gray-400">Storage</span>
+                                                <span className="text-white">{server.capacity.allocatedStorage}/{server.capacity.totalStorage} GB</span>
+                                            </div>
+                                            <div className="w-full bg-gray-700 rounded-full h-2">
+                                                <div
+                                                    className={`h-2 rounded-full transition-all ${
+                                                        (server.capacity.allocatedStorage / server.capacity.totalStorage) > 0.9 ? 'bg-red-500' :
+                                                        (server.capacity.allocatedStorage / server.capacity.totalStorage) > 0.7 ? 'bg-yellow-500' : 'bg-green-500'
+                                                    }`}
+                                                    style={{ width: `${Math.min(100, (server.capacity.allocatedStorage / server.capacity.totalStorage) * 100)}%` }}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-6 mt-3 text-sm text-gray-400">
+                                        <span>Max Containers: <strong className="text-white">{server.capacity.maxContainers}</strong></span>
+                                        {server.capacity.lastUpdated && (
+                                            <span>Updated: <strong className="text-white">{new Date(server.capacity.lastUpdated).toLocaleDateString()}</strong></span>
+                                        )}
+                                        {server.capacity.warnings.length > 0 && (
+                                            <span className="text-yellow-400">⚠️ {server.capacity.warnings.length} warning(s)</span>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Health Indicators */}
                             {healthStatus[serverKey] && serverKey !== 'EC1' && (
                                 <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -335,6 +460,73 @@ export default function ServerManagement() {
                         </div>
                     ))}
                 </div>
+
+                {/* Edit Capacity Modal */}
+                {editingServer && (
+                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+                        <div className="bg-gray-900 border border-white/20 rounded-lg p-6 max-w-md w-full mx-4">
+                            <h3 className="text-2xl font-bold text-white mb-4">✏️ Edit {editingServer} Capacity</h3>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="text-gray-300 text-sm block mb-1">Total CPU (OCPU)</label>
+                                    <input
+                                        type="number"
+                                        step="0.5"
+                                        value={editForm.totalCPU}
+                                        onChange={(e) => setEditForm({ ...editForm, totalCPU: parseFloat(e.target.value) })}
+                                        className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-gray-300 text-sm block mb-1">Total RAM (GB)</label>
+                                    <input
+                                        type="number"
+                                        value={editForm.totalRAM}
+                                        onChange={(e) => setEditForm({ ...editForm, totalRAM: parseFloat(e.target.value) })}
+                                        className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-gray-300 text-sm block mb-1">Total Storage (GB)</label>
+                                    <input
+                                        type="number"
+                                        value={editForm.totalStorage}
+                                        onChange={(e) => setEditForm({ ...editForm, totalStorage: parseFloat(e.target.value) })}
+                                        className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white"
+                                    />
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <label className="text-gray-300 text-sm">Server Active</label>
+                                    <button
+                                        onClick={() => setEditForm({ ...editForm, isActive: !editForm.isActive })}
+                                        className={`px-4 py-1 rounded-full text-sm font-medium transition ${
+                                            editForm.isActive
+                                                ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                                                : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                                        }`}
+                                    >
+                                        {editForm.isActive ? '✅ Active' : '❌ Inactive'}
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="flex space-x-4 mt-6">
+                                <button
+                                    onClick={() => setEditingServer(null)}
+                                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={saveCapacity}
+                                    disabled={saving}
+                                    className="flex-1 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg transition"
+                                >
+                                    {saving ? 'Saving...' : '💾 Save'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Infrastructure Scan Utility */}
                 <div className="mt-12">
