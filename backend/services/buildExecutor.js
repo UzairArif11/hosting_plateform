@@ -13,6 +13,7 @@ const containerOrchestrator = require('./containerOrchestrator');
 const githubService = require('./github');
 const websocketService = require('./websocket');
 const logger = require('../utils/logger');
+const notify = require('./notificationService');
 
 const BUILD_DIR = process.env.BUILD_DIR || '/tmp/builds';
 const MAX_BUILD_TIME = parseInt(process.env.MAX_BUILD_TIME) || 15 * 60 * 1000; // 15 minutes
@@ -142,6 +143,16 @@ async function executeBuild(deploymentId, callbacks = {}) {
         websocketService.emitDeploymentStatus(deploymentId, 'success', { url: deploymentInfo.url });
         await onProgress(100);
 
+        // Send deployment success notifications (notification + email)
+        try {
+            if (user && project && !deployment.metadata?.isAdminDemo) {
+                await notify.deploymentSucceeded(user._id, project.name, deploymentInfo.url);
+                await notify.deploymentSucceededEmail(user, project.name, deploymentInfo.url);
+            }
+        } catch (notifyErr) {
+            logger.warn('Deployment success notification failed:', notifyErr.message);
+        }
+
         // Check if this is an admin demo deployment - emit template-specific event
         if (deployment.metadata?.isAdminDemo && deployment.metadata?.templateId) {
             try {
@@ -235,6 +246,16 @@ async function executeBuild(deploymentId, callbacks = {}) {
             error: error.message,
             phase: getCurrentPhase(error)
         });
+
+        // Send deployment failure notifications
+        try {
+            if (user && project && !deployment?.metadata?.isAdminDemo) {
+                await notify.deploymentFailed(user._id, project.name, error.message);
+                await notify.deploymentFailedEmail(user, project.name, error.message);
+            }
+        } catch (notifyErr) {
+            logger.warn('Deployment failure notification failed:', notifyErr.message);
+        }
 
         // CRITICAL FIX: Always try to update template status on failure
         // Look up template by checking if this project was deployed from a template

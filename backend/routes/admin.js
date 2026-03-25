@@ -9,6 +9,7 @@ const Plan = require('../models/Plan');
 const ServerCapacity = require('../models/ServerCapacity');
 const docker = require('../services/docker');
 const logger = require('../utils/logger');
+const notify = require('../services/notificationService');
 const rateLimit = require('express-rate-limit');
 const { getRemoteSystemStats, getServerUtilization, getRemoteDockerStats, getRemoteContainerLogs, ORACLE_SERVERS } = require('../services/containerOrchestrator');
 
@@ -337,6 +338,13 @@ router.put('/users/:userId/suspend', requireAuth, requireAdmin, async (req, res)
     user.suspendedAt = new Date();
     await user.save();
 
+    try {
+      await notify.accountSuspended(user, reason || 'Your account has been suspended by an administrator.');
+      await notify.adminSuspendedUser(user);
+    } catch (notifyErr) {
+      logger.error('Suspend notification failed:', notifyErr.message);
+    }
+
     res.json({ success: true, message: 'User suspended' });
   } catch (error) {
     logger.error('Suspend user error:', error);
@@ -378,6 +386,13 @@ router.put('/users/:userId/unsuspend', requireAuth, requireAdmin, async (req, re
       } catch (containerErr) {
         logger.warn(`Could not restart containers for ${user.email}: ${containerErr.message}`);
       }
+    }
+
+    try {
+      await notify.accountReactivated(user);
+      await notify.adminUnsuspendedUser(user);
+    } catch (notifyErr) {
+      logger.error('Unsuspend notification failed:', notifyErr.message);
     }
 
     res.json({
@@ -1890,6 +1905,13 @@ router.post('/manual-payments/:id/verify', requireAuth, requireAdmin, async (req
         amount: payment.amount,
         verifiedBy: req.user._id
       });
+
+      try {
+        await notify.paymentVerified(user, plan.displayName, payment.amount, payment.currency);
+        await notify.planUpgraded(user, plan.displayName);
+      } catch (notifyErr) {
+        logger.error('Payment verified notification failed:', notifyErr.message);
+      }
     }
 
     res.json({
@@ -1929,6 +1951,15 @@ router.post('/manual-payments/:id/reject', requireAuth, requireAdmin, async (req
       reason: reason || 'Payment rejected by admin',
       rejectedBy: req.user._id
     });
+
+    try {
+      const paymentUser = await User.findById(payment.user);
+      if (paymentUser) {
+        await notify.paymentRejected(paymentUser, payment.planName, reason || 'Payment rejected by admin');
+      }
+    } catch (notifyErr) {
+      logger.error('Payment rejected notification failed:', notifyErr.message);
+    }
 
     res.json({
       success: true,

@@ -5,6 +5,7 @@ const Project = require('../models/Project');
 const User = require('../models/User');
 const { requireAuth } = require('../middleware/auth');
 const logger = require('../utils/logger');
+const notify = require('../services/notificationService');
 
 // POST /api/projects/:id/invitations - Send invitation
 router.post('/projects/:id/invitations', requireAuth, async (req, res) => {
@@ -111,9 +112,19 @@ router.post('/projects/:id/invitations', requireAuth, async (req, res) => {
             expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
         });
 
-        // TODO: Send email notification
-        // For now, return the invite link in response
         const inviteLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/invite/${invitation.token}`;
+
+        try {
+            const inviter = await User.findById(userId);
+            await notify.invitationSent(
+                email.toLowerCase(),
+                project.name,
+                inviter?.displayName || inviter?.username || 'A team member',
+                inviteLink
+            );
+        } catch (emailErr) {
+            logger.warn('Invitation email failed (non-fatal):', emailErr.message);
+        }
 
         logger.info('Invitation created', {
             projectId,

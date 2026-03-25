@@ -12,8 +12,7 @@ const payoneerService = require('../services/payoneer');
 const jazzcashService = require('../services/jazzcash');
 const easypaisaService = require('../services/easypaisa');
 const logger = require('../utils/logger');
-const Notification = require('../models/Notification');
-const websocketService = require('../services/websocket');
+const notify = require('../services/notificationService');
 
 // Multer config for screenshot uploads
 const uploadsDir = path.join(__dirname, '..', 'uploads', 'payments');
@@ -685,29 +684,12 @@ router.post('/manual-payment', upload.single('screenshot'), async (req, res) => 
       paymentId: paymentRecord._id
     });
 
-    // Notify all admin users
+    // Notify admins + send user confirmation (email + real-time)
     try {
-      const adminUsers = await User.find({ role: 'admin' }).select('_id');
-      const paymentTypeLabel = isCrypto ? 'Crypto' : 'Bank Transfer';
-      for (const admin of adminUsers) {
-        await Notification.create({
-          userId: admin._id,
-          title: `New ${paymentTypeLabel} Payment`,
-          message: `${user.displayName || user.email} submitted a ${paymentTypeLabel.toLowerCase()} payment of ${paymentRecord.currency} ${paymentRecord.amount} for ${plan.displayName} plan. Verify it in Admin → Payments.`,
-          type: 'warning',
-          resourceType: 'system',
-          metadata: {}
-        });
-      }
-      websocketService.emitAdminNotification({
-        type: 'payment_submitted',
-        title: `New ${paymentTypeLabel} Payment`,
-        message: `${user.displayName || user.email} submitted ${paymentTypeLabel.toLowerCase()} payment for ${plan.displayName}`,
-        paymentId: paymentRecord._id,
-        timestamp: new Date().toISOString()
-      });
+      await notify.paymentSubmitted(user, plan.displayName, isCrypto ? 'crypto' : 'bank');
+      await notify.paymentReceived(user, plan.displayName, paymentRecord.amount, paymentRecord.currency, isCrypto ? 'crypto' : 'bank');
     } catch (notifyErr) {
-      logger.error('Failed to notify admins about payment:', notifyErr);
+      logger.error('Failed to send payment notifications:', notifyErr);
     }
 
     res.json({

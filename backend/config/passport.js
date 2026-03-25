@@ -2,6 +2,7 @@ const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const GitHubStrategy = require('passport-github2').Strategy;
 const User = require('../models/User');
+const notify = require('../services/notificationService');
 
 // Helper to escape special regex characters in strings
 const escapeRegex = (str) => str ? str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '';
@@ -203,6 +204,14 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
                     }
 
                     logger.info('New Google user created', { email: user.email, userId: user._id });
+
+                    try {
+                        await notify.welcomeUser(user);
+                        await notify.newUserSignup(user);
+                    } catch (notifyErr) {
+                        logger.warn('Welcome notification failed (non-fatal):', notifyErr.message);
+                    }
+
                     done(null, user);
                 } catch (error) {
                     console.error('❌ Google OAuth Error:', error.message);
@@ -493,6 +502,13 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                         });
                     } catch (payErr) {
                         logger.warn('Payoneer customer creation failed (non-fatal):', payErr.message);
+                    }
+
+                    try {
+                        await notify.welcomeUser(user);
+                        await notify.newUserSignup(user);
+                    } catch (notifyErr) {
+                        logger.warn('Welcome notification failed (non-fatal):', notifyErr.message);
                     }
 
                     done(null, user);

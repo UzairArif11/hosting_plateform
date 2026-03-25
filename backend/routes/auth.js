@@ -7,6 +7,7 @@ const Plan = require('../models/Plan');
 const payoneerService = require('../services/payoneer');
 const { assignUserToServer } = require('../services/containerOrchestrator');
 const logger = require('../utils/logger');
+const notify = require('../services/notificationService');
 
 // Strict rate limiter for OAuth endpoints (prevent redirect spam)
 const oauthLimiter = rateLimit({
@@ -552,7 +553,6 @@ const handleDirectRegistration = async (req, res) => {
     } catch (containerError) {
       logger.error('Failed to assign user to container server:', containerError.message);
 
-      // Still return token even if container assignment fails
       res.json({
         success: true,
         token,
@@ -563,6 +563,13 @@ const handleDirectRegistration = async (req, res) => {
         },
         warning: 'Container assignment pending'
       });
+    }
+
+    try {
+      await notify.welcomeUser(user);
+      await notify.newUserSignup(user);
+    } catch (notifyErr) {
+      logger.warn('Welcome notification failed (non-fatal):', notifyErr.message);
     }
 
   } catch (error) {

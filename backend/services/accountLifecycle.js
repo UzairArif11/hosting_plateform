@@ -3,6 +3,7 @@ const Deployment = require('../models/Deployment');
 const Project = require('../models/Project');
 const docker = require('./docker');
 const logger = require('../utils/logger');
+const notify = require('./notificationService');
 
 /**
  * Account Lifecycle Management Service
@@ -51,8 +52,11 @@ async function checkAndSuspendExpiredTrials() {
                 // Stop user's containers
                 await stopUserContainers(user._id);
 
-                // Send email notification
-                // await emailService.sendTrialExpiredEmail(user);
+                try {
+                    await notify.trialExpired(user);
+                } catch (notifyErr) {
+                    logger.error(`Trial expired notification failed for ${user.email}:`, notifyErr.message);
+                }
 
             } catch (error) {
                 logger.error(`Failed to suspend user ${user.email}:`, error);
@@ -110,8 +114,11 @@ async function checkAndSuspendExpiredSubscriptions() {
                 // Stop user's containers
                 await stopUserContainers(user._id);
 
-                // Send email notification
-                // await emailService.sendSubscriptionExpiredEmail(user);
+                try {
+                    await notify.subscriptionExpired(user);
+                } catch (notifyErr) {
+                    logger.error(`Subscription expired notification failed for ${user.email}:`, notifyErr.message);
+                }
 
             } catch (error) {
                 logger.error(`Failed to suspend user ${user.email}:`, error);
@@ -160,8 +167,11 @@ async function deleteResourcesForLongSuspended() {
 
                 logger.info(`Deleted resources for ${user.email}: ${JSON.stringify(result)}`);
 
-                // Send email notification
-                // await emailService.sendResourcesDeletedEmail(user);
+                try {
+                    await notify.resourcesDeleted(user);
+                } catch (notifyErr) {
+                    logger.error(`Resources deleted notification failed for ${user.email}:`, notifyErr.message);
+                }
 
             } catch (error) {
                 logger.error(`Failed to delete resources for ${user.email}:`, error);
@@ -204,8 +214,11 @@ async function softDeleteUser(userId, deletedBy, reason = 'User requested deleti
 
         logger.info(`User ${user.email} soft deleted. Recovery deadline: ${user.recoveryDeadline}`);
 
-        // Send email notification
-        // await emailService.sendAccountDeletedEmail(user);
+        try {
+            await notify.accountDeleted(user);
+        } catch (notifyErr) {
+            logger.error(`Account deleted notification failed for ${user.email}:`, notifyErr.message);
+        }
 
         return {
             success: true,
@@ -360,8 +373,11 @@ async function recoverDeletedUser(userId, recoveredBy) {
 
         logger.info(`User ${user.email} recovered successfully`);
 
-        // Send email notification
-        // await emailService.sendAccountRecoveredEmail(user);
+        try {
+            await notify.accountRecovered(user);
+        } catch (notifyErr) {
+            logger.error(`Account recovered notification failed for ${user.email}:`, notifyErr.message);
+        }
 
         return {
             success: true,

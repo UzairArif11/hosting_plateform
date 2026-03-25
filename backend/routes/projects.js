@@ -5,6 +5,7 @@ const User = require('../models/User');
 const githubService = require('../services/github');
 const logger = require('../utils/logger');
 const { requireProjectAccess, requireResourceCapacity } = require('../middleware/auth');
+const notify = require('../services/notificationService');
 
 const router = express.Router();
 
@@ -557,6 +558,12 @@ router.delete('/:id', requireProjectAccess('admin'), async (req, res) => {
       projectId: project._id,
       projectName: project.name
     });
+
+    try {
+      await notify.projectDeleted(req.user._id, project.name);
+    } catch (notifyErr) {
+      logger.warn('Project deleted notification failed:', notifyErr.message);
+    }
 
     res.json({
       success: true,
