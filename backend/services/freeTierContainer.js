@@ -226,39 +226,86 @@ async function deployProjectToUserContainer(user, project, buildPath, containerI
             if (!recheckResult.stdout || recheckResult.stdout.trim() !== 'true') {
                 logger.info(`🔨 [DEPLOY_PROJECT] Creating new container ${containerName}...`);
 
+                // Remove old container if it exists but is broken
+                if (!containerNotFound) {
+                    await ssh.execCommand(`docker rm -f ${containerName} 2>/dev/null || true`);
+                }
+
                 // Get user's plan resources
-                const Plan = require('../models/Plan');
                 const User = require('../models/User');
                 const fullUser = await User.findById(user._id).populate('plan');
                 const resources = fullUser?.plan?.resources || fullUser?.resourceAllocation || {
                     cpu: 0.5, ram: 0.5, storage: 2, bandwidth: 100
                 };
 
-                // Determine server object from containerOrchestrator
-                const containerOrchestrator = require('./containerOrchestrator');
-                const server = containerOrchestrator.ORACLE_SERVERS[serverKey];
+                // Try Docker API first, fall back to SSH direct docker run
+                let containerCreated = false;
+                try {
+                    const containerOrchestrator = require('./containerOrchestrator');
+                    const server = containerOrchestrator.ORACLE_SERVERS[serverKey];
+                    if (!server) throw new Error(`Server ${serverKey} not found`);
 
-                if (!server) {
-                    throw new Error(`Server ${serverKey} not found in ORACLE_SERVERS`);
+                    const containerResult = await createUserContainer(
+                        fullUser || user, serverKey, server, resources
+                    );
+                    if (containerResult.success) {
+                        containerCreated = true;
+                        logger.info(`✅ [DEPLOY_PROJECT] Container ${containerResult.containerName} created via Docker API`);
+                    } else {
+                        throw new Error(containerResult.error || 'Docker API creation failed');
+                    }
+                } catch (apiErr) {
+                    logger.warn(`⚠️ [DEPLOY_PROJECT] Docker API failed: ${apiErr.message}. Falling back to SSH docker run...`);
+
+                    // Ensure PM2 image exists
+                    const imgCheck = await ssh.execCommand('docker images node-pm2-alpine:v2 -q');
+                    if (!imgCheck.stdout || imgCheck.stdout.trim() === '') {
+                        logger.info('📦 [DEPLOY_PROJECT] Building PM2 image via SSH...');
+                        await ssh.execCommand(`mkdir -p /tmp/pm2-image && cat > /tmp/pm2-image/Dockerfile << 'EOF'\nFROM node:18-alpine\nRUN apk add --no-cache openssl\nRUN npm install -g pm2@latest --no-audit --no-fund --silent --prefer-offline --no-optional\nWORKDIR /app\nENV NODE_ENV=production\nEXPOSE 3000\nCMD ["pm2-runtime", "start", "ecosystem.config.js"]\nEOF`);
+                        const buildResult = await ssh.execCommand('cd /tmp/pm2-image && docker build -t node-pm2-alpine:v2 .');
+                        if (buildResult.code !== 0) throw new Error('PM2 image build failed: ' + buildResult.stderr);
+                        await ssh.execCommand('rm -rf /tmp/pm2-image');
+                    }
+
+                    // Create container via SSH
+                    const cpuLimit = resources.cpu || 0.5;
+                    const memLimit = Math.round((resources.ram || 0.5) * 1024);
+                    const runCmd = [
+                        'docker run -d',
+                        `--name ${containerName}`,
+                        `--network host`,
+                        `--restart unless-stopped`,
+                        `--cpus=${cpuLimit}`,
+                        `-m ${memLimit}m`,
+                        `-e USER_ID=${user._id}`,
+                        `-e USER_EMAIL=${user.email}`,
+                        `-e PLAN_TYPE=${user.planType || 'free'}`,
+                        `node-pm2-alpine:v2`,
+                        `pm2-runtime start /dev/null --name keepalive`
+                    ].join(' ');
+
+                    const runResult = await ssh.execCommand(runCmd);
+                    if (runResult.code !== 0) {
+                        throw new Error(`SSH docker run failed: ${runResult.stderr}`);
+                    }
+                    containerCreated = true;
+                    logger.info(`✅ [DEPLOY_PROJECT] Container ${containerName} created via SSH fallback`);
                 }
 
-                // Remove old container if it exists but is broken
-                if (!containerNotFound) {
-                    await ssh.execCommand(`docker rm -f ${containerName} 2>/dev/null || true`);
+                if (!containerCreated) {
+                    throw new Error(`Failed to create container ${containerName} by any method`);
                 }
 
-                const containerResult = await createUserContainer(
-                    fullUser || user,
-                    serverKey,
-                    server,
-                    resources
-                );
-
-                if (!containerResult.success) {
-                    throw new Error(`Failed to auto-create container: ${containerResult.error}`);
+                // Update user's container info in DB
+                try {
+                    const User = require('../models/User');
+                    await User.findByIdAndUpdate(user._id, {
+                        containerName: containerName,
+                        assignedServer: serverKey,
+                    });
+                } catch (dbErr) {
+                    logger.warn(`DB update for container info failed (non-fatal): ${dbErr.message}`);
                 }
-
-                logger.info(`✅ [DEPLOY_PROJECT] Container ${containerResult.containerName} created and running`);
 
                 // Wait for container to be fully ready
                 await new Promise(resolve => setTimeout(resolve, 3000));

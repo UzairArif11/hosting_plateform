@@ -478,7 +478,6 @@ async function cloneRepository(deployment, project, user, onLog) {
         // Validate GitHub token before cloning (only for user tokens, not platform token)
         if (githubToken && githubToken === user.githubAccessToken) {
             try {
-                const { execSync } = require('child_process');
                 // Quick validation: check if token can access GitHub API
                 const https = require('https');
                 const tokenValid = await new Promise((resolve) => {

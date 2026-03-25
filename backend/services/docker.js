@@ -4,46 +4,52 @@ const logger = require('../utils/logger');
 // Create Docker client
 const createDockerClient = (host = null) => {
   if (host) {
-    // Check if this is the local server (EC1/EC3 same machine)
+    // Determine if this host is the local machine (EC1 / API server)
     const localIP = process.env.EC1_SERVER_IP || 'localhost';
     const isLocalServer = host === localIP || 
                          host === 'localhost' || 
-                         host === '127.0.0.1' ||
-                         host === process.env.EC3_SERVER_IP; // EC3 = EC1 (same server)
+                         host === '127.0.0.1';
 
-    if (isLocalServer || host === process.env.EC3_SERVER_IP) {
-      // 🏠 Local server: Connect directly to local Docker daemon
-      logger.info(`Connecting to local Docker daemon (same machine)`);
-      return new Docker(); // Uses unix socket by default
+    if (isLocalServer) {
+      return new Docker();
     }
 
-    // 🔒 SECURE: Use SSH tunnel for remote servers (EC2)
-    const serverKey = host === process.env.EC2_SERVER_IP ? 'EC2' : 'EC3';
+    // Determine which server key this host maps to
+    let serverKey;
+    if (host === process.env.EC2_SERVER_IP) {
+      serverKey = 'EC2';
+    } else if (host === process.env.EC3_SERVER_IP) {
+      serverKey = 'EC3';
+    } else {
+      logger.warn(`[DOCKER] Unknown remote host ${host}, defaulting to EC2`);
+      serverKey = 'EC2';
+    }
 
-    // Get tunnel info from SSH tunnel manager
+    // Check if this server is actually on the same machine (marked local at startup)
     const sshTunnelManager = require('./sshTunnelManager');
+    if (sshTunnelManager.isMarkedLocal(serverKey)) {
+      return new Docker();
+    }
+
+    // Remote server — use SSH tunnel
     const tunnelInfo = sshTunnelManager.getTunnelInfo(serverKey);
 
-    if (!tunnelInfo) {
-      logger.warn(`No SSH tunnel found for ${serverKey}. Falling back to local Docker.`);
-      return new Docker(); // Fallback to local Docker
-    }
-
-    if (!sshTunnelManager.isTunnelActive(serverKey)) {
-      logger.warn(`SSH tunnel for ${serverKey} is not active. Using local Docker.`);
-      return new Docker(); // Fallback to local Docker
+    if (!tunnelInfo || !sshTunnelManager.isTunnelActive(serverKey)) {
+      const msg = `SSH tunnel for ${serverKey} (${host}) is not available. Cannot connect to remote Docker daemon.`;
+      logger.error(`[DOCKER] ${msg}`);
+      throw new Error(msg);
     }
 
     logger.info(`Using SSH tunnel for ${serverKey}: localhost:${tunnelInfo.localPort} → ${host}:2376`);
 
     return new Docker({
-      host: 'localhost',              // ✅ Connect via SSH tunnel
-      port: tunnelInfo.localPort,     // 2376 (EC2)
-      protocol: 'http',               // Local connection, encrypted by SSH
+      host: 'localhost',
+      port: tunnelInfo.localPort,
+      protocol: 'http',
     });
   }
 
-  // Local Docker
+  // No host specified — local Docker
   return new Docker();
 };
 

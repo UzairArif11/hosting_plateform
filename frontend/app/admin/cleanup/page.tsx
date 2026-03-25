@@ -30,16 +30,15 @@ export default function ResourceCleanup() {
 
     const fetchStats = async () => {
         try {
-            const token = localStorage.getItem('token');
-            if (!token) {
-                toast.error('No authentication token found');
+            const res = await fetch('/api/admin/users/cleanup-stats', {
+                credentials: 'include' // Send auth_token cookie
+            });
+
+            if (res.status === 401) {
+                toast.error('Not authenticated. Please log in as admin.');
                 setLoading(false);
                 return;
             }
-
-            const res = await fetch('/api/admin/users/cleanup-stats', {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
 
             if (!res.ok) {
                 throw new Error('Failed to fetch cleanup stats');
@@ -66,11 +65,10 @@ export default function ResourceCleanup() {
         setConfirmText('');
 
         try {
-            const token = localStorage.getItem('token');
             const res = await fetch('/api/admin/users/delete-all-suspended', {
                 method: 'POST',
+                credentials: 'include',
                 headers: {
-                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({ confirm: 'DELETE ALL SUSPENDED' })
@@ -103,11 +101,10 @@ export default function ResourceCleanup() {
         setConfirmText('');
 
         try {
-            const token = localStorage.getItem('token');
             const res = await fetch('/api/admin/users/delete-all-soft-deleted', {
                 method: 'POST',
+                credentials: 'include',
                 headers: {
-                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({ confirm: 'DELETE ALL SOFT DELETED' })

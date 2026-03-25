@@ -237,13 +237,16 @@ async function initializeSSHTunnels() {
 
   if (process.env.EC3_SERVER_IP) {
     // Check if EC3 is the same as EC1 (same server)
-    const localIP = process.env.EC1_SERVER_IP;
+    // Detect by: explicit match, or EC1 is localhost/127.0.0.1 and EC3 has a real IP
+    // (when EC1=localhost, the backend runs on the same machine as EC3)
+    const localIP = process.env.EC1_SERVER_IP || '';
+    const ec1IsLocalhost = !localIP || localIP === 'localhost' || localIP === '127.0.0.1';
     const isSameServer = process.env.EC3_SERVER_IP === localIP ||
-      process.env.EC3_SERVER_IP === process.env.EC2_SERVER_IP ||
-      !process.env.EC1_SERVER_IP; // If no EC1_SERVER_IP, assume EC3 is local
+      (ec1IsLocalhost && process.env.EC3_SERVER_IP !== process.env.EC2_SERVER_IP);
 
     if (isSameServer) {
       console.log(`   Skipping EC3 tunnel (same server as EC1) - using local Docker directly`);
+      sshTunnelManager.markAsLocal('EC3');
       tunnels.push({ server: 'EC3', success: true, local: true });
     } else {
       console.log(`   Creating EC3 tunnel: localhost:2377 → ${process.env.EC3_SERVER_IP}:2376`);

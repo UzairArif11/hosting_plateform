@@ -118,6 +118,157 @@ router.get('/dashboard-stats', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// ==========================================
+// CLEANUP ROUTES (used by /admin/cleanup page)
+// ==========================================
+
+// GET /api/admin/users/cleanup-stats — Counts of suspended/soft-deleted users
+router.get('/users/cleanup-stats', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const [suspended, softDeleted, suspendedOver7Days] = await Promise.all([
+      User.countDocuments({ status: 'suspended' }),
+      User.countDocuments({ status: 'deleted' }),
+      User.countDocuments({
+        status: 'suspended',
+        suspendedAt: { $lt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+      })
+    ]);
+
+    // Count users past the 15-day recovery deadline
+    const pastRecoveryDeadline = await User.countDocuments({
+      status: 'deleted',
+      deletedAt: { $lt: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000) }
+    });
+
+    // Estimate resources that can be freed
+    const totalCleanable = suspended + softDeleted;
+    const estimatedProjects = await Project.countDocuments({
+      owner: {
+        $in: await User.find({
+          status: { $in: ['suspended', 'deleted'] }
+        }).distinct('_id')
+      }
+    });
+
+    res.json({
+      suspended,
+      softDeleted,
+      suspendedOver7Days,
+      pastRecoveryDeadline,
+      totalResourcesCanFree: {
+        users: totalCleanable,
+        estimatedProjects,
+        estimatedDeployments: estimatedProjects * 3, // rough estimate
+        estimatedContainers: totalCleanable
+      }
+    });
+  } catch (error) {
+    logger.error('Error fetching cleanup stats:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch cleanup stats' });
+  }
+});
+
+// POST /api/admin/users/delete-all-suspended — Bulk delete all suspended users
+router.post('/users/delete-all-suspended', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { confirm } = req.body;
+    if (confirm !== 'DELETE ALL SUSPENDED') {
+      return res.status(400).json({ success: false, error: 'Confirmation text required' });
+    }
+
+    const suspendedUsers = await User.find({ status: 'suspended', role: { $ne: 'admin' } });
+    const results = { deleted: 0, failed: 0, details: [] };
+
+    for (const user of suspendedUsers) {
+      try {
+        // Delete user's containers on remote servers
+        if (user.containerName && user.assignedServer) {
+          try {
+            const freeTierContainer = require('../services/freeTierContainer');
+            await freeTierContainer.removeUserContainer(user);
+          } catch (containerErr) {
+            logger.warn(`Failed to remove container for ${user.email}: ${containerErr.message}`);
+          }
+        }
+
+        // Delete user's projects and deployments
+        const projectCount = await Project.countDocuments({ owner: user._id });
+        const deploymentCount = await Deployment.countDocuments({ userId: user._id });
+        await Project.deleteMany({ owner: user._id });
+        await Deployment.deleteMany({ userId: user._id });
+        await User.findByIdAndDelete(user._id);
+
+        results.deleted++;
+        results.details.push({
+          email: user.email,
+          projects: projectCount,
+          deployments: deploymentCount,
+          containers: user.containerName ? 1 : 0
+        });
+      } catch (userErr) {
+        results.failed++;
+        logger.error(`Failed to delete suspended user ${user.email}:`, userErr);
+      }
+    }
+
+    logger.info(`Cleanup: Deleted ${results.deleted} suspended users`, results);
+    res.json({ success: true, results });
+  } catch (error) {
+    logger.error('Error deleting suspended users:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete suspended users' });
+  }
+});
+
+// POST /api/admin/users/delete-all-soft-deleted — Bulk delete all soft-deleted users
+router.post('/users/delete-all-soft-deleted', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { confirm } = req.body;
+    if (confirm !== 'DELETE ALL SOFT DELETED') {
+      return res.status(400).json({ success: false, error: 'Confirmation text required' });
+    }
+
+    const deletedUsers = await User.find({ status: 'deleted', role: { $ne: 'admin' } });
+    const results = { deleted: 0, failed: 0, details: [] };
+
+    for (const user of deletedUsers) {
+      try {
+        // Remove containers
+        if (user.containerName && user.assignedServer) {
+          try {
+            const freeTierContainer = require('../services/freeTierContainer');
+            await freeTierContainer.removeUserContainer(user);
+          } catch (containerErr) {
+            logger.warn(`Failed to remove container for ${user.email}: ${containerErr.message}`);
+          }
+        }
+
+        // Delete projects and deployments
+        const projectCount = await Project.countDocuments({ owner: user._id });
+        const deploymentCount = await Deployment.countDocuments({ userId: user._id });
+        await Project.deleteMany({ owner: user._id });
+        await Deployment.deleteMany({ userId: user._id });
+        await User.findByIdAndDelete(user._id);
+
+        results.deleted++;
+        results.details.push({
+          email: user.email,
+          projects: projectCount,
+          deployments: deploymentCount,
+          containers: user.containerName ? 1 : 0
+        });
+      } catch (userErr) {
+        results.failed++;
+        logger.error(`Failed to delete soft-deleted user ${user.email}:`, userErr);
+      }
+    }
+
+    logger.info(`Cleanup: Deleted ${results.deleted} soft-deleted users`, results);
+    res.json({ success: true, results });
+  } catch (error) {
+    logger.error('Error deleting soft-deleted users:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete soft-deleted users' });
+  }
+});
 // Get system-wide stats (Host CPU, RAM, Disk)
 router.get('/system-stats', requireAuth, requireAdmin, async (req, res) => {
   try {

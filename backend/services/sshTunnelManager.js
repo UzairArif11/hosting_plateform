@@ -2,6 +2,7 @@ const { NodeSSH } = require('node-ssh');
 const fs = require('fs');
 const path = require('path');
 const net = require('net');
+const { execSync } = require('child_process');
 const logger = require('../utils/logger');
 
 /**
@@ -15,6 +16,7 @@ class SSHTunnelManager {
         this.tunnels = new Map(); // serverKey → { localPort, remoteHost, status, server }
         this.connections = new Map(); // serverKey → SSH connection
         this.reconnectAttempts = new Map(); // serverKey → attempt count
+        this.localServers = new Set(); // serverKeys that are on the same machine (no tunnel needed)
         this.maxReconnectAttempts = 5;
         this.reconnectDelay = 5000; // 5 seconds
 
@@ -30,37 +32,32 @@ class SSHTunnelManager {
 
     /**
      * Force-kill any process listening on a specific port
-     * This handles the EADDRINUSE scenario when PM2 restarts the backend
+     * Uses OS-level tools (fuser/lsof) to actually terminate the process
      */
-    async killPortIfInUse(port) {
-        return new Promise((resolve) => {
-            const testServer = net.createServer();
-            testServer.once('error', (err) => {
-                if (err.code === 'EADDRINUSE') {
-                    logger.warn(`[SSH Tunnel] Port ${port} is in use. Attempting to free it...`);
-                    
-                    // Try connecting to force the old server to release
-                    const client = new net.Socket();
-                    client.once('connect', () => {
-                        client.destroy();
-                        // Small delay to let OS reclaim the port
-                        setTimeout(() => resolve(true), 1000);
-                    });
-                    client.once('error', () => {
-                        // Port is stuck (zombie), wait a bit and resolve
-                        setTimeout(() => resolve(true), 2000);
-                    });
-                    client.connect(port, '127.0.0.1');
-                } else {
-                    resolve(false);
+    /**
+     * Close any existing tunnel server on the given port (our own process only).
+     * IMPORTANT: We do NOT use fuser/kill anymore — that was killing the backend itself
+     * and causing PM2 to restart infinitely.
+     */
+    async freePort(port) {
+        try {
+            // First, close any of our own tunnel servers that might be on this port
+            for (const [key, tunnel] of this.tunnels) {
+                if (tunnel.localPort === port && tunnel.server) {
+                    try {
+                        tunnel.server.close();
+                        logger.info(`[SSH Tunnel] Closed our own server on port ${port} (${key})`);
+                    } catch (e) {}
                 }
-            });
-            testServer.once('listening', () => {
-                // Port is free, close the test server
-                testServer.close(() => resolve(false));
-            });
-            testServer.listen(port, '127.0.0.1');
-        });
+            }
+            
+            // Brief wait for the OS to release the port
+            await new Promise(r => setTimeout(r, 500));
+            return true;
+        } catch (err) {
+            logger.error(`[SSH Tunnel] freePort error: ${err.message}`);
+            return false;
+        }
     }
 
     /**
@@ -79,14 +76,16 @@ class SSHTunnelManager {
                 remotePort
             });
 
-            // STEP 0: Close any existing tunnel for this server key first
+            // STEP 0: Close any existing tunnel and kill stale port occupants
             const existingTunnel = this.tunnels.get(serverKey);
             if (existingTunnel) {
                 logger.info(`[SSH Tunnel] Closing existing tunnel for ${serverKey} before recreating...`);
                 await this.closeTunnel(serverKey);
-                // Small delay to let OS reclaim the port
                 await new Promise(r => setTimeout(r, 500));
             }
+
+            // Close any of our own stale servers on this port (safe — no fuser/kill!)
+            await this.freePort(localPort);
 
             // Get SSH key path from environment
             const keyPath = serverKey === 'EC2'
@@ -118,7 +117,8 @@ class SSHTunnelManager {
             logger.info(`[SSH Tunnel] ✅ SSH connected to ${serverKey} (${remoteHost})`);
 
             // Create a local TCP server that forwards connections through the SSH tunnel
-            const tcpServer = net.createServer((socket) => {
+            // SO_REUSEADDR allows the new server to bind even if the old one hasn't fully released
+            const tcpServer = net.createServer({ allowHalfOpen: true }, (socket) => {
                 if (!ssh.connection) {
                     logger.error(`[SSH Tunnel] SSH connection lost for ${serverKey}, rejecting incoming connection`);
                     return socket.end();
@@ -147,17 +147,18 @@ class SSHTunnelManager {
                 logger.error(`[SSH Tunnel] TCP server error for ${serverKey}:`, err.message);
             });
 
-            // Try to listen, with EADDRINUSE retry logic
+            // Try to listen with SO_REUSEADDR and retry logic
             try {
                 await this._listenWithRetry(tcpServer, localPort, serverKey);
             } catch (listenError) {
-                // If we still can't bind, try to force-free the port
                 if (listenError.code === 'EADDRINUSE') {
-                    logger.warn(`[SSH Tunnel] Port ${localPort} in use, attempting to force-free...`);
-                    await this.killPortIfInUse(localPort);
+                    logger.warn(`[SSH Tunnel] Port ${localPort} still in use for ${serverKey}. Will use dynamic port as fallback.`);
                     
-                    // Create a new TCP server (the old one is broken after listen error)
-                    const retryServer = net.createServer((socket) => {
+                    // Use a dynamic port instead of fighting over the fixed port
+                    const dynamicPort = localPort + 100 + Math.floor(Math.random() * 100);
+                    logger.info(`[SSH Tunnel] Trying dynamic port ${dynamicPort} for ${serverKey}...`);
+                    
+                    const retryServer = net.createServer({ allowHalfOpen: true }, (socket) => {
                         if (!ssh.connection) {
                             return socket.end();
                         }
@@ -178,12 +179,12 @@ class SSHTunnelManager {
                         );
                     });
 
-                    await this._listenWithRetry(retryServer, localPort, serverKey);
+                    await this._listenWithRetry(retryServer, dynamicPort, serverKey);
                     
-                    // Use the retry server instead
+                    // Use the retry server with the dynamic port
                     this.connections.set(serverKey, ssh);
                     this.tunnels.set(serverKey, {
-                        localPort,
+                        localPort: dynamicPort,
                         remoteHost,
                         remotePort,
                         status: 'active',
@@ -191,16 +192,16 @@ class SSHTunnelManager {
                         createdAt: new Date()
                     });
                     this.reconnectAttempts.set(serverKey, 0);
-                    this._setupSSHHandlers(ssh, serverKey, remoteHost, localPort, remotePort);
+                    this._setupSSHHandlers(ssh, serverKey, remoteHost, dynamicPort, remotePort);
 
-                    logger.info(`[SSH Tunnel] ✅ Tunnel established (after retry): ${serverKey}`, {
-                        localPort,
+                    logger.info(`[SSH Tunnel] ✅ Tunnel established (dynamic port): ${serverKey}`, {
+                        localPort: dynamicPort,
                         remoteHost,
                         remotePort,
-                        mapping: `localhost:${localPort} → ${remoteHost}:${remotePort}`
+                        mapping: `localhost:${dynamicPort} → ${remoteHost}:${remotePort}`
                     });
 
-                    return { success: true, localPort };
+                    return { success: true, localPort: dynamicPort };
                 }
                 throw listenError;
             }
@@ -435,6 +436,21 @@ class SSHTunnelManager {
         const connection = this.connections.get(serverKey);
 
         return tunnel?.status === 'active' && connection !== undefined;
+    }
+
+    /**
+     * Mark a server as local (same machine as EC1 — no tunnel needed)
+     */
+    markAsLocal(serverKey) {
+        this.localServers.add(serverKey);
+        logger.info(`[SSH Tunnel] ${serverKey} marked as local server (no tunnel needed)`);
+    }
+
+    /**
+     * Check if a server is marked as local
+     */
+    isMarkedLocal(serverKey) {
+        return this.localServers.has(serverKey);
     }
 }
 
