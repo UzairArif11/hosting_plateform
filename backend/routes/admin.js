@@ -8,6 +8,7 @@ const Deployment = require('../models/Deployment');
 const Plan = require('../models/Plan');
 const ServerCapacity = require('../models/ServerCapacity');
 const docker = require('../services/docker');
+const containerUpgrade = require('../services/containerUpgrade');
 const logger = require('../utils/logger');
 const notify = require('../services/notificationService');
 const rateLimit = require('express-rate-limit');
@@ -635,6 +636,11 @@ router.delete('/users/:userId', requireAuth, requireAdmin, async (req, res) => {
   try {
     const user = await User.findById(req.params.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // Protect admin accounts from deletion
+    if (user.role === 'admin') {
+      return res.status(403).json({ error: 'Cannot delete admin accounts' });
+    }
 
     user.status = 'deleted';
     user.deletedAt = new Date();

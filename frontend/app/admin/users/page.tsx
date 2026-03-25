@@ -121,11 +121,51 @@ export default function UserManagement() {
                 containerType: plan === 'free' ? 'shared' : 'dedicated',
                 upgradeContainers: true
             });
-            alert(`User plan updated to ${plan} with zero-downtime container migration`);
+            toast.success(`User plan updated to ${plan}`);
             fetchUsers();
-        } catch (error) {
-            alert('Error updating plan');
+        } catch (error: any) {
+            const msg = error.response?.data?.error || 'Error updating plan';
+            toast.error(msg);
         }
+    };
+
+    const handleBulkDelete = async (userIds: string[]) => {
+        let deleted = 0;
+        let failed = 0;
+        for (const userId of userIds) {
+            try {
+                await api.delete(`/admin/users/${userId}`, {
+                    data: { confirm: 'DELETE' }
+                });
+                deleted++;
+            } catch (error) {
+                failed++;
+            }
+        }
+        toast.success(`Deleted ${deleted} user(s)${failed > 0 ? `, ${failed} failed` : ''}`);
+        setSelectedUsers(new Set());
+        fetchUsers();
+    };
+
+    const handleBulkChangePlan = async (plan: string) => {
+        if (!confirm(`Change plan to ${plan} for ${selectedUsers.size} user(s)?`)) return;
+        let updated = 0;
+        let failed = 0;
+        for (const userId of Array.from(selectedUsers)) {
+            try {
+                await api.put(`/admin/users/${userId}/plan`, {
+                    plan,
+                    containerType: plan === 'free' ? 'shared' : 'dedicated',
+                    upgradeContainers: true
+                });
+                updated++;
+            } catch (error) {
+                failed++;
+            }
+        }
+        toast.success(`Updated ${updated} user(s) to ${plan}${failed > 0 ? `, ${failed} failed` : ''}`);
+        setSelectedUsers(new Set());
+        fetchUsers();
     };
 
     if (loading) {
@@ -194,7 +234,19 @@ export default function UserManagement() {
                             <span className="text-white">
                                 {selectedUsers.size} user(s) selected
                             </span>
-                            <div className="space-x-2">
+                            <div className="flex items-center space-x-2">
+                                <select
+                                    onChange={(e) => {
+                                        if (e.target.value) handleBulkChangePlan(e.target.value);
+                                        e.target.value = '';
+                                    }}
+                                    className="text-sm bg-purple-500/20 text-purple-400 px-3 py-2 rounded-lg border border-purple-500/30"
+                                >
+                                    <option value="">Change Plan</option>
+                                    <option value="free">Free</option>
+                                    <option value="pro">Pro</option>
+                                    <option value="enterprise">Enterprise</option>
+                                </select>
                                 <button
                                     onClick={() => setShowConfirmDialog({ type: 'bulk-delete', users: Array.from(selectedUsers) })}
                                     className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition"
@@ -251,7 +303,7 @@ export default function UserManagement() {
                     <ConfirmDialog
                         dialog={showConfirmDialog}
                         onConfirm={() => {
-                            // Handle bulk delete
+                            handleBulkDelete(showConfirmDialog.users);
                             setShowConfirmDialog(null);
                         }}
                         onCancel={() => setShowConfirmDialog(null)}
