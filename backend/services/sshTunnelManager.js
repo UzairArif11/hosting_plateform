@@ -2,7 +2,6 @@ const { NodeSSH } = require('node-ssh');
 const fs = require('fs');
 const path = require('path');
 const net = require('net');
-const { execSync } = require('child_process');
 const logger = require('../utils/logger');
 
 /**
@@ -30,10 +29,6 @@ class SSHTunnelManager {
         process.on('SIGTERM', () => { cleanup(); process.exit(0); });
     }
 
-    /**
-     * Force-kill any process listening on a specific port
-     * Uses OS-level tools (fuser/lsof) to actually terminate the process
-     */
     /**
      * Close any existing tunnel server on the given port (our own process only).
      * IMPORTANT: We do NOT use fuser/kill anymore — that was killing the backend itself
@@ -320,8 +315,11 @@ class SSHTunnelManager {
 
             logger.info(`[SSH Tunnel] Attempting to reconnect ${serverKey} (attempt ${attempts + 1}/${this.maxReconnectAttempts})...`);
 
+            // Use the ORIGINAL configured port (not dynamic), let createTunnel handle fallback
+            const reconnectPort = serverKey === 'EC2' ? 2376 : 2377;
+
             setTimeout(async () => {
-                const result = await this.createTunnel(serverKey, remoteHost, localPort, remotePort);
+                const result = await this.createTunnel(serverKey, remoteHost, reconnectPort, remotePort);
 
                 if (!result.success) {
                     logger.error(`[SSH Tunnel] Reconnection failed for ${serverKey}`);
