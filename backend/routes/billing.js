@@ -12,6 +12,8 @@ const payoneerService = require('../services/payoneer');
 const jazzcashService = require('../services/jazzcash');
 const easypaisaService = require('../services/easypaisa');
 const logger = require('../utils/logger');
+const Notification = require('../models/Notification');
+const websocketService = require('../services/websocket');
 
 // Multer config for screenshot uploads
 const uploadsDir = path.join(__dirname, '..', 'uploads', 'payments');
@@ -682,6 +684,31 @@ router.post('/manual-payment', upload.single('screenshot'), async (req, res) => 
       paymentType: isCrypto ? 'crypto' : 'bank',
       paymentId: paymentRecord._id
     });
+
+    // Notify all admin users
+    try {
+      const adminUsers = await User.find({ role: 'admin' }).select('_id');
+      const paymentTypeLabel = isCrypto ? 'Crypto' : 'Bank Transfer';
+      for (const admin of adminUsers) {
+        await Notification.create({
+          userId: admin._id,
+          title: `New ${paymentTypeLabel} Payment`,
+          message: `${user.displayName || user.email} submitted a ${paymentTypeLabel.toLowerCase()} payment of ${paymentRecord.currency} ${paymentRecord.amount} for ${plan.displayName} plan. Verify it in Admin → Payments.`,
+          type: 'warning',
+          resourceType: 'system',
+          metadata: {}
+        });
+      }
+      websocketService.emitAdminNotification({
+        type: 'payment_submitted',
+        title: `New ${paymentTypeLabel} Payment`,
+        message: `${user.displayName || user.email} submitted ${paymentTypeLabel.toLowerCase()} payment for ${plan.displayName}`,
+        paymentId: paymentRecord._id,
+        timestamp: new Date().toISOString()
+      });
+    } catch (notifyErr) {
+      logger.error('Failed to notify admins about payment:', notifyErr);
+    }
 
     res.json({
       success: true,

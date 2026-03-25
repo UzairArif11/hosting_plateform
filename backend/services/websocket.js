@@ -37,6 +37,16 @@ function initializeWebSocket(server) {
             });
         });
 
+        // Join user-specific notification room
+        socket.on('join-notifications', (userId) => {
+            socket.join(`user-${userId}`);
+        });
+
+        // Join admin notification room
+        socket.on('join-admin', () => {
+            socket.join('admin-room');
+        });
+
         socket.on('disconnect', () => {
             logger.info('WebSocket client disconnected', { socketId: socket.id });
         });
@@ -107,10 +117,36 @@ function emitDeploymentStatus(deploymentId, status, data = {}) {
     }
 }
 
+/**
+ * Send a notification to a specific user via socket
+ */
+function emitNotification(userId, notification) {
+    if (!io) return;
+    try {
+        io.to(`user-${userId}`).emit('notification', notification);
+    } catch (err) {
+        logger.error('Failed to emit notification:', err);
+    }
+}
+
+/**
+ * Send a notification to all admins via socket
+ */
+function emitAdminNotification(notification) {
+    if (!io) return;
+    try {
+        io.to('admin-room').emit('admin-notification', notification);
+    } catch (err) {
+        logger.error('Failed to emit admin notification:', err);
+    }
+}
+
 module.exports = {
     initializeWebSocket,
     emitDeploymentLog,
     emitDeploymentProgress,
     emitDeploymentStatus,
+    emitNotification,
+    emitAdminNotification,
     getIO: () => io
 };

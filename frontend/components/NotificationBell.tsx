@@ -1,13 +1,19 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import { BellIcon, XMarkIcon, ExclamationTriangleIcon, CheckCircleIcon, InformationCircleIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { useSelector } from 'react-redux';
+import { RootState } from '@/lib/store';
 import api from '@/lib/api';
+import { io as socketIO, Socket } from 'socket.io-client';
 
 export default function NotificationBell() {
+    const { user } = useSelector((state: RootState) => state.auth);
     const [notifications, setNotifications] = useState<any[]>([]);
     const [unreadCount, setUnreadCount] = useState(0);
     const [isOpen, setIsOpen] = useState(false);
+    const [flash, setFlash] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
+    const socketRef = useRef<Socket | null>(null);
 
     const fetchNotifications = async () => {
         try {
@@ -23,9 +29,31 @@ export default function NotificationBell() {
 
     useEffect(() => {
         fetchNotifications();
-        const interval = setInterval(fetchNotifications, 60000); // 1 min poll
-        return () => clearInterval(interval);
-    }, []);
+        const interval = setInterval(fetchNotifications, 60000);
+
+        const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+        const socket = socketIO(socketUrl, { path: '/api/socket.io/', transports: ['websocket', 'polling'] });
+        socketRef.current = socket;
+
+        socket.on('connect', () => {
+            if (user?.id) socket.emit('join-notifications', user.id);
+            if (user?.role === 'admin') socket.emit('join-admin');
+        });
+
+        const handleNewNotification = () => {
+            fetchNotifications();
+            setFlash(true);
+            setTimeout(() => setFlash(false), 2000);
+        };
+
+        socket.on('notification', handleNewNotification);
+        socket.on('admin-notification', handleNewNotification);
+
+        return () => {
+            clearInterval(interval);
+            socket.disconnect();
+        };
+    }, [user?.id, user?.role]);
 
     // Close dropdown when clicking outside
     useEffect(() => {
@@ -58,12 +86,12 @@ export default function NotificationBell() {
     return (
         <div className="relative" ref={dropdownRef}>
             <button
-                onClick={() => setIsOpen(!isOpen)}
-                className="relative p-2 text-gray-400 hover:text-white transition-colors rounded-full hover:bg-gray-800 focus:outline-none"
+                onClick={() => { setIsOpen(!isOpen); setFlash(false); }}
+                className={`relative p-2 text-gray-400 hover:text-white transition-colors rounded-full hover:bg-gray-800 focus:outline-none ${flash ? 'animate-bounce' : ''}`}
             >
-                <BellIcon className="h-6 w-6" />
+                <BellIcon className={`h-6 w-6 ${flash ? 'text-yellow-400' : ''}`} />
                 {unreadCount > 0 && (
-                    <span className="absolute top-1 right-1 h-3 w-3 bg-red-500 rounded-full border-2 border-gray-950"></span>
+                    <span className={`absolute top-1 right-1 h-3 w-3 rounded-full border-2 border-gray-950 ${flash ? 'bg-yellow-400 animate-ping' : 'bg-red-500'}`}></span>
                 )}
             </button>
 
