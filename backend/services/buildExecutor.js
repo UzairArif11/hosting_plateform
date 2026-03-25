@@ -973,6 +973,73 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
 
         await onLog('info', `Build command: ${buildCommand}`);
 
+        // ===== AUTO-FIX: Ensure PostCSS config exists for Tailwind CSS projects =====
+        // If tailwindcss is in dependencies but postcss.config.js is missing,
+        // the CSS won't be compiled and raw @tailwind directives will be served.
+        try {
+            const pkgJsonPath = path.join(buildPath, 'package.json');
+            const pkgData = JSON.parse(await fs.readFile(pkgJsonPath, 'utf8'));
+            const allDeps = { ...(pkgData.dependencies || {}), ...(pkgData.devDependencies || {}) };
+
+            if (allDeps['tailwindcss']) {
+                // Check if postcss.config exists in any common form
+                const postcssConfigNames = [
+                    'postcss.config.js', 'postcss.config.mjs', 'postcss.config.cjs',
+                    'postcss.config.ts', '.postcssrc', '.postcssrc.js', '.postcssrc.json'
+                ];
+                let hasPostcssConfig = false;
+                for (const name of postcssConfigNames) {
+                    try {
+                        await fs.access(path.join(buildPath, name));
+                        hasPostcssConfig = true;
+                        break;
+                    } catch { }
+                }
+
+                if (!hasPostcssConfig) {
+                    // Generate postcss.config.js with tailwindcss and autoprefixer
+                    const postcssConfig = `module.exports = {\n  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n};\n`;
+                    await fs.writeFile(path.join(buildPath, 'postcss.config.js'), postcssConfig);
+                    await onLog('info', '✓ Auto-generated postcss.config.js (tailwindcss detected but no PostCSS config found)');
+
+                    // Also ensure autoprefixer is installed (tailwindcss peer dep)
+                    if (!allDeps['autoprefixer']) {
+                        try {
+                            await execAsync('npm install autoprefixer --save-dev --legacy-peer-deps', {
+                                cwd: buildPath,
+                                timeout: 60 * 1000
+                            });
+                            await onLog('info', '✓ Installed missing autoprefixer dependency');
+                        } catch (apErr) {
+                            await onLog('warn', `Could not install autoprefixer: ${apErr.message}`);
+                        }
+                    }
+                }
+
+                // Also check tailwind.config exists
+                const tailwindConfigNames = [
+                    'tailwind.config.js', 'tailwind.config.mjs', 'tailwind.config.cjs', 'tailwind.config.ts'
+                ];
+                let hasTailwindConfig = false;
+                for (const name of tailwindConfigNames) {
+                    try {
+                        await fs.access(path.join(buildPath, name));
+                        hasTailwindConfig = true;
+                        break;
+                    } catch { }
+                }
+
+                if (!hasTailwindConfig) {
+                    // Generate a minimal tailwind.config.js that scans typical Next.js paths
+                    const tailwindConfig = `/** @type {import('tailwindcss').Config} */\nmodule.exports = {\n  content: [\n    './app/**/*.{js,ts,jsx,tsx,mdx}',\n    './components/**/*.{js,ts,jsx,tsx,mdx}',\n    './pages/**/*.{js,ts,jsx,tsx,mdx}',\n    './src/**/*.{js,ts,jsx,tsx,mdx}',\n  ],\n  theme: { extend: {} },\n  plugins: [],\n};\n`;
+                    await fs.writeFile(path.join(buildPath, 'tailwind.config.js'), tailwindConfig);
+                    await onLog('info', '✓ Auto-generated tailwind.config.js (missing from project)');
+                }
+            }
+        } catch (postcssErr) {
+            await onLog('warn', `PostCSS auto-config check failed (non-fatal): ${postcssErr.message}`);
+        }
+
         // For Next.js deployments we still compute a deterministic URL path
         // for metadata/debugging, but routing is now handled purely by Nginx
         // (which rewrites /slug-id/* → /*), so we do NOT configure basePath
