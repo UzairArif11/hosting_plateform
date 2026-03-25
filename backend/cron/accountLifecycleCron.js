@@ -9,6 +9,17 @@ const logger = require('../utils/logger');
 function startCronJobs() {
     logger.info('Starting account lifecycle cron jobs...');
 
+    // Run every day at 1 AM: Warn users whose trial expires within 5 days
+    cron.schedule('0 1 * * *', async () => {
+        try {
+            logger.info('[CRON] Sending trial expiry warnings...');
+            const result = await accountLifecycle.warnExpiringTrials();
+            logger.info(`[CRON] Trial warnings sent to ${result.warned} users`);
+        } catch (error) {
+            logger.error('[CRON] Error sending trial warnings:', error);
+        }
+    });
+
     // Run every day at 2 AM: Check and suspend expired trials
     cron.schedule('0 2 * * *', async () => {
         try {

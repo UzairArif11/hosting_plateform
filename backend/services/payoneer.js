@@ -1,6 +1,7 @@
 const axios = require('axios');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
+const notify = require('./notificationService');
 
 // Configuration and constants
 const config = {
@@ -444,6 +445,16 @@ const handlePaymentCompleted = async (paymentData) => {
         upgrade: upgradeResult.upgrade,
         dataPreserved: true
       });
+
+      try {
+        const freshUser = await User.findById(userId);
+        if (freshUser) {
+          await notify.paymentVerified(freshUser, plan.displayName, paymentData.amount, paymentData.currency || 'USD');
+          await notify.planUpgraded(freshUser, plan.displayName);
+        }
+      } catch (notifyErr) {
+        logger.warn('Payoneer payment notification failed:', notifyErr.message);
+      }
       
       return { 
         success: true, 

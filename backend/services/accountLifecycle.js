@@ -11,6 +11,46 @@ const notify = require('./notificationService');
  */
 
 /**
+ * Warn users whose trial expires in 5, 3, or 1 day(s)
+ * Runs daily via cron job — uses a 24-hour window so each user gets at most 3 warnings
+ */
+async function warnExpiringTrials() {
+    try {
+        const now = new Date();
+        let warned = 0;
+
+        for (const targetDays of [5, 3, 1]) {
+            const windowStart = new Date(now.getTime() + (targetDays - 1) * 24 * 60 * 60 * 1000);
+            const windowEnd = new Date(now.getTime() + targetDays * 24 * 60 * 60 * 1000);
+
+            const users = await User.find({
+                status: 'active',
+                role: { $ne: 'admin' },
+                planType: 'free',
+                isTrialActive: true,
+                trialExpiry: { $gt: windowStart, $lte: windowEnd }
+            });
+
+            for (const user of users) {
+                try {
+                    await notify.trialExpiring(user, targetDays);
+                    warned++;
+                    logger.info(`Trial expiring warning sent to ${user.email} (${targetDays} days left)`);
+                } catch (err) {
+                    logger.error(`Trial warning failed for ${user.email}:`, err.message);
+                }
+            }
+        }
+
+        logger.info(`Trial expiry warnings sent to ${warned} users`);
+        return { warned };
+    } catch (error) {
+        logger.error('Error warning expiring trials:', error);
+        throw error;
+    }
+}
+
+/**
  * Check and suspend expired trial users
  * Runs daily via cron job
  */
@@ -591,6 +631,7 @@ async function stopAndRemoveContainer(containerName, serverKey) {
 }
 
 module.exports = {
+    warnExpiringTrials,
     checkAndSuspendExpiredTrials,
     checkAndSuspendExpiredSubscriptions,
     deleteResourcesForLongSuspended,

@@ -224,8 +224,10 @@ const sendWarning = async (user, type, used, limit, percent) => {
         resourceType: type.toLowerCase()
     });
 
-    // Send Email
-    await sendEmail(user.email, `⚠️ High ${type} Usage Alert`, message);
+    // Send Email (respects user email preferences)
+    if (user.preferences?.notifications?.resources !== false) {
+        await sendEmail(user.email, `⚠️ High ${type} Usage Alert`, message);
+    }
 };
 
 const killProcess = async (ssh, containerName, proc, user, type, used, limit) => {

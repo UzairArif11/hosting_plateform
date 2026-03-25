@@ -333,6 +333,14 @@ const userSchema = new mongoose.Schema({
       billing: {
         type: Boolean,
         default: true
+      },
+      security: {
+        type: Boolean,
+        default: true
+      },
+      resources: {
+        type: Boolean,
+        default: true
       }
     },
     timezone: {

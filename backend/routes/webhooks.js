@@ -7,6 +7,7 @@ const Deployment = require('../models/Deployment');
 const Payment = require('../models/Payment');
 const payoneerService = require('../services/payoneer');
 const { hasFeature } = require('../utils/featureCheck');
+const notify = require('../services/notificationService');
 
 /**
  * Verify GitHub webhook signature
@@ -511,6 +512,13 @@ router.post('/jazzcash', express.urlencoded({ extended: true }), async (req, res
               planName: plan.displayName,
               amount: result.amount
             });
+
+            try {
+              await notify.paymentVerified(user, plan.displayName, result.amount, 'PKR');
+              await notify.planUpgraded(user, plan.displayName);
+            } catch (notifyErr) {
+              logger.warn('JazzCash payment notification failed:', notifyErr.message);
+            }
           }
         } catch (upgradeErr) {
           logger.error('Failed to upgrade user after JazzCash payment:', upgradeErr.message);
@@ -591,6 +599,13 @@ router.post('/easypaisa', express.urlencoded({ extended: true }), async (req, re
               planName: plan.displayName,
               amount: result.amount
             });
+
+            try {
+              await notify.paymentVerified(user, plan.displayName, result.amount, 'PKR');
+              await notify.planUpgraded(user, plan.displayName);
+            } catch (notifyErr) {
+              logger.warn('EasyPaisa payment notification failed:', notifyErr.message);
+            }
           }
         } catch (upgradeErr) {
           logger.error('Failed to upgrade user after EasyPaisa payment:', upgradeErr.message);

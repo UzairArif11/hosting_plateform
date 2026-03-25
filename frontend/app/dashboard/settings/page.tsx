@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSelector } from 'react-redux';
 import { RootState } from '@/lib/store';
 import toast from 'react-hot-toast';
+import api from '@/lib/api';
 import {
     UserIcon,
     KeyIcon,
@@ -15,6 +16,34 @@ export default function SettingsPage() {
     const { user } = useSelector((state: RootState) => state.auth);
     const [activeTab, setActiveTab] = useState('profile');
     const [apiKey, setApiKey] = useState(user?.apiKey || '');
+    const [emailPrefs, setEmailPrefs] = useState({ deployments: true, billing: true, security: true, resources: true });
+    const [prefsLoading, setPrefLoading] = useState(false);
+    const [prefsSaving, setPrefsSaving] = useState(false);
+
+    const fetchEmailPrefs = useCallback(async () => {
+        try {
+            setPrefLoading(true);
+            const res = await api.get('/user/email-preferences');
+            if (res.data?.preferences) setEmailPrefs(res.data.preferences);
+        } catch { } finally { setPrefLoading(false); }
+    }, []);
+
+    useEffect(() => {
+        if (activeTab === 'notifications') fetchEmailPrefs();
+    }, [activeTab, fetchEmailPrefs]);
+
+    const updatePref = async (key: string, value: boolean) => {
+        const prev = { ...emailPrefs };
+        setEmailPrefs(p => ({ ...p, [key]: value }));
+        try {
+            setPrefsSaving(true);
+            await api.put('/user/email-preferences', { [key]: value });
+            toast.success('Preference updated');
+        } catch {
+            setEmailPrefs(prev);
+            toast.error('Failed to update preference');
+        } finally { setPrefsSaving(false); }
+    };
 
     const handleGenerateApiKey = () => {
         const newKey = `vcp_${Math.random().toString(36).substring(2, 15)}${Math.random().toString(36).substring(2, 15)}`;
@@ -203,42 +232,44 @@ export default function SettingsPage() {
                         <div>
                             <h3 className="text-lg font-semibold text-white mb-2">Email Notifications</h3>
                             <p className="text-gray-400 text-sm mb-4">
-                                Choose which emails you want to receive
+                                Choose which emails you want to receive. Critical notifications (account suspension, payment verification) are always sent.
                             </p>
                         </div>
 
-                        <div className="space-y-4">
-                            <label className="flex items-center justify-between p-4 bg-gray-800 rounded-lg cursor-pointer hover:bg-gray-750 transition-colors">
-                                <div>
-                                    <p className="text-white font-medium">Deployment Success</p>
-                                    <p className="text-gray-400 text-sm">Get notified when deployments succeed</p>
-                                </div>
-                                <input type="checkbox" defaultChecked className="w-5 h-5 text-purple-600" />
-                            </label>
+                        {prefsLoading ? (
+                            <div className="py-8 text-center text-gray-500">Loading preferences...</div>
+                        ) : (
+                            <div className="space-y-4">
+                                {[
+                                    { key: 'deployments', title: 'Deployment Notifications', desc: 'Emails when deployments succeed or fail' },
+                                    { key: 'billing', title: 'Billing & Plan Updates', desc: 'Payment confirmations and plan upgrade emails' },
+                                    { key: 'security', title: 'Security Alerts', desc: 'Account recovery, deletion warnings, and login alerts' },
+                                    { key: 'resources', title: 'Resource Alerts', desc: 'Warnings when approaching CPU, RAM, or storage limits' },
+                                ].map(item => (
+                                    <label key={item.key} className="flex items-center justify-between p-4 bg-gray-800 rounded-lg cursor-pointer hover:bg-gray-800/80 transition-colors">
+                                        <div>
+                                            <p className="text-white font-medium">{item.title}</p>
+                                            <p className="text-gray-400 text-sm">{item.desc}</p>
+                                        </div>
+                                        <div className="relative">
+                                            <input
+                                                type="checkbox"
+                                                checked={emailPrefs[item.key as keyof typeof emailPrefs]}
+                                                onChange={(e) => updatePref(item.key, e.target.checked)}
+                                                disabled={prefsSaving}
+                                                className="sr-only peer"
+                                            />
+                                            <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-gray-400 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600 peer-checked:after:bg-white"></div>
+                                        </div>
+                                    </label>
+                                ))}
+                            </div>
+                        )}
 
-                            <label className="flex items-center justify-between p-4 bg-gray-800 rounded-lg cursor-pointer hover:bg-gray-750 transition-colors">
-                                <div>
-                                    <p className="text-white font-medium">Deployment Failures</p>
-                                    <p className="text-gray-400 text-sm">Get notified when deployments fail</p>
-                                </div>
-                                <input type="checkbox" defaultChecked className="w-5 h-5 text-purple-600" />
-                            </label>
-
-                            <label className="flex items-center justify-between p-4 bg-gray-800 rounded-lg cursor-pointer hover:bg-gray-750 transition-colors">
-                                <div>
-                                    <p className="text-white font-medium">Resource Alerts</p>
-                                    <p className="text-gray-400 text-sm">Get notified when reaching resource limits</p>
-                                </div>
-                                <input type="checkbox" defaultChecked className="w-5 h-5 text-purple-600" />
-                            </label>
-
-                            <label className="flex items-center justify-between p-4 bg-gray-800 rounded-lg cursor-pointer hover:bg-gray-750 transition-colors">
-                                <div>
-                                    <p className="text-white font-medium">Billing Updates</p>
-                                    <p className="text-gray-400 text-sm">Get notified about billing and payments</p>
-                                </div>
-                                <input type="checkbox" defaultChecked className="w-5 h-5 text-purple-600" />
-                            </label>
+                        <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
+                            <p className="text-blue-400 text-sm">
+                                Critical emails like payment verification, account suspension, and trial expiration are always delivered regardless of these settings.
+                            </p>
                         </div>
                     </div>
                 )}

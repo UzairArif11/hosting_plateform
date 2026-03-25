@@ -143,18 +143,41 @@ router.get('/account/status', requireAuth, async (req, res) => {
 
 /**
  * @route   GET /api/user/notifications
- * @desc    Get user notifications (resource warnings, etc)
+ * @desc    Get user notifications with pagination, filtering, search
  * @access  User (authenticated)
  */
 router.get('/notifications', requireAuth, async (req, res) => {
     try {
-        const notifications = await Notification.find({ userId: req.user._id })
-            .sort({ createdAt: -1 })
-            .limit(50);
+        const { page = 1, limit = 50, type, search, unreadOnly } = req.query;
+        const pageNum = Math.max(1, parseInt(page));
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+        const skip = (pageNum - 1) * limitNum;
 
-        const unreadCount = await Notification.countDocuments({ userId: req.user._id, read: false });
+        const query = { userId: req.user._id };
+        if (type && ['info', 'warning', 'error', 'success'].includes(type)) {
+            query.type = type;
+        }
+        if (unreadOnly === 'true') {
+            query.read = false;
+        }
+        if (search) {
+            query.$or = [
+                { title: { $regex: search, $options: 'i' } },
+                { message: { $regex: search, $options: 'i' } }
+            ];
+        }
 
-        res.json({ notifications, unreadCount });
+        const [notifications, total, unreadCount] = await Promise.all([
+            Notification.find(query).sort({ createdAt: -1 }).skip(skip).limit(limitNum),
+            Notification.countDocuments(query),
+            Notification.countDocuments({ userId: req.user._id, read: false })
+        ]);
+
+        res.json({
+            notifications,
+            unreadCount,
+            pagination: { page: pageNum, limit: limitNum, total, totalPages: Math.ceil(total / limitNum) }
+        });
     } catch (error) {
         logger.error('Get notifications error:', error);
         res.status(500).json({ error: 'Failed to fetch notifications' });
@@ -162,8 +185,26 @@ router.get('/notifications', requireAuth, async (req, res) => {
 });
 
 /**
+ * @route   PUT /api/user/notifications/read-all
+ * @desc    Mark all notifications as read (must be before :id route)
+ * @access  User (authenticated)
+ */
+router.put('/notifications/read-all', requireAuth, async (req, res) => {
+    try {
+        const result = await Notification.updateMany(
+            { userId: req.user._id, read: false },
+            { read: true }
+        );
+        res.json({ success: true, marked: result.modifiedCount });
+    } catch (error) {
+        logger.error('Mark all read error:', error);
+        res.status(500).json({ error: 'Failed to mark all as read' });
+    }
+});
+
+/**
  * @route   PUT /api/user/notifications/:id/read
- * @desc    Mark notification as read
+ * @desc    Mark single notification as read
  * @access  User (authenticated)
  */
 router.put('/notifications/:id/read', requireAuth, async (req, res) => {
@@ -175,6 +216,52 @@ router.put('/notifications/:id/read', requireAuth, async (req, res) => {
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: 'Update failed' });
+    }
+});
+
+/**
+ * @route   GET /api/user/email-preferences
+ * @desc    Get email notification preferences
+ * @access  User (authenticated)
+ */
+router.get('/email-preferences', requireAuth, async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id).select('preferences');
+        const prefs = user?.preferences?.notifications || {};
+        res.json({
+            success: true,
+            preferences: {
+                deployments: prefs.deployments !== false,
+                billing: prefs.billing !== false,
+                security: prefs.security !== false,
+                resources: prefs.resources !== false
+            }
+        });
+    } catch (error) {
+        logger.error('Get email preferences error:', error);
+        res.status(500).json({ error: 'Failed to fetch preferences' });
+    }
+});
+
+/**
+ * @route   PUT /api/user/email-preferences
+ * @desc    Update email notification preferences
+ * @access  User (authenticated)
+ */
+router.put('/email-preferences', requireAuth, async (req, res) => {
+    try {
+        const { deployments, billing, security, resources } = req.body;
+        const update = {};
+        if (typeof deployments === 'boolean') update['preferences.notifications.deployments'] = deployments;
+        if (typeof billing === 'boolean') update['preferences.notifications.billing'] = billing;
+        if (typeof security === 'boolean') update['preferences.notifications.security'] = security;
+        if (typeof resources === 'boolean') update['preferences.notifications.resources'] = resources;
+
+        await User.findByIdAndUpdate(req.user._id, { $set: update });
+        res.json({ success: true, message: 'Email preferences updated' });
+    } catch (error) {
+        logger.error('Update email preferences error:', error);
+        res.status(500).json({ error: 'Failed to update preferences' });
     }
 });
 

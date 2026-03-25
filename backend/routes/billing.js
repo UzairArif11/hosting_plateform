@@ -321,6 +321,12 @@ router.post('/cancel', async (req, res) => {
       cancelledAt: new Date()
     });
 
+    try {
+      await notify.subscriptionCancelled(user);
+    } catch (notifyErr) {
+      logger.warn('Subscription cancellation notification failed:', notifyErr.message);
+    }
+
     res.json({
       success: true,
       message: 'Subscription cancelled successfully'

@@ -80,6 +80,18 @@ async function notifyAdmins({ title, message, type = 'warning', socketEvent = nu
 const platformName = () => process.env.PLATFORM_NAME || 'DeployHub';
 const frontendUrl = () => process.env.FRONTEND_URL || 'http://localhost:3000';
 
+/**
+ * Check if user has opted in to a specific email category.
+ * Critical emails (payment verified/rejected, account suspended/reactivated) always send.
+ * Categories: 'deployments', 'billing', 'security', 'resources'
+ */
+function shouldSendEmail(user, category) {
+    if (!category) return true;
+    const prefs = user?.preferences?.notifications;
+    if (!prefs) return true;
+    return prefs[category] !== false;
+}
+
 // ─── BILLING ───────────────────────────────────────────────
 
 async function paymentVerified(user, planName, amount, currency) {
@@ -107,10 +119,19 @@ async function planUpgraded(user, planName) {
     const title = 'Plan Upgraded';
     const msg = `Congratulations! Your plan has been upgraded to ${planName}.`;
     await createNotification(user._id, { title, message: msg, type: 'success' });
+    if (!shouldSendEmail(user, 'billing')) return;
     await sendEmail(user.email, `🚀 Plan Upgraded to ${planName}`, loadTemplate('planUpgraded', {
         platformName: platformName(), userName: user.displayName || user.username,
         planName, dashboardUrl: `${frontendUrl()}/dashboard`
     }));
+}
+
+async function subscriptionCancelled(user) {
+    await createNotification(user._id, {
+        title: 'Subscription Cancelled',
+        message: 'Your subscription has been cancelled. Your plan remains active until the current billing period ends.',
+        type: 'warning'
+    });
 }
 
 async function paymentSubmitted(user, planName, paymentType) {
@@ -256,9 +277,10 @@ async function subscriptionExpired(user) {
         message: 'Your subscription has expired. Your account is suspended. Renew to reactivate.',
         type: 'error'
     });
-    await sendEmail(user.email, `🔴 Subscription Expired — ${platformName()}`, loadTemplate('subscriptionExpired', {
+    await sendEmail(user.email, `🔴 Subscription Expired — Account Suspended`, loadTemplate('accountSuspended', {
         platformName: platformName(), userName: user.displayName || user.username || user.email,
-        billingUrl: `${frontendUrl()}/dashboard/billing`
+        renewUrl: `${frontendUrl()}/dashboard/billing`,
+        deletionNotice: 'Your subscription has expired and your account has been suspended. Renew your plan to reactivate. Resources will be deleted after 30 days of suspension.'
     }));
 }
 
@@ -301,6 +323,7 @@ async function paymentReceived(user, planName, amount, currency, paymentType) {
         message: `Your ${typeLabel.toLowerCase()} payment of ${currency} ${amount} for ${planName} is under review. You'll be notified once verified.`,
         type: 'info'
     });
+    if (!shouldSendEmail(user, 'billing')) return;
     await sendEmail(user.email, `📋 Payment Received — ${platformName()}`, loadTemplate('paymentReceived', {
         platformName: platformName(), userName: user.displayName || user.username || user.email,
         planName, amount: String(amount), currency, paymentType: typeLabel,
@@ -309,6 +332,7 @@ async function paymentReceived(user, planName, amount, currency, paymentType) {
 }
 
 async function deploymentSucceededEmail(user, projectName, url) {
+    if (!shouldSendEmail(user, 'deployments')) return;
     await sendEmail(user.email, `🚀 ${projectName} is Live — ${platformName()}`, loadTemplate('deploymentSuccess', {
         platformName: platformName(), userName: user.displayName || user.username || user.email,
         projectName, deploymentUrl: url || '',
@@ -317,6 +341,7 @@ async function deploymentSucceededEmail(user, projectName, url) {
 }
 
 async function deploymentFailedEmail(user, projectName, error) {
+    if (!shouldSendEmail(user, 'deployments')) return;
     await sendEmail(user.email, `❌ ${projectName} Deployment Failed — ${platformName()}`, loadTemplate('deploymentFailed', {
         platformName: platformName(), userName: user.displayName || user.username || user.email,
         projectName, error: error || 'Unknown error',
@@ -326,7 +351,7 @@ async function deploymentFailedEmail(user, projectName, error) {
 
 module.exports = {
     sendEmail, createNotification, notifyAdmins, resetTransporter,
-    paymentVerified, paymentRejected, planUpgraded, paymentSubmitted,
+    paymentVerified, paymentRejected, planUpgraded, subscriptionCancelled, paymentSubmitted,
     welcomeUser, trialExpiring, accountSuspended, accountReactivated,
     deploymentSucceeded, deploymentFailed,
     newUserSignup, adminSuspendedUser, adminUnsuspendedUser,
