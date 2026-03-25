@@ -188,15 +188,15 @@ export default function SuspendedAccountPage() {
                     <ArrowUpCircleIcon className="h-8 w-8 mb-3" />
                   )}
                   <h4 className="font-bold text-lg mb-1">
-                    {resourcesDeleted ? 'Upgrade & Start Fresh' : 'Upgrade Plan'}
+                    {resourcesDeleted ? 'Upgrade to Pro & Start Fresh' : 'Upgrade to a Paid Plan'}
                   </h4>
                   <p className="text-sm text-purple-100">
                     {resourcesDeleted
-                      ? 'Subscribe to a paid plan to reactivate your account and deploy new projects with fresh resources'
-                      : 'Subscribe to a paid plan to reactivate immediately'}
+                      ? 'Choose Pro or Enterprise to reactivate your account and deploy new projects with fresh resources'
+                      : 'Choose Pro or Enterprise to reactivate immediately — free plan users are auto-assigned'}
                   </p>
                   <div className="mt-4 text-xs text-purple-200">
-                    {resourcesDeleted ? 'New container + resources allocated instantly' : 'Starting from $5/month'}
+                    {resourcesDeleted ? 'New container + resources allocated instantly' : 'Pro starts from $5/month'}
                   </div>
                 </button>
 

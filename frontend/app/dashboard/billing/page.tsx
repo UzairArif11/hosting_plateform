@@ -380,6 +380,19 @@ export default function BillingPage() {
                             </p>
                             <span className="text-lg opacity-80">/month</span>
                         </div>
+
+                        {(user?.plan?.name || '').toLowerCase() !== 'free' && (
+                            <button
+                                onClick={() => {
+                                    const currentPlanData = availablePlans.find(p => p.id === user?.plan?._id || p.id === user?.plan);
+                                    if (currentPlanData) handleUpgrade(currentPlanData);
+                                    else toast.error('Plan data not loaded yet');
+                                }}
+                                className="mt-4 px-6 py-2.5 bg-white/20 hover:bg-white/30 backdrop-blur-sm border border-white/30 rounded-xl text-sm font-semibold transition-all"
+                            >
+                                🔄 Renew / Extend Subscription
+                            </button>
+                        )}
                     </div>
 
                     {/* Dynamic User Resource Display */}
@@ -419,10 +432,24 @@ export default function BillingPage() {
                         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500 mx-auto"></div>
                     </div>
                 ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                        {availablePlans.map((plan) => {
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {availablePlans
+                            .filter((plan) => {
+                                const planName = (plan.name || plan.displayName || '').toLowerCase();
+                                const isFree = planName === 'free' || plan.price === 0 || (typeof plan.price === 'object' && plan.price.usd === 0);
+                                const isCurrent = user?.plan?._id === plan.id || user?.plan === plan.id;
+                                if (isFree && !isCurrent) return false;
+                                return true;
+                            })
+                            .map((plan) => {
                             const isCurrent = user?.plan?._id === plan.id || user?.plan === plan.id;
                             const displayResources = plan.resources || {};
+                            const planName = (plan.name || '').toLowerCase();
+                            const isDowngrade = isCurrent ? false : (() => {
+                                const LEVELS: Record<string, number> = { free: 0, pro: 1, enterprise: 2 };
+                                const currentPlanName = (user?.plan?.name || user?.planType || 'free').toLowerCase();
+                                return (LEVELS[planName] || 0) < (LEVELS[currentPlanName] || 0);
+                            })();
 
                             return (
                                 <div
@@ -432,14 +459,6 @@ export default function BillingPage() {
                                         : 'border-gray-800 hover:border-gray-600'
                                         }`}
                                 >
-                                    {plan.isDefault && (
-                                        <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
-                                            <span className="bg-gray-700 text-white px-3 py-1 rounded-full text-xs font-bold">
-                                                Please Start Here
-                                            </span>
-                                        </div>
-                                    )}
-
                                     {isCurrent && (
                                         <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 z-10">
                                             <span className="bg-purple-500 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg">
@@ -495,16 +514,27 @@ export default function BillingPage() {
                                         </ul>
                                     </div>
 
-                                    <button
-                                        disabled={isCurrent}
-                                        onClick={() => handleUpgrade(plan)}
-                                        className={`w-full py-3 rounded-xl font-bold transition-all ${isCurrent
-                                            ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
-                                            : 'bg-white text-black hover:bg-gray-200'
-                                            }`}
-                                    >
-                                        {isCurrent ? 'Current Plan' : 'Upgrade'}
-                                    </button>
+                                    {(() => {
+                                        const isFreePlan = planName === 'free';
+                                        const canRenew = isCurrent && !isFreePlan;
+                                        return (
+                                            <button
+                                                disabled={isCurrent && isFreePlan}
+                                                onClick={() => handleUpgrade(plan)}
+                                                className={`w-full py-3 rounded-xl font-bold transition-all ${
+                                                    isCurrent && isFreePlan
+                                                        ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                                                        : canRenew
+                                                        ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:from-green-700 hover:to-emerald-700'
+                                                        : isDowngrade
+                                                        ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                                        : 'bg-white text-black hover:bg-gray-200'
+                                                }`}
+                                            >
+                                                {isCurrent && isFreePlan ? 'Current Plan' : canRenew ? '🔄 Renew Plan' : isDowngrade ? 'Downgrade' : 'Upgrade'}
+                                            </button>
+                                        );
+                                    })()}
                                 </div>
                             );
                         })}
