@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import api from '@/lib/api';
 import toast from 'react-hot-toast';
 
 interface Collaborator {
@@ -41,28 +42,15 @@ export default function TeamPage({ params }: { params: { id: string } }) {
 
     const fetchProjectAndTeam = async () => {
         try {
-            const token = localStorage.getItem('token');
-
-            // Fetch project
-            const res = await fetch(`/api/projects/${params.id}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (!res.ok) throw new Error('Failed to fetch project');
-            const data = await res.json();
-
-            setProject(data);
-            setCollaborators(data.collaborators || []);
+            const res = await api.get(`/projects/${params.id}`);
+            setProject(res.data);
+            setCollaborators(res.data.collaborators || []);
 
             // Fetch pending invitations
-            const invRes = await fetch(`/api/projects/${params.id}/invitations`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (invRes.ok) {
-                const invData = await invRes.json();
-                setInvitations(invData.invitations || []);
-            }
+            try {
+                const invRes = await api.get(`/projects/${params.id}/invitations`);
+                setInvitations(invRes.data.invitations || []);
+            } catch { /* ignore invitation fetch errors */ }
         } catch (error) {
             console.error('Error fetching team:', error);
             toast.error('Failed to load team information');
@@ -79,29 +67,10 @@ export default function TeamPage({ params }: { params: { id: string } }) {
 
         setInviting(true);
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`/api/projects/${params.id}/invitations`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    email: inviteEmail,
-                    role: inviteRole
-                })
+            const res = await api.post(`/projects/${params.id}/invitations`, {
+                email: inviteEmail,
+                role: inviteRole
             });
-
-            const data = await res.json();
-
-            if (!res.ok) {
-                if (data.upgradeRequired) {
-                    toast.error(data.error || 'Team collaboration not available in your plan');
-                } else {
-                    throw new Error(data.error || 'Invitation failed');
-                }
-                return;
-            }
 
             toast.success(`Invitation sent to ${inviteEmail}`);
             setShowInviteModal(false);
@@ -110,7 +79,12 @@ export default function TeamPage({ params }: { params: { id: string } }) {
             fetchProjectAndTeam();
         } catch (error: any) {
             console.error('Invite error:', error);
-            toast.error(error.message || 'Failed to send invitation');
+            const errMsg = error.response?.data?.error || 'Failed to send invitation';
+            if (error.response?.data?.upgradeRequired) {
+                toast.error(errMsg);
+            } else {
+                toast.error(errMsg);
+            }
         } finally {
             setInviting(false);
         }
@@ -120,20 +94,13 @@ export default function TeamPage({ params }: { params: { id: string } }) {
         if (!removeTarget) return;
 
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`/api/projects/${params.id}/collaborators/${removeTarget.user._id}`, {
-                method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (!res.ok) throw new Error('Failed to remove member');
-
+            await api.delete(`/projects/${params.id}/collaborators/${removeTarget.user._id}`);
             toast.success('Member removed successfully');
             setRemoveTarget(null);
             fetchProjectAndTeam();
-        } catch (error) {
+        } catch (error: any) {
             console.error('Remove member error:', error);
-            toast.error('Failed to remove member');
+            toast.error(error.response?.data?.error || 'Failed to remove member');
         }
     };
 

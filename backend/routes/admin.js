@@ -13,6 +13,7 @@ const logger = require('../utils/logger');
 const notify = require('../services/notificationService');
 const rateLimit = require('express-rate-limit');
 const { getRemoteSystemStats, getServerUtilization, getRemoteDockerStats, getRemoteContainerLogs, ORACLE_SERVERS } = require('../services/containerOrchestrator');
+const buildQueue = require('../services/buildQueue');
 
 
 // --- Rate Limiters ---
@@ -1896,6 +1897,54 @@ router.get('/servers/:serverKey/docker-stats', requireAuth, requireAdmin, async 
       error: 'Failed to fetch Docker stats',
       details: error.message
     });
+  }
+});
+
+// ==================== ADMIN PROJECT REBUILD ====================
+
+// Force rebuild a project (admin only)
+router.post('/projects/:projectId/rebuild', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const project = await Project.findById(req.params.projectId).populate('userId', 'username email');
+    if (!project) {
+      return res.status(404).json({ success: false, error: 'Project not found' });
+    }
+
+    // Create a new deployment record
+    const deployment = await Deployment.create({
+      projectId: project._id,
+      userId: project.userId._id || project.userId,
+      branch: project.repository?.branch || 'main',
+      commitSha: `admin_rebuild_${Date.now()}`,
+      commitMessage: `Admin force rebuild by ${req.user.email}`,
+      status: 'queued',
+      isPreview: false,
+      environment: 'production',
+      trigger: 'admin'
+    });
+
+    // Add to build queue with high priority
+    await buildQueue.addDeployment(
+      deployment._id.toString(),
+      project._id.toString(),
+      (project.userId._id || project.userId).toString(),
+      { priority: 1 }
+    );
+
+    logger.info('Admin force rebuild queued', {
+      projectId: project._id,
+      deploymentId: deployment._id,
+      adminUser: req.user.email
+    });
+
+    res.json({
+      success: true,
+      deployment,
+      message: 'Rebuild queued successfully'
+    });
+  } catch (error) {
+    logger.error('Admin rebuild error:', error);
+    res.status(500).json({ success: false, error: 'Failed to queue rebuild' });
   }
 });
 

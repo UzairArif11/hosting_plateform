@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { TrashIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import api from '@/lib/api';
 
 interface ProjectActionsProps {
     projectId: string;
@@ -29,19 +30,11 @@ export default function ProjectActions({
         setIsDeleting(true);
 
         try {
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}`, {
-                method: 'DELETE',
-                credentials: 'include'
-            });
-
-            if (response.ok) {
-                toast.success('Project deleted successfully');
-                if (onDelete) onDelete();
-            } else {
-                throw new Error('Failed to delete project');
-            }
-        } catch (error) {
-            toast.error('Failed to delete project');
+            await api.delete(`/projects/${projectId}`);
+            toast.success('Project deleted successfully');
+            if (onDelete) onDelete();
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'Failed to delete project');
             console.error(error);
         } finally {
             setIsDeleting(false);
@@ -53,25 +46,11 @@ export default function ProjectActions({
         setIsRedeploying(true);
 
         try {
-            const response = await fetch(
-                `${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/deploy`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'include',
-                    body: JSON.stringify({ branch })
-                }
-            );
-
-            if (response.ok) {
-                const data = await response.json();
-                toast.success(`Deployment started on branch: ${branch}`);
-                if (onRedeploy) onRedeploy(branch);
-            } else {
-                throw new Error('Failed to start deployment');
-            }
-        } catch (error) {
-            toast.error('Failed to start deployment');
+            await api.post(`/projects/${projectId}/deploy`, { branch });
+            toast.success(`Deployment started on branch: ${branch}`);
+            if (onRedeploy) onRedeploy(branch);
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'Failed to start deployment');
             console.error(error);
         } finally {
             setIsRedeploying(false);

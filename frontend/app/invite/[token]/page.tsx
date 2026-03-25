@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import api from '@/lib/api';
 import { toast } from 'react-hot-toast';
 
 export default function InvitePage() {
@@ -18,16 +19,14 @@ export default function InvitePage() {
 
     const validateInvitation = async () => {
         try {
-            const res = await fetch(`/api/invitations/${params.token}`);
-            const data = await res.json();
-
-            if (data.success) {
-                setInvitation(data.invitation);
+            const res = await api.get(`/invitations/${params.token}`);
+            if (res.data.success) {
+                setInvitation(res.data.invitation);
             } else {
-                setError(data.error || 'Invalid invitation');
+                setError(res.data.error || 'Invalid invitation');
             }
-        } catch (err) {
-            setError('Failed to load invitation');
+        } catch (err: any) {
+            setError(err.response?.data?.error || 'Failed to load invitation');
         } finally {
             setLoading(false);
         }
@@ -37,26 +36,21 @@ export default function InvitePage() {
         setAccepting(true);
 
         try {
-            const res = await fetch(`/api/invitations/${params.token}/accept`, {
-                method: 'POST'
-            });
+            const res = await api.post(`/invitations/${params.token}/accept`);
 
-            const data = await res.json();
-
-            if (data.success) {
+            if (res.data.success) {
                 toast.success('Successfully joined the project!');
-                router.push(`/dashboard/projects/${data.project.id}`);
+                router.push(`/dashboard/projects/${res.data.project.id}`);
             } else {
-                // If not authenticated, redirect to login
-                if (res.status === 401) {
-                    toast.error('Please login to accept the invitation');
-                    router.push(`/login?redirect=/invite/${params.token}`);
-                } else {
-                    toast.error(data.error || 'Failed to accept invitation');
-                }
+                toast.error(res.data.error || 'Failed to accept invitation');
             }
-        } catch (error) {
-            toast.error('Network error');
+        } catch (error: any) {
+            if (error.response?.status === 401) {
+                toast.error('Please login to accept the invitation');
+                router.push(`/login?redirect=/invite/${params.token}`);
+            } else {
+                toast.error(error.response?.data?.error || 'Failed to accept invitation');
+            }
         } finally {
             setAccepting(false);
         }

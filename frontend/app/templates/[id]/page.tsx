@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import api from '@/lib/api';
 import toast from 'react-hot-toast';
 import { useSelector } from 'react-redux';
 import { RootState } from '@/lib/store';
@@ -63,18 +64,17 @@ export default function DeployTemplatePage() {
 
     const fetchTemplate = async (id: string) => {
         try {
-            const res = await fetch(`/api/templates/${id}`);
-            const data = await res.json();
+            const res = await api.get(`/templates/${id}`);
 
-            if (data.success) {
+            if (res.data.success) {
                 const templateData = {
-                    ...data.template,
-                    previewUrl: data.template.previewUrl || undefined,
-                    demoDeploymentUrl: data.template.demoDeploymentUrl || undefined,
+                    ...res.data.template,
+                    previewUrl: res.data.template.previewUrl || undefined,
+                    demoDeploymentUrl: res.data.template.demoDeploymentUrl || undefined,
                 };
                 setTemplate(templateData);
                 const initialEnv: Record<string, string> = {};
-                data.template.environmentVariables?.forEach((ev: any) => {
+                res.data.template.environmentVariables?.forEach((ev: any) => {
                     if (ev.defaultValue) initialEnv[ev.key] = ev.defaultValue;
                 });
                 setEnvVars(initialEnv);
@@ -82,9 +82,9 @@ export default function DeployTemplatePage() {
                 toast.error('Template not found');
                 router.push('/templates');
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('Failed to fetch template:', error);
-            toast.error('Failed to load template');
+            toast.error(error.response?.data?.error || 'Failed to load template');
         } finally {
             setLoading(false);
         }
@@ -103,30 +103,21 @@ export default function DeployTemplatePage() {
         try {
             const formattedEnvVars = Object.entries(envVars).map(([key, value]) => ({ key, value }));
 
-            const res = await fetch(`/api/templates/${params.id}/deploy`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('token')}`
-                },
-                body: JSON.stringify({
-                    projectName: projectName,
-                    environmentVariables: formattedEnvVars,
-                    mode: template.supportedModes && template.supportedModes.length > 1 ? mode : undefined
-                })
+            const res = await api.post(`/templates/${params.id}/deploy`, {
+                projectName: projectName,
+                environmentVariables: formattedEnvVars,
+                mode: template.supportedModes && template.supportedModes.length > 1 ? mode : undefined
             });
 
-            const data = await res.json();
-
-            if (data.success) {
+            if (res.data.success) {
                 toast.success('🚀 Project created successfully!');
-                router.push(`/dashboard/projects/${data.project._id}`);
+                router.push(`/dashboard/projects/${res.data.project._id}`);
             } else {
-                toast.error(data.error || 'Deployment failed');
+                toast.error(res.data.error || 'Deployment failed');
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('Deployment error:', error);
-            toast.error('Failed to create project');
+            toast.error(error.response?.data?.error || 'Failed to create project');
         } finally {
             setIsDeploying(false);
         }

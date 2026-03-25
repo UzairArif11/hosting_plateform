@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import api from '@/lib/api';
 import toast from 'react-hot-toast';
 
 interface AnalyticsSummary {
@@ -24,24 +25,15 @@ export default function AnalyticsPage({ params }: { params: { id: string } }) {
 
     const fetchAnalytics = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`/api/projects/${params.id}/analytics/summary?timeframe=${timeframe}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (res.status === 403) {
+            const res = await api.get(`/projects/${params.id}/analytics/summary?timeframe=${timeframe}`);
+            setAnalytics(res.data);
+        } catch (error: any) {
+            if (error.response?.status === 403) {
                 setHasAccess(false);
-                setLoading(false);
-                return;
+            } else {
+                console.error('Error fetching analytics:', error);
+                toast.error('Failed to load analytics');
             }
-
-            if (!res.ok) throw new Error('Failed to fetch analytics');
-
-            const data = await res.json();
-            setAnalytics(data);
-        } catch (error) {
-            console.error('Error fetching analytics:', error);
-            toast.error('Failed to load analytics');
         } finally {
             setLoading(false);
         }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import api from '@/lib/api';
 import toast from 'react-hot-toast';
 
 interface AuditLog {
@@ -35,31 +36,22 @@ export default function AuditLogsPage() {
 
     const fetchLogs = async () => {
         try {
-            const token = localStorage.getItem('token');
             const queryParams = new URLSearchParams({
                 page: page.toString(),
                 limit: limit.toString(),
                 ...(filter && { action: filter })
             });
 
-            const res = await fetch(`/api/audit?${queryParams}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (res.status === 403) {
+            const res = await api.get(`/audit?${queryParams}`);
+            setLogs(res.data.logs || []);
+            setTotal(res.data.pagination?.total || 0);
+        } catch (error: any) {
+            if (error.response?.status === 403) {
                 setHasAccess(false);
-                setLoading(false);
-                return;
+            } else {
+                console.error('Error fetching audit logs:', error);
+                toast.error('Failed to load audit logs');
             }
-
-            if (!res.ok) throw new Error('Failed to fetch audit logs');
-
-            const data = await res.json();
-            setLogs(data.logs || []);
-            setTotal(data.pagination?.total || 0);
-        } catch (error) {
-            console.error('Error fetching audit logs:', error);
-            toast.error('Failed to load audit logs');
         } finally {
             setLoading(false);
         }

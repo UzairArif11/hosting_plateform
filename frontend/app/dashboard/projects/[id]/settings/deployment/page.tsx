@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
+import api from '@/lib/api';
 import { toast } from 'react-hot-toast';
 
 export default function DeploymentSettingsPage() {
@@ -21,14 +22,13 @@ export default function DeploymentSettingsPage() {
 
     const fetchSettings = async () => {
         try {
-            const res = await fetch(`/api/projects/${params.id}`);
-            const data = await res.json();
-            if (data.success) {
+            const res = await api.get(`/projects/${params.id}`);
+            if (res.data.success) {
                 setSettings({
-                    buildCommand: data.project.buildCommand || '',
-                    installCommand: data.project.installCommand || 'npm install',
-                    outputDirectory: data.project.outputDirectory || 'dist',
-                    framework: data.project.framework || ''
+                    buildCommand: res.data.project.buildCommand || '',
+                    installCommand: res.data.project.installCommand || 'npm install',
+                    outputDirectory: res.data.project.outputDirectory || 'dist',
+                    framework: res.data.project.framework || ''
                 });
             }
         } catch (error) {
@@ -43,19 +43,10 @@ export default function DeploymentSettingsPage() {
         setSaving(true);
 
         try {
-            const res = await fetch(`/api/projects/${params.id}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(settings)
-            });
-
-            if (res.ok) {
-                toast.success('Settings saved successfully');
-            } else {
-                toast.error('Failed to save settings');
-            }
-        } catch (error) {
-            toast.error('Network error');
+            await api.put(`/projects/${params.id}`, settings);
+            toast.success('Settings saved successfully');
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'Failed to save settings');
         } finally {
             setSaving(false);
         }

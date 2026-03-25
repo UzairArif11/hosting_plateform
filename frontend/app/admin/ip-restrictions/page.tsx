@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import api from '@/lib/api';
 import toast from 'react-hot-toast';
 
 interface IPRestrictionSettings {
@@ -33,33 +34,16 @@ export default function IPRestrictionsPage() {
 
     const fetchData = async () => {
         try {
-            const token = localStorage.getItem('token');
-            if (!token) {
-                toast.error('No authentication token');
-                return;
-            }
-
             const [settingsRes, statsRes] = await Promise.all([
-                fetch('/api/ip-restrictions/settings', {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                }),
-                fetch('/api/ip-restrictions/statistics', {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                })
+                api.get('/ip-restrictions/settings'),
+                api.get('/ip-restrictions/statistics')
             ]);
 
-            if (!settingsRes.ok || !statsRes.ok) {
-                throw new Error('Failed to fetch data');
-            }
-
-            const settingsData = await settingsRes.json();
-            const statsData = await statsRes.json();
-
-            setSettings(settingsData.ipRestrictions);
-            setIPStats(statsData.topIPs || []);
+            setSettings(settingsRes.data.ipRestrictions);
+            setIPStats(statsRes.data.topIPs || []);
             setLoading(false);
         } catch (error: any) {
-            toast.error(error.message || 'Failed to load data');
+            toast.error(error.response?.data?.error || 'Failed to load data');
             setLoading(false);
         }
     };
@@ -69,25 +53,11 @@ export default function IPRestrictionsPage() {
 
         setSaving(true);
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch('/api/ip-restrictions/settings', {
-                method: 'PUT',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(settings)
-            });
-
-            if (!res.ok) {
-                const data = await res.json();
-                throw new Error(data.error || 'Failed to save settings');
-            }
-
+            await api.put('/ip-restrictions/settings', settings);
             toast.success('Settings saved successfully!');
             setSaving(false);
         } catch (error: any) {
-            toast.error(error.message || 'Failed to save settings');
+            toast.error(error.response?.data?.error || 'Failed to save settings');
             setSaving(false);
         }
     };
@@ -99,22 +69,12 @@ export default function IPRestrictionsPage() {
         }
 
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch('/api/ip-restrictions/test', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    email: testEmail,
-                    ipAddress: testIP,
-                    planType: 'free'
-                })
+            const res = await api.post('/ip-restrictions/test', {
+                email: testEmail,
+                ipAddress: testIP,
+                planType: 'free'
             });
-
-            const data = await res.json();
-            setTestResult(data);
+            setTestResult(res.data);
         } catch (error: any) {
             toast.error('Failed to test signup');
         }

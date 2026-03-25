@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import api from '@/lib/api';
+import toast from 'react-hot-toast';
 import InfraScanner from './InfraScanner';
 
 interface ServerCapacity {
@@ -116,7 +117,7 @@ export default function ServerManagement() {
                 setServerLogs({ ...serverLogs, [serverKey]: res.data.stats });
             }
         } catch (error) {
-            alert('Failed to fetch server logs');
+            toast.error('Failed to fetch server logs');
         } finally {
             setLoadingLogs(null);
         }
@@ -140,7 +141,7 @@ export default function ServerManagement() {
             setEditingServer(null);
             fetchServers(); // Refresh data
         } catch (error) {
-            alert('Failed to save server capacity');
+            toast.error('Failed to save server capacity');
         } finally {
             setSaving(false);
         }
@@ -156,7 +157,7 @@ export default function ServerManagement() {
             });
             setVerifying(null);
         } catch (error) {
-            alert('Error verifying DNS');
+            toast.error('Error verifying DNS');
             setVerifying(null);
         }
     };

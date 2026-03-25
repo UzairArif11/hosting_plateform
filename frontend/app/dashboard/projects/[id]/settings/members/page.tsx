@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
+import api from '@/lib/api';
 import { toast } from 'react-hot-toast';
 import FeatureGuard from '@/components/FeatureGuard';
 
@@ -31,15 +32,12 @@ function MembersPageContent() {
         setLoading(true);
         try {
             const [projectRes, invitesRes] = await Promise.all([
-                fetch(`/api/projects/${params.id}`),
-                fetch(`/api/projects/${params.id}/invitations`)
+                api.get(`/projects/${params.id}`),
+                api.get(`/projects/${params.id}/invitations`)
             ]);
 
-            const projectData = await projectRes.json();
-            const invitesData = await invitesRes.json();
-
-            if (projectData.success) setProject(projectData.project);
-            if (invitesData.success) setInvitations(invitesData.invitations || []);
+            if (projectRes.data.success) setProject(projectRes.data.project);
+            if (invitesRes.data.success) setInvitations(invitesRes.data.invitations || []);
         } catch (error) {
             toast.error('Failed to load data');
         } finally {
@@ -52,25 +50,21 @@ function MembersPageContent() {
         setInviting(true);
 
         try {
-            const res = await fetch(`/api/projects/${params.id}/invitations`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: inviteEmail, role: inviteRole })
+            const res = await api.post(`/projects/${params.id}/invitations`, {
+                email: inviteEmail, role: inviteRole
             });
 
-            const data = await res.json();
-
-            if (data.success) {
+            if (res.data.success) {
                 toast.success('Invitation sent!');
                 setShowInviteModal(false);
                 setInviteEmail('');
                 setInviteRole('viewer');
                 fetchData();
             } else {
-                toast.error(data.error || 'Failed to send invitation');
+                toast.error(res.data.error || 'Failed to send invitation');
             }
-        } catch (error) {
-            toast.error('Network error');
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'Failed to send invitation');
         } finally {
             setInviting(false);
         }
@@ -80,35 +74,21 @@ function MembersPageContent() {
         if (!confirm('Remove this member from the project?')) return;
 
         try {
-            const res = await fetch(`/api/projects/${params.id}/members/${userId}`, {
-                method: 'DELETE'
-            });
-
-            if (res.ok) {
-                toast.success('Member removed');
-                fetchData();
-            } else {
-                toast.error('Failed to remove member');
-            }
-        } catch (error) {
-            toast.error('Network error');
+            await api.delete(`/projects/${params.id}/members/${userId}`);
+            toast.success('Member removed');
+            fetchData();
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'Failed to remove member');
         }
     };
 
     const handleCancelInvite = async (inviteId: string) => {
         try {
-            const res = await fetch(`/api/invitations/${inviteId}`, {
-                method: 'DELETE'
-            });
-
-            if (res.ok) {
-                toast.success('Invitation cancelled');
-                fetchData();
-            } else {
-                toast.error('Failed to cancel invitation');
-            }
-        } catch (error) {
-            toast.error('Network error');
+            await api.delete(`/invitations/${inviteId}`);
+            toast.success('Invitation cancelled');
+            fetchData();
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'Failed to cancel invitation');
         }
     };
 

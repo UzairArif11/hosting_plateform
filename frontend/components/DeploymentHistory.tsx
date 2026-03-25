@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { CheckCircleIcon, XCircleIcon, ClockIcon, ArrowPathIcon } from '@heroicons/react/24/solid';
+import api from '@/lib/api';
 
 interface Deployment {
     _id: string;
@@ -28,15 +29,8 @@ export default function DeploymentHistory({ projectId }: DeploymentHistoryProps)
 
     const loadDeployments = async () => {
         try {
-            const response = await fetch(
-                `${process.env.NEXT_PUBLIC_API_URL}/api/deployments/project/${projectId}?limit=20`,
-                { credentials: 'include' }
-            );
-
-            if (response.ok) {
-                const data = await response.json();
-                setDeployments(data.deployments || []);
-            }
+            const res = await api.get(`/deployments/project/${projectId}?limit=20`);
+            setDeployments(res.data.deployments || []);
         } catch (error) {
             console.error('Failed to load deployments:', error);
         } finally {

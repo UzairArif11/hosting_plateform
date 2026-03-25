@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import api from '@/lib/api';
 import toast from 'react-hot-toast';
 import FeatureGuard from '@/components/FeatureGuard';
 
@@ -38,16 +39,9 @@ function DomainsPageContent({ params }: { params: { id: string } }) {
 
     const fetchProject = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`/api/projects/${params.id}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (!res.ok) throw new Error('Failed to fetch project');
-            const data = await res.json();
-
-            setProject(data);
-            setDomains(data.domains || []);
+            const res = await api.get(`/projects/${params.id}`);
+            setProject(res.data);
+            setDomains(res.data.domains || []);
         } catch (error) {
             console.error('Error fetching project:', error);
             toast.error('Failed to load project');
@@ -64,31 +58,14 @@ function DomainsPageContent({ params }: { params: { id: string } }) {
 
         setAdding(true);
         try {
-            const token = localStorage.getItem('token');
-
-            const res = await fetch(`/api/projects/${params.id}/domains`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({ domain: newDomain })
-            });
-
-            const data = await res.json();
-
-            if (!res.ok) {
-                toast.error(data.error || 'Failed to add domain');
-                return;
-            }
-
-            toast.success(data.message || 'Domain added! Configure DNS to verify.');
+            const res = await api.post(`/projects/${params.id}/domains`, { domain: newDomain });
+            toast.success(res.data.message || 'Domain added! Configure DNS to verify.');
             setShowAddModal(false);
             setNewDomain('');
             fetchProject();
-        } catch (error) {
+        } catch (error: any) {
             console.error('Add domain error:', error);
-            toast.error('Failed to add domain');
+            toast.error(error.response?.data?.error || 'Failed to add domain');
         } finally {
             setAdding(false);
         }
@@ -96,24 +73,11 @@ function DomainsPageContent({ params }: { params: { id: string } }) {
 
     const handleVerifyDomain = async (domainId: string) => {
         try {
-            const token = localStorage.getItem('token');
-
-            const res = await fetch(`/api/projects/${params.id}/domains/${domainId}/verify`, {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            const data = await res.json();
-
-            if (!res.ok) {
-                toast.error(data.error || 'Verification failed');
-                return;
-            }
-
-            toast.success(data.message || 'Domain verified successfully!');
+            const res = await api.post(`/projects/${params.id}/domains/${domainId}/verify`);
+            toast.success(res.data.message || 'Domain verified successfully!');
             fetchProject();
-        } catch (error) {
-            toast.error('Failed to verify domain');
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'Verification failed');
         }
     };
 

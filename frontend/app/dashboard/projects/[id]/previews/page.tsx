@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import api from '@/lib/api';
 import toast from 'react-hot-toast';
 
 interface PreviewDeployment {
@@ -30,32 +31,20 @@ export default function PreviewsPage({ params }: { params: { id: string } }) {
 
     const fetchPreviews = async () => {
         try {
-            const token = localStorage.getItem('token');
-
-            // Fetch project
-            const projectRes = await fetch(`/api/projects/${params.id}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (!projectRes.ok) throw new Error('Failed to fetch project');
-            const projectData = await projectRes.json();
-            setProject(projectData);
+            const projectRes = await api.get(`/projects/${params.id}`);
+            setProject(projectRes.data);
 
             // Fetch preview deployments
-            const res = await fetch(`/api/projects/${params.id}/deployments?preview=true`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (res.status === 403) {
-                setHasFeature(false);
-                setLoading(false);
-                return;
+            try {
+                const res = await api.get(`/projects/${params.id}/deployments?preview=true`);
+                setPreviews(res.data.deployments || []);
+            } catch (err: any) {
+                if (err.response?.status === 403) {
+                    setHasFeature(false);
+                } else {
+                    throw err;
+                }
             }
-
-            if (!res.ok) throw new Error('Failed to fetch previews');
-
-            const data = await res.json();
-            setPreviews(data.deployments || []);
         } catch (error) {
             console.error('Error fetching previews:', error);
             toast.error('Failed to load preview deployments');
@@ -66,19 +55,12 @@ export default function PreviewsPage({ params }: { params: { id: string } }) {
 
     const handleCleanup = async (deploymentId: string) => {
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`/api/deployments/${deploymentId}`, {
-                method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (!res.ok) throw new Error('Failed to cleanup preview');
-
+            await api.delete(`/deployments/${deploymentId}`);
             toast.success('Preview deployment cleaned up');
             fetchPreviews();
-        } catch (error) {
+        } catch (error: any) {
             console.error('Cleanup error:', error);
-            toast.error('Failed to cleanup preview');
+            toast.error(error.response?.data?.error || 'Failed to cleanup preview');
         }
     };
 

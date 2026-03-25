@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ExclamationTriangleIcon, ArrowUpCircleIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import api from '@/lib/api';
 
 interface SuspensionInfo {
   suspended: boolean;
@@ -17,9 +18,9 @@ export default function SuspendedAccountBanner() {
   const router = useRouter();
 
   useEffect(() => {
-    fetch('/api/auth/me')
-      .then(res => res.json())
-      .then(data => {
+    api.get('/auth/me')
+      .then(res => {
+        const data = res.data;
         if (data.user?.status === 'suspended') {
           setSuspensionInfo({
             suspended: true,

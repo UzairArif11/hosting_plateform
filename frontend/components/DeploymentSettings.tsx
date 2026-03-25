@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { useDispatch } from 'react-redux';
 import { fetchProject } from '@/lib/slices/projectsSlice';
 import { AppDispatch } from '@/lib/store';
+import api from '@/lib/api';
 
 interface Project {
     _id: string;
@@ -34,25 +35,21 @@ export default function DeploymentSettings({ project }: DeploymentSettingsProps)
         setLoadingBranches(true);
         setError(null);
         try {
-            const res = await fetch(`/api/projects/${project._id}/branches`, {
-                headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('token')}`
-                }
-            });
-            const data = await res.json();
+            const res = await api.get(`/projects/${project._id}/branches`);
 
-            if (data.success) {
-                setBranches(data.branches || []);
+            if (res.data.success) {
+                setBranches(res.data.branches || []);
             } else {
-                // Build error handling for GitHub API limits or auth issues
-                console.warn('Failed to fetch branches:', data.error);
-                if (data.error?.includes('GitHub connection required')) {
+                console.warn('Failed to fetch branches:', res.data.error);
+                if (res.data.error?.includes('GitHub connection required')) {
                     setError('Please reconnect GitHub to fetch branches');
                 }
             }
-        } catch (err) {
+        } catch (err: any) {
             console.error('Error fetching branches:', err);
-            // Don't show blocking error, just fallback to input
+            if (err.response?.data?.error?.includes('GitHub connection required')) {
+                setError('Please reconnect GitHub to fetch branches');
+            }
         } finally {
             setLoadingBranches(false);
         }
@@ -61,29 +58,22 @@ export default function DeploymentSettings({ project }: DeploymentSettingsProps)
     const updateSettings = async (updates: Partial<any>) => {
         setUpdating(true);
         try {
-            const res = await fetch(`/api/projects/${project._id}`, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('token')}`
-                },
-                body: JSON.stringify(updates)
-            });
+            const res = await api.put(`/projects/${project._id}`, updates);
 
-            const data = await res.json();
-
-            if (data.success) {
+            if (res.data.success) {
                 toast.success('Deployment settings updated');
-                dispatch(fetchProject(project._id)); // Refresh project state
+                dispatch(fetchProject(project._id));
             } else {
-                toast.error(data.error || 'Failed to update settings');
-                if (data.upgradeRequired) {
-                    // Can trigger upgrade modal here
+                toast.error(res.data.error || 'Failed to update settings');
+                if (res.data.upgradeRequired) {
                     toast('This feature requires an upgrade', { icon: '💎' });
                 }
             }
-        } catch (err) {
-            toast.error('Failed to update settings');
+        } catch (err: any) {
+            if (err.response?.data?.upgradeRequired) {
+                toast('This feature requires an upgrade', { icon: '💎' });
+            }
+            toast.error(err.response?.data?.error || 'Failed to update settings');
         } finally {
             setUpdating(false);
         }

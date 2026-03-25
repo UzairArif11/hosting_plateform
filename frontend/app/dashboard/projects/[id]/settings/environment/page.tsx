@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
+import api from '@/lib/api';
 import { toast } from 'react-hot-toast';
 import { PlusIcon, TrashIcon, LockClosedIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
 
@@ -25,11 +26,10 @@ export default function EnvironmentVariablesPage() {
 
     const fetchProject = async () => {
         try {
-            const res = await fetch(`/api/projects/${params.id}`);
-            const data = await res.json();
+            const res = await api.get(`/projects/${params.id}`);
+            const data = res.data;
             if (data.success) {
                 setProjectName(data.project.name || '');
-                // Convert environmentVariables array to our format
                 const envVarsData = (data.project.environmentVariables || []).map((env: any) => ({
                     key: env.key || '',
                     value: env.value || '',
@@ -89,28 +89,19 @@ export default function EnvironmentVariablesPage() {
                 environments: env.environments || ['production']
             }));
 
-            const res = await fetch(`/api/projects/${params.id}`, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('token')}`
-                },
-                body: JSON.stringify({
-                    environmentVariables: formattedEnvVars
-                })
+            const res = await api.put(`/projects/${params.id}`, {
+                environmentVariables: formattedEnvVars
             });
 
-            const data = await res.json();
-
-            if (data.success) {
+            if (res.data.success) {
                 toast.success('✅ Environment variables updated successfully');
-                fetchProject(); // Refresh to get server state
+                fetchProject();
             } else {
-                toast.error(data.error || 'Failed to update environment variables');
+                toast.error(res.data.error || 'Failed to update environment variables');
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('Save error:', error);
-            toast.error('Failed to save environment variables');
+            toast.error(error.response?.data?.error || 'Failed to save environment variables');
         } finally {
             setSaving(false);
         }

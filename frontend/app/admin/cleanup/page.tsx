@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
+import api from '@/lib/api';
 
 interface CleanupStats {
     suspended: number;
@@ -30,26 +31,16 @@ export default function ResourceCleanup() {
 
     const fetchStats = async () => {
         try {
-            const res = await fetch('/api/admin/users/cleanup-stats', {
-                credentials: 'include' // Send auth_token cookie
-            });
-
-            if (res.status === 401) {
-                toast.error('Not authenticated. Please log in as admin.');
-                setLoading(false);
-                return;
-            }
-
-            if (!res.ok) {
-                throw new Error('Failed to fetch cleanup stats');
-            }
-
-            const data = await res.json();
-            setStats(data);
+            const res = await api.get('/admin/users/cleanup-stats');
+            setStats(res.data);
             setLoading(false);
         } catch (error: any) {
             console.error('Failed to fetch stats:', error);
-            toast.error(error.message || 'Failed to load cleanup statistics');
+            if (error.response?.status === 401) {
+                toast.error('Not authenticated. Please log in as admin.');
+            } else {
+                toast.error(error.response?.data?.error || 'Failed to load cleanup statistics');
+            }
             setLoading(false);
         }
     };
@@ -65,27 +56,13 @@ export default function ResourceCleanup() {
         setConfirmText('');
 
         try {
-            const res = await fetch('/api/admin/users/delete-all-suspended', {
-                method: 'POST',
-                credentials: 'include',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ confirm: 'DELETE ALL SUSPENDED' })
-            });
-
-            if (!res.ok) {
-                const data = await res.json();
-                throw new Error(data.error || 'Failed to delete suspended users');
-            }
-
-            const data = await res.json();
-            setResult(data);
-            toast.success(`Successfully deleted ${data.results?.deleted || 0} users`);
+            const res = await api.post('/admin/users/delete-all-suspended', { confirm: 'DELETE ALL SUSPENDED' });
+            setResult(res.data);
+            toast.success(`Successfully deleted ${res.data.results?.deleted || 0} users`);
             setProcessing(false);
             fetchStats();
         } catch (error: any) {
-            toast.error(error.message || 'Error deleting suspended users');
+            toast.error(error.response?.data?.error || 'Error deleting suspended users');
             setProcessing(false);
         }
     };
@@ -101,27 +78,13 @@ export default function ResourceCleanup() {
         setConfirmText('');
 
         try {
-            const res = await fetch('/api/admin/users/delete-all-soft-deleted', {
-                method: 'POST',
-                credentials: 'include',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ confirm: 'DELETE ALL SOFT DELETED' })
-            });
-
-            if (!res.ok) {
-                const data = await res.json();
-                throw new Error(data.error || 'Failed to delete soft-deleted users');
-            }
-
-            const data = await res.json();
-            setResult(data);
-            toast.success(`Successfully deleted ${data.results?.deleted || 0} users`);
+            const res = await api.post('/admin/users/delete-all-soft-deleted', { confirm: 'DELETE ALL SOFT DELETED' });
+            setResult(res.data);
+            toast.success(`Successfully deleted ${res.data.results?.deleted || 0} users`);
             setProcessing(false);
             fetchStats();
         } catch (error: any) {
-            toast.error(error.message || 'Error deleting soft-deleted users');
+            toast.error(error.response?.data?.error || 'Error deleting soft-deleted users');
             setProcessing(false);
         }
     };

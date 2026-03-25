@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import api from '@/lib/api';
 import toast from 'react-hot-toast';
 
 interface FeatureToggle {
@@ -25,17 +26,9 @@ export default function FeaturesPage({ params }: { params: { id: string } }) {
 
     const fetchProject = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`/api/projects/${params.id}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (!res.ok) throw new Error('Failed to fetch project');
-            const data = await res.json();
-            setProject(data);
-
-            // Build feature list from plan and project settings
-            buildFeatureList(data);
+            const res = await api.get(`/projects/${params.id}`);
+            setProject(res.data.project);
+            buildFeatureList(res.data.project);
         } catch (error) {
             console.error('Error fetching project:', error);
             toast.error('Failed to load project');
@@ -129,29 +122,15 @@ export default function FeaturesPage({ params }: { params: { id: string } }) {
     const handleToggle = async (featureName: string, currentValue: boolean) => {
         setSaving(featureName);
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`/api/projects/${params.id}/features`, {
-                method: 'PATCH',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    feature: featureName,
-                    enabled: !currentValue
-                })
+            await api.patch(`/projects/${params.id}/features`, {
+                feature: featureName,
+                enabled: !currentValue
             });
-
-            if (!res.ok) {
-                const data = await res.json();
-                throw new Error(data.error || 'Failed to update feature');
-            }
-
             toast.success(`${featureName} ${!currentValue ? 'enabled' : 'disabled'}`);
             fetchProject();
         } catch (error: any) {
             console.error('Toggle error:', error);
-            toast.error(error.message || 'Failed to update feature');
+            toast.error(error.response?.data?.error || 'Failed to update feature');
         } finally {
             setSaving(null);
         }

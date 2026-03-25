@@ -11,6 +11,7 @@ import {
   TrashIcon,
   RocketLaunchIcon
 } from '@heroicons/react/24/outline';
+import api from '@/lib/api';
 
 export default function SuspendedAccountPage() {
   const router = useRouter();
@@ -19,9 +20,9 @@ export default function SuspendedAccountPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/auth/me')
-      .then(res => res.json())
-      .then(data => {
+    api.get('/auth/me')
+      .then(res => {
+        const data = res.data;
         if (data.user) {
           setUser(data.user);
           computeDaysLeft(data.user.suspendedAt, data.user.resourcesDeleted);

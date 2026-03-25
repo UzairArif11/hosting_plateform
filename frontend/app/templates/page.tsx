@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useSelector } from 'react-redux';
 import { RootState } from '@/lib/store';
+import api from '@/lib/api';
 import TemplateCard from '../../components/TemplateCard';
 
 interface Template {
@@ -49,11 +50,10 @@ export default function TemplatesPage() {
             if (debouncedSearch) params.append('search', debouncedSearch);
             if (category !== 'all') params.append('category', category);
 
-            const res = await fetch(`/api/templates/published?${params.toString()}`);
-            const data = await res.json();
+            const res = await api.get(`/templates/published?${params.toString()}`);
 
-            if (data.success) {
-                setTemplates(data.templates.map((t: any) => ({
+            if (res.data.success) {
+                setTemplates(res.data.templates.map((t: any) => ({
                     ...t,
                     previewUrl: t.previewUrl || undefined,
                     demoDeploymentUrl: t.demoDeploymentUrl || undefined,

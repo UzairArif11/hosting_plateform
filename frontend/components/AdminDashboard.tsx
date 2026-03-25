@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
+import api from '@/lib/api';
 
 interface ServerStats {
     key: string;
@@ -36,24 +37,14 @@ export default function AdminDashboard() {
 
     const loadData = async () => {
         try {
-            // Load server stats
-            const statsRes = await fetch(
-                `${process.env.NEXT_PUBLIC_API_URL}/api/admin/server-stats`,
-                { credentials: 'include' }
-            );
-            if (statsRes.ok) {
-                const data = await statsRes.json();
-                setStats(data.servers || []);
+            const statsRes = await api.get('/admin/server-stats');
+            if (statsRes.data) {
+                setStats(statsRes.data.servers || []);
             }
 
-            // Load users
-            const usersRes = await fetch(
-                `${process.env.NEXT_PUBLIC_API_URL}/api/admin/users`,
-                { credentials: 'include' }
-            );
-            if (usersRes.ok) {
-                const data = await usersRes.json();
-                setUsers(data.users || []);
+            const usersRes = await api.get('/admin/users');
+            if (usersRes.data) {
+                setUsers(usersRes.data.users || []);
             }
         } catch (error) {
             console.error('Failed to load data:', error);
@@ -67,25 +58,12 @@ export default function AdminDashboard() {
         if (!selectedUser) return;
 
         try {
-            const response = await fetch(
-                `${process.env.NEXT_PUBLIC_API_URL}/api/admin/users/${selectedUser._id}/resources`,
-                {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'include',
-                    body: JSON.stringify(newResources)
-                }
-            );
-
-            if (response.ok) {
-                toast.success('Resources updated successfully');
-                setSelectedUser(null);
-                loadData();
-            } else {
-                throw new Error('Failed to update resources');
-            }
-        } catch (error) {
-            toast.error('Failed to update resources');
+            await api.put(`/admin/users/${selectedUser._id}/resources`, newResources);
+            toast.success('Resources updated successfully');
+            setSelectedUser(null);
+            loadData();
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'Failed to update resources');
         }
     };
 

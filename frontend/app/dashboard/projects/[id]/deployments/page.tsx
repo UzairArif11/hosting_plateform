@@ -41,14 +41,8 @@ export default function DeploymentsPage({ params }: { params: { id: string } }) 
 
     const fetchDeployments = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`/api/projects/${params.id}/deployments?limit=50`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (!res.ok) throw new Error('Failed to fetch deployments');
-            const data = await res.json();
-            setDeployments(data.deployments || []);
+            const res = await api.get(`/projects/${params.id}/deployments?limit=50`);
+            setDeployments(res.data.deployments || []);
         } catch (error) {
             console.error('Error fetching deployments:', error);
             toast.error('Failed to load deployments');
@@ -62,33 +56,19 @@ export default function DeploymentsPage({ params }: { params: { id: string } }) 
 
         setIsRollingBack(true);
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`/api/deployments/${rollbackTarget._id}/rollback`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-
-            const data = await res.json();
-
-            if (!res.ok) {
-                if (data.upgradeRequired) {
-                    toast.error(data.error || 'Rollback feature not available in your plan');
-                } else {
-                    throw new Error(data.error || 'Rollback failed');
-                }
-                return;
-            }
+            const res = await api.post(`/deployments/${rollbackTarget._id}/rollback`);
 
             toast.success('Rollback initiated successfully');
             setRollbackTarget(null);
             fetchDeployments();
-            router.push(`/dashboard/projects/${params.id}/deployments/${data.deployment._id}`);
+            router.push(`/dashboard/projects/${params.id}/deployments/${res.data.deployment._id}`);
         } catch (error: any) {
             console.error('Rollback error:', error);
-            toast.error(error.message || 'Failed to initiate rollback');
+            if (error.response?.data?.upgradeRequired) {
+                toast.error(error.response.data.error || 'Rollback feature not available in your plan');
+            } else {
+                toast.error(error.response?.data?.error || error.message || 'Failed to initiate rollback');
+            }
         } finally {
             setIsRollingBack(false);
         }

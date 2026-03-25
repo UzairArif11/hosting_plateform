@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import api from '@/lib/api';
 import toast from 'react-hot-toast';
 
 interface Branch {
@@ -27,29 +28,16 @@ export default function DeploymentSettings({ params }: { params: { id: string } 
 
     const fetchProjectAndBranches = async () => {
         try {
-            const token = localStorage.getItem('token');
-
-            // Fetch project details
-            const projectRes = await fetch(`/api/projects/${params.id}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (!projectRes.ok) throw new Error('Failed to fetch project');
-            const projectData = await projectRes.json();
-
-            setProject(projectData);
-            setAutoDeployEnabled(projectData.autoDeployEnabled || false);
-            setProductionBranch(projectData.repository?.branch || 'main');
+            const res = await api.get(`/projects/${params.id}`);
+            setProject(res.data.project);
+            setAutoDeployEnabled(res.data.project?.autoDeployEnabled || false);
+            setProductionBranch(res.data.project?.repository?.branch || 'main');
 
             // Fetch branches from GitHub
-            const branchesRes = await fetch(`/api/projects/${params.id}/branches`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (branchesRes.ok) {
-                const branchesData = await branchesRes.json();
-                setBranches(branchesData.branches || []);
-            }
+            try {
+                const branchesRes = await api.get(`/projects/${params.id}/branches`);
+                setBranches(branchesRes.data.branches || []);
+            } catch { /* branches fetch may fail if no repo connected */ }
 
             setLoading(false);
         } catch (error) {
@@ -62,29 +50,18 @@ export default function DeploymentSettings({ params }: { params: { id: string } 
     const handleSave = async () => {
         setSaving(true);
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`/api/projects/${params.id}`, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    autoDeployEnabled,
-                    repository: {
-                        ...project.repository,
-                        branch: productionBranch
-                    }
-                })
+            await api.put(`/projects/${params.id}`, {
+                autoDeployEnabled,
+                repository: {
+                    ...project.repository,
+                    branch: productionBranch
+                }
             });
-
-            if (!res.ok) throw new Error('Failed to update settings');
-
             toast.success('Deployment settings updated successfully');
-            fetchProjectAndBranches(); // Refresh
-        } catch (error) {
+            fetchProjectAndBranches();
+        } catch (error: any) {
             console.error('Error saving settings:', error);
-            toast.error('Failed to save settings');
+            toast.error(error.response?.data?.error || 'Failed to save settings');
         } finally {
             setSaving(false);
         }

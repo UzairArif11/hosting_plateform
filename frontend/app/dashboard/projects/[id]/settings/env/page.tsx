@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import api from '@/lib/api';
 import toast from 'react-hot-toast';
 
 interface EnvVariable {
@@ -26,16 +27,9 @@ export default function EnvironmentsPage({ params }: { params: { id: string } })
 
     const fetchProject = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`/api/projects/${params.id}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (!res.ok) throw new Error('Failed to fetch project');
-            const data = await res.json();
-
-            setProject(data);
-            setVariables(data.environmentVariables || []);
+            const res = await api.get(`/projects/${params.id}`);
+            setProject(res.data.project);
+            setVariables(res.data.project?.environmentVariables || []);
         } catch (error) {
             console.error('Error fetching project:', error);
             toast.error('Failed to load project');
@@ -85,25 +79,14 @@ export default function EnvironmentsPage({ params }: { params: { id: string } })
     const handleSave = async () => {
         setSaving(true);
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`/api/projects/${params.id}`, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    environmentVariables: variables
-                })
+            await api.put(`/projects/${params.id}`, {
+                environmentVariables: variables
             });
-
-            if (!res.ok) throw new Error('Failed to save variables');
-
             toast.success('Environment variables saved successfully');
             fetchProject();
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error saving variables:', error);
-            toast.error('Failed to save variables');
+            toast.error(error.response?.data?.error || 'Failed to save variables');
         } finally {
             setSaving(false);
         }

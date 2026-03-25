@@ -74,20 +74,20 @@ export default function UserManagement() {
     const handleSuspendUser = async (userId: string, reason: string) => {
         try {
             await api.put(`/admin/users/${userId}/suspend`, { reason });
-            alert('User suspended successfully');
+            toast.success('User suspended successfully');
             fetchUsers();
         } catch (error) {
-            alert('Error suspending user');
+            toast.error('Error suspending user');
         }
     };
 
     const handleUnsuspendUser = async (userId: string) => {
         try {
             await api.put(`/admin/users/${userId}/unsuspend`);
-            alert('User unsuspended successfully');
+            toast.success('User unsuspended successfully');
             fetchUsers();
         } catch (error) {
-            alert('Error unsuspending user');
+            toast.error('Error unsuspending user');
         }
     };
 
@@ -96,21 +96,21 @@ export default function UserManagement() {
             await api.delete(`/admin/users/${userId}`, {
                 data: { confirm: 'DELETE' }
             });
-            alert('User deleted successfully (15-day recovery period)');
+            toast.success('User deleted successfully (15-day recovery period)');
             fetchUsers();
         } catch (error) {
-            alert('Error deleting user');
+            toast.error('Error deleting user');
         }
     };
 
     const handleRecoverUser = async (userId: string) => {
         try {
             await api.put(`/admin/users/${userId}/recover`);
-            alert('User recovered successfully');
+            toast.success('User recovered successfully');
             fetchUsers();
         } catch (error: any) {
             const msg = error.response?.data?.error || 'Error recovering user';
-            alert(msg);
+            toast.error(msg);
         }
     };
 

@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import api from '@/lib/api';
+import toast from 'react-hot-toast';
 
 interface Settings {
     baseDomain: string;
@@ -23,16 +25,14 @@ export default function DomainManagement() {
 
     const fetchSettings = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch('/api/settings', {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            const data = await res.json();
+            const res = await api.get('/settings');
+            const data = res.data;
             setSettings(data);
             setNewDomains(data.serverDomains || {});
             setLoading(false);
         } catch (error) {
             console.error('Failed to fetch settings:', error);
+            toast.error('Failed to load domain settings');
             setLoading(false);
         }
     };
@@ -45,32 +45,17 @@ export default function DomainManagement() {
         setProcessing(true);
 
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch('/api/settings/domains', {
-                method: 'PUT',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    serverDomains: newDomains,
-                    updateServerConfig: migrationMode === 'automatic'
-                })
+            const res = await api.put('/settings/domains', {
+                serverDomains: newDomains,
+                updateServerConfig: migrationMode === 'automatic'
             });
 
-            const data = await res.json();
-
-            if (res.ok) {
-                alert(data.message);
-                setEditing(false);
-                fetchSettings();
-            } else {
-                alert('Failed to update domains');
-            }
-
+            toast.success(res.data.message || 'Domains updated successfully');
+            setEditing(false);
+            fetchSettings();
             setProcessing(false);
-        } catch (error) {
-            alert('Error updating domains');
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'Error updating domains');
             setProcessing(false);
         }
     };

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { toast } from 'react-hot-toast';
+import api from '@/lib/api';
 
 interface Deployment {
     _id: string;
@@ -27,20 +28,16 @@ export default function DeploymentList({ deployments, onRollback, canRollback = 
 
         setRolling(deploymentId);
         try {
-            const res = await fetch(`/api/deployments/${deploymentId}/rollback`, {
-                method: 'POST'
-            });
+            const res = await api.post(`/deployments/${deploymentId}/rollback`);
 
-            const data = await res.json();
-
-            if (data.success) {
+            if (res.data.success) {
                 toast.success('Rollback initiated!');
-                onRollback(); // Refresh list
+                onRollback();
             } else {
-                toast.error(data.error || 'Rollback failed');
+                toast.error(res.data.error || 'Rollback failed');
             }
-        } catch (error) {
-            toast.error('Network error');
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'Rollback failed');
         } finally {
             setRolling(null);
         }

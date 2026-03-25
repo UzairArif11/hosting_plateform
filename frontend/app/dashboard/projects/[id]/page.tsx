@@ -685,19 +685,14 @@ export default function ProjectDetailPage() {
                                                     onClick={async () => {
                                                         setDomainLoading(d._id);
                                                         try {
-                                                            const token = localStorage.getItem('token');
-                                                            const res = await fetch(`/api/projects/${params.id}/domains/${d._id}/verify`, {
-                                                                method: 'POST',
-                                                                headers: { 'Authorization': `Bearer ${token}` }
-                                                            });
-                                                            const data = await res.json();
-                                                            if (data.verified) {
+                                                            const res = await api.post(`/projects/${params.id}/domains/${d._id}/verify`);
+                                                            if (res.data.verified) {
                                                                 toast.success('Domain verified! SSL provisioning...');
                                                                 dispatch(fetchProject(params.id as string));
                                                             } else {
-                                                                toast.error(data.error || 'DNS not yet propagated');
+                                                                toast.error(res.data.error || 'DNS not yet propagated');
                                                             }
-                                                        } catch { toast.error('Verification failed'); }
+                                                        } catch (err: any) { toast.error(err.response?.data?.error || 'Verification failed'); }
                                                         finally { setDomainLoading(null); }
                                                     }}
                                                     disabled={domainLoading === d._id}
@@ -717,16 +712,12 @@ export default function ProjectDetailPage() {
                                                     onClick={async () => {
                                                         if (!confirm(`Remove ${d.domain}?`)) return;
                                                         setDomainLoading(d._id);
-                                                        try {
-                                                            const token = localStorage.getItem('token');
-                                                            await fetch(`/api/projects/${params.id}/domains/${d._id}`, {
-                                                                method: 'DELETE',
-                                                                headers: { 'Authorization': `Bearer ${token}` }
-                                                            });
-                                                            toast.success('Domain removed');
-                                                            dispatch(fetchProject(params.id as string));
-                                                        } catch { toast.error('Remove failed'); }
-                                                        finally { setDomainLoading(null); }
+                                                         try {
+                                                             await api.delete(`/projects/${params.id}/domains/${d._id}`);
+                                                             toast.success('Domain removed');
+                                                             dispatch(fetchProject(params.id as string));
+                                                         } catch (err: any) { toast.error(err.response?.data?.error || 'Remove failed'); }
+                                                         finally { setDomainLoading(null); }
                                                     }}
                                                     disabled={domainLoading === d._id}
                                                     className="px-3 py-1.5 text-xs bg-red-900/40 hover:bg-red-900/70 disabled:opacity-50 text-red-300 rounded transition"
@@ -758,21 +749,13 @@ export default function ProjectDetailPage() {
                                         onClick={async () => {
                                             setAddingDomain(true);
                                             try {
-                                                const token = localStorage.getItem('token');
-                                                const res = await fetch(`/api/projects/${params.id}/domains`, {
-                                                    method: 'POST',
-                                                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                                                    body: JSON.stringify({ domain: newDomain.trim().toLowerCase() })
+                                                const res = await api.post(`/projects/${params.id}/domains`, {
+                                                    domain: newDomain.trim().toLowerCase()
                                                 });
-                                                const data = await res.json();
-                                                if (res.ok) {
-                                                    toast.success('Domain added — verify DNS next');
-                                                    setNewDomain('');
-                                                    dispatch(fetchProject(params.id as string));
-                                                } else {
-                                                    toast.error(data.error || 'Failed to add domain');
-                                                }
-                                            } catch { toast.error('Request failed'); }
+                                                toast.success('Domain added — verify DNS next');
+                                                setNewDomain('');
+                                                dispatch(fetchProject(params.id as string));
+                                            } catch (err: any) { toast.error(err.response?.data?.error || 'Failed to add domain'); }
                                             finally { setAddingDomain(false); }
                                         }}
                                         className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-lg text-sm transition"
