@@ -191,6 +191,23 @@ router.post('/users/delete-all-suspended', requireAuth, requireAdmin, async (req
           }
         }
 
+        // Deallocate server capacity
+        if (user.assignedServer && user.allocatedResources) {
+          try {
+            const serverCap = await ServerCapacity.findOne({ serverName: user.assignedServer });
+            if (serverCap) {
+              await serverCap.deallocate({
+                cpu: user.allocatedResources.cpu || 0,
+                ram: user.allocatedResources.ram || 0,
+                storage: user.allocatedResources.storage || 0,
+                bandwidth: user.allocatedResources.bandwidth || 0
+              });
+            }
+          } catch (capErr) {
+            logger.warn(`Failed to deallocate capacity for ${user.email}: ${capErr.message}`);
+          }
+        }
+
         // Delete user's projects and deployments
         const projectCount = await Project.countDocuments({ owner: user._id });
         const deploymentCount = await Deployment.countDocuments({ userId: user._id });
@@ -239,6 +256,23 @@ router.post('/users/delete-all-soft-deleted', requireAuth, requireAdmin, async (
             await freeTierContainer.removeUserContainer(user);
           } catch (containerErr) {
             logger.warn(`Failed to remove container for ${user.email}: ${containerErr.message}`);
+          }
+        }
+
+        // Deallocate server capacity
+        if (user.assignedServer && user.allocatedResources) {
+          try {
+            const serverCap = await ServerCapacity.findOne({ serverName: user.assignedServer });
+            if (serverCap) {
+              await serverCap.deallocate({
+                cpu: user.allocatedResources.cpu || 0,
+                ram: user.allocatedResources.ram || 0,
+                storage: user.allocatedResources.storage || 0,
+                bandwidth: user.allocatedResources.bandwidth || 0
+              });
+            }
+          } catch (capErr) {
+            logger.warn(`Failed to deallocate capacity for ${user.email}: ${capErr.message}`);
           }
         }
 
