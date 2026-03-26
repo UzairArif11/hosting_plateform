@@ -221,7 +221,9 @@ const getCurrentUser = async (req, res) => {
           name: user.plan.name,
           displayName: user.plan.displayName,
           features: user.plan.features,
-          resources: user.plan.resources
+          resources: user.plan.resources,
+          pricing: user.plan.pricing || {},
+          limits: user.plan.limits || {}
         } : null,
         trialDaysRemaining: user.trialDaysRemaining,
         isTrialActive: user.isTrialActive,
@@ -624,7 +626,9 @@ const handleLogin = async (req, res) => {
           name: user.plan.name,
           displayName: user.plan.displayName,
           features: user.plan.features,
-          resources: user.plan.resources
+          resources: user.plan.resources,
+          pricing: user.plan.pricing || {},
+          limits: user.plan.limits || {}
         } : null,
       }
     });

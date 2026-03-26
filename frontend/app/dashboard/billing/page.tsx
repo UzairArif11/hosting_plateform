@@ -449,12 +449,12 @@ export default function BillingPage() {
                             .filter((plan) => {
                                 const planName = (plan.name || plan.displayName || '').toLowerCase();
                                 const isFree = planName === 'free' || plan.price === 0 || (typeof plan.price === 'object' && plan.price.usd === 0);
-                                const isCurrent = user?.plan?._id === plan.id || user?.plan === plan.id;
+                                const isCurrent = String(user?.plan?._id || '') === String(plan.id || '') || String(user?.plan) === String(plan.id);
                                 if (isFree && !isCurrent) return false;
                                 return true;
                             })
                             .map((plan) => {
-                            const isCurrent = user?.plan?._id === plan.id || user?.plan === plan.id;
+                            const isCurrent = String(user?.plan?._id || '') === String(plan.id || '') || String(user?.plan) === String(plan.id);
                             const displayResources = plan.resources || {};
                             const planName = (plan.name || '').toLowerCase();
                             const isDowngrade = isCurrent ? false : (() => {
