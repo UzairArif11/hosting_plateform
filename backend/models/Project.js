@@ -45,6 +45,13 @@ const projectSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
+
+  // Template this project was deployed from (for redeploy duplicate detection)
+  templateId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Template',
+    default: null
+  },
   collaborators: [{
     user: {
       type: mongoose.Schema.Types.ObjectId,
@@ -155,7 +162,7 @@ const projectSchema = new mongoose.Schema({
   // Project status and settings
   status: {
     type: String,
-    enum: ['active', 'paused', 'archived', 'error', 'suspended', 'deploying'],
+    enum: ['active', 'paused', 'archived', 'error', 'suspended', 'deploying', 'deleted'],
     default: 'active'
   },
   isPublic: {
@@ -330,6 +337,8 @@ projectSchema.index({ owner: 1, status: 1 });
 projectSchema.index({ owner: 1, createdAt: -1 });
 // Unique index: prevent duplicate project names per user
 projectSchema.index({ name: 1, owner: 1 }, { unique: true });
+// Index for template redeploy duplicate detection
+projectSchema.index({ owner: 1, templateId: 1 });
 
 // Virtual for default domain
 projectSchema.virtual('defaultDomain').get(function () {

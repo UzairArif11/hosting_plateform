@@ -515,6 +515,69 @@ export default function PlanManagement() {
                                 </div>
                             </div>
 
+                            {/* Deployment Limits */}
+                            <div>
+                                <h3 className="text-lg font-semibold text-white mb-3">
+                                    Deployment Limits
+                                    <span className="block text-xs text-gray-400 font-normal mt-1">
+                                        Controls how many projects and deployments users on this plan can have
+                                    </span>
+                                </h3>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                    <div>
+                                        <label className="block text-sm text-gray-300 mb-2">Max Live Projects</label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            value={(editingPlan as any).limits?.maxLiveProjects ?? 10}
+                                            onChange={(e) => setEditingPlan({
+                                                ...editingPlan,
+                                                limits: {
+                                                    ...((editingPlan as any).limits || {}),
+                                                    maxLiveProjects: parseInt(e.target.value) || 10
+                                                }
+                                            } as any)}
+                                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">Active (non-deleted) projects at once</p>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm text-gray-300 mb-2">Deployments / Day</label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            value={(editingPlan as any).limits?.deploymentsPerDay ?? 100}
+                                            onChange={(e) => setEditingPlan({
+                                                ...editingPlan,
+                                                limits: {
+                                                    ...((editingPlan as any).limits || {}),
+                                                    deploymentsPerDay: parseInt(e.target.value) || 100
+                                                }
+                                            } as any)}
+                                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">Max deploys per 24 hours</p>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm text-gray-300 mb-2">Concurrent Deployments</label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            value={(editingPlan as any).limits?.concurrentDeployments ?? 2}
+                                            onChange={(e) => setEditingPlan({
+                                                ...editingPlan,
+                                                limits: {
+                                                    ...((editingPlan as any).limits || {}),
+                                                    concurrentDeployments: parseInt(e.target.value) || 2
+                                                }
+                                            } as any)}
+                                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">Simultaneous builds at a time</p>
+                                    </div>
+                                </div>
+                            </div>
+
                             {/* Display Resources (Marketing) */}
                             <div>
                                 <h3 className="text-lg font-semibold text-white mb-3">

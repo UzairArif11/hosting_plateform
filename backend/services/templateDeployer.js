@@ -6,8 +6,9 @@ const logger = require('../utils/logger');
 
 /**
  * Deploy a template for a user or as an admin demo
+ * If existingProject is provided, creates a new deployment for that project (redeploy)
  */
-async function deployTemplate({ template, user, projectName, environmentVariables, mode, isAdminDemo = false }) {
+async function deployTemplate({ template, user, projectName, environmentVariables, mode, isAdminDemo = false, existingProject = null }) {
     try {
         // ===== SMART TEMPLATE VALIDATION =====
         // 1. Validate mode is supported by template
@@ -50,38 +51,6 @@ async function deployTemplate({ template, user, projectName, environmentVariable
             });
         }
         // ===== END SMART TEMPLATE VALIDATION =====
-        // Generate unique slug
-        const slugBase = projectName.toLowerCase()
-            .replace(/[^a-z0-9]+/g, '-')
-            .replace(/^-|-$/g, '');
-
-        // Ensure uniqueness
-        let slug = `${user.username || user._id}-${slugBase}`;
-        let slugExists = await Project.findOne({ slug });
-        let attempts = 0;
-        while (slugExists && attempts < 5) {
-            slug = `${user.username || user._id}-${slugBase}-${Math.random().toString(36).substring(2, 6)}`;
-            slugExists = await Project.findOne({ slug });
-            attempts++;
-        }
-
-        // IMPORTANT: Use shared template repository (not forked)
-        // All users deploy from the same template repo
-        // Users customize via environment variables and project settings (dynamic customization)
-        // This allows template to be updated and all users benefit from updates
-        const repoInfo = {
-            url: `https://github.com/${template.githubRepo}`,
-            fullName: template.githubRepo,
-            branch: template.githubBranch || 'main',
-            provider: 'github',
-            isPrivate: false
-        };
-
-        logger.info('✅ Using shared template repository - users customize via env vars and settings', {
-            userId: user._id,
-            templateRepo: template.githubRepo,
-            note: 'Template is shared, users customize dynamically via environment variables'
-        });
 
         // Merge template env vars with user-provided ones
         const mergedEnvVars = (template.environmentVariables || []).map(templateVar => {
@@ -94,61 +63,104 @@ async function deployTemplate({ template, user, projectName, environmentVariable
             };
         });
 
-        // Check for existing project with same name and append suffix if needed
-        let finalProjectName = projectName;
-        let nameExists = await Project.findOne({ name: finalProjectName, owner: user._id });
-        let nameAttempts = 0;
+        let project;
 
-        while (nameExists && nameAttempts < 10) {
-            finalProjectName = `${projectName}-${Math.floor(1000 + Math.random() * 9000)}`;
-            nameExists = await Project.findOne({ name: finalProjectName, owner: user._id });
-            nameAttempts++;
-        }
+        if (existingProject) {
+            // ===== REDEPLOY: Reuse existing project =====
+            project = existingProject;
 
-        // Create project - Shared template repo, dynamic customization via env vars
-        // User has FULL CONTROL via:
-        // - Environment variables (add/update/delete) - for dynamic data customization
-        // - Build config (customize build process)
-        // - Project settings (all editable)
-        // Template repo is shared - users customize via environment variables (like API keys, database URLs, etc.)
-        const project = await Project.create({
-            name: finalProjectName,
-            slug: slug,
-            owner: user._id, // This is the correct field (not userId)
-            repository: repoInfo, // Shared template repo
-            framework: template.framework,
-            buildConfig: template.buildConfig || {}, // User can edit this later
-            environmentVariables: mergedEnvVars, // User can add/update/delete these - DYNAMIC CUSTOMIZATION
-            autoDeployEnabled: true, // User can toggle this
-            metadata: {
-                deployedFromTemplate: template._id,
+            // Update env vars on the existing project
+            project.environmentVariables = mergedEnvVars;
+            await project.save();
+
+            logger.info('♻️ Redeploying template to existing project', {
+                projectId: project._id,
+                userId: user._id,
                 templateName: template.name,
-                deployedAt: new Date(),
-                sharedTemplate: true // Template is shared, customization via env vars
-            },
-            status: 'active',
-            domains: [{
-                domain: `${slug}.${process.env.BASE_DOMAIN || 'foodpanda.site'}`,
-                isCustom: false,
-                isPrimary: true,
-                verified: true
-            }],
-            // User can edit all these settings via PUT /api/projects/:id
-            settings: {
-                notifications: {
-                    email: true
-                }
-            }
-        });
+                envVarsCount: mergedEnvVars.length
+            });
+        } else {
+            // ===== NEW DEPLOY: Create project =====
+            // Generate unique slug
+            const slugBase = projectName.toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-|-$/g, '');
 
-        logger.info('✅ Project created from shared template - user customizes via env vars', {
-            projectId: project._id,
-            userId: user._id,
-            projectName: projectName,
-            templateRepo: template.githubRepo,
-            envVarsCount: mergedEnvVars.length,
-            note: 'Template is shared, user customizes dynamically via environment variables'
-        });
+            // Ensure uniqueness
+            let slug = `${user.username || user._id}-${slugBase}`;
+            let slugExists = await Project.findOne({ slug });
+            let attempts = 0;
+            while (slugExists && attempts < 5) {
+                slug = `${user.username || user._id}-${slugBase}-${Math.random().toString(36).substring(2, 6)}`;
+                slugExists = await Project.findOne({ slug });
+                attempts++;
+            }
+
+            // IMPORTANT: Use shared template repository (not forked)
+            const repoInfo = {
+                url: `https://github.com/${template.githubRepo}`,
+                fullName: template.githubRepo,
+                branch: template.githubBranch || 'main',
+                provider: 'github',
+                isPrivate: false
+            };
+
+            logger.info('✅ Using shared template repository - users customize via env vars and settings', {
+                userId: user._id,
+                templateRepo: template.githubRepo,
+                note: 'Template is shared, users customize dynamically via environment variables'
+            });
+
+            // Check for existing project with same name and append suffix if needed
+            let finalProjectName = projectName;
+            let nameExists = await Project.findOne({ name: finalProjectName, owner: user._id });
+            let nameAttempts = 0;
+
+            while (nameExists && nameAttempts < 10) {
+                finalProjectName = `${projectName}-${Math.floor(1000 + Math.random() * 9000)}`;
+                nameExists = await Project.findOne({ name: finalProjectName, owner: user._id });
+                nameAttempts++;
+            }
+
+            // Create project
+            project = await Project.create({
+                name: finalProjectName,
+                slug: slug,
+                owner: user._id,
+                templateId: template._id,
+                repository: repoInfo,
+                framework: template.framework,
+                buildConfig: template.buildConfig || {},
+                environmentVariables: mergedEnvVars,
+                autoDeployEnabled: true,
+                metadata: {
+                    deployedFromTemplate: template._id,
+                    templateName: template.name,
+                    deployedAt: new Date(),
+                    sharedTemplate: true
+                },
+                status: 'active',
+                domains: [{
+                    domain: `${slug}.${process.env.BASE_DOMAIN || 'foodpanda.site'}`,
+                    isCustom: false,
+                    isPrimary: true,
+                    verified: true
+                }],
+                settings: {
+                    notifications: {
+                        email: true
+                    }
+                }
+            });
+
+            logger.info('✅ Project created from shared template', {
+                projectId: project._id,
+                userId: user._id,
+                projectName: projectName,
+                templateRepo: template.githubRepo,
+                envVarsCount: mergedEnvVars.length
+            });
+        }
 
         // Create initial deployment
         const deployment = await Deployment.create({

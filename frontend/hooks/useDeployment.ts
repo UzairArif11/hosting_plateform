@@ -3,7 +3,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+const RAW_API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+// Strip /api or /api/ suffix — socket.io connects to the server root, not the API path
+const SOCKET_URL = RAW_API_URL.replace(/\/api\/?$/, '');
 
 export interface DeploymentLog {
     timestamp: string;
@@ -35,11 +37,12 @@ export function useDeployment(deploymentId: string | null) {
         if (!deploymentId) return;
 
         // Create socket connection
-        const newSocket = io(API_URL, {
+        const newSocket = io(SOCKET_URL, {
             transports: ['websocket', 'polling'],
             reconnection: true,
-            reconnectionAttempts: 5,
-            reconnectionDelay: 1000,
+            reconnectionAttempts: 10,
+            reconnectionDelay: 2000,
+            withCredentials: true,
             path: '/api/socket.io/'
         });
 
@@ -122,7 +125,7 @@ export function useDeployment(deploymentId: string | null) {
         if (!deploymentId) return;
 
         try {
-            const response = await fetch(`${API_URL}/api/deployments/${deploymentId}/status`, {
+            const response = await fetch(`${RAW_API_URL}/api/deployments/${deploymentId}/status`, {
                 credentials: 'include'
             });
 

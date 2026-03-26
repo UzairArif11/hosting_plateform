@@ -229,6 +229,14 @@ const planSchema = new mongoose.Schema({
     logRetentionDays: {
       type: Number,
       default: 30
+    },
+    maxLiveProjects: {
+      type: Number,
+      default: 10 // Max active (non-deleted) projects at once
+    },
+    concurrentDeployments: {
+      type: Number,
+      default: 2 // Max simultaneous builds at a time
     }
   },
 

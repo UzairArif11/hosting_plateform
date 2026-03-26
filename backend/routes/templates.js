@@ -415,6 +415,7 @@ router.delete('/:id/remove-demo', requireAuth, requireAdmin, async (req, res) =>
 });
 
 // User: Deploy template to their account (creates a new project for them)
+// If user already has a project from this template, reuse it (redeploy)
 router.post('/:id/deploy', requireAuth, async (req, res) => {
     try {
         const template = await Template.findById(req.params.id);
@@ -427,9 +428,9 @@ router.post('/:id/deploy', requireAuth, async (req, res) => {
             return res.status(403).json({ success: false, error: 'Template is not published' });
         }
 
-        // Plan-based access is enforced by minPlan check below
-        // No separate feature gate needed — all users can deploy templates matching their plan level
+        // Load full user with plan
         const User = require('../models/User');
+        const Project = require('../models/Project');
         const fullUser = await User.findById(req.user._id).populate('plan');
 
         // Enforce template minPlan restriction
@@ -448,32 +449,121 @@ router.post('/:id/deploy', requireAuth, async (req, res) => {
             });
         }
 
+        // ──── PLAN LIMIT ENFORCEMENT ────────────────────────────
+        const planLimits = fullUser.plan?.limits || {};
+
+        // 1) Max live projects
+        const maxProjects = planLimits.maxLiveProjects || 10;
+        const activeProjectCount = await Project.countDocuments({
+            owner: req.user._id,
+            status: { $ne: 'deleted' }
+        });
+
+        // 2) Deployments per day
+        const maxDeploymentsPerDay = planLimits.deploymentsPerDay || 100;
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const todayDeployments = await Deployment.countDocuments({
+            userId: req.user._id,
+            createdAt: { $gte: todayStart }
+        });
+
+        if (todayDeployments >= maxDeploymentsPerDay) {
+            return res.status(429).json({
+                success: false,
+                error: `Daily deployment limit reached (${maxDeploymentsPerDay}/day for your plan). Try again tomorrow or upgrade.`,
+                limitReached: true,
+                limitType: 'deploymentsPerDay',
+                current: todayDeployments,
+                max: maxDeploymentsPerDay
+            });
+        }
+
+        // 3) Concurrent deployments (currently building)
+        const maxConcurrent = planLimits.concurrentDeployments || 2;
+        const buildingCount = await Deployment.countDocuments({
+            userId: req.user._id,
+            status: { $in: ['queued', 'building', 'deploying'] }
+        });
+
+        if (buildingCount >= maxConcurrent) {
+            return res.status(429).json({
+                success: false,
+                error: `Concurrent deployment limit reached (${maxConcurrent} at a time for your plan). Wait for current builds to finish or upgrade.`,
+                limitReached: true,
+                limitType: 'concurrentDeployments',
+                current: buildingCount,
+                max: maxConcurrent
+            });
+        }
+
         const { projectName, environmentVariables, mode } = req.body;
 
         if (!projectName) {
             return res.status(400).json({ success: false, error: 'Project name is required' });
         }
 
-        // Deploy template for user (creates project in their account)
-        const result = await templateDeployer.deployTemplate({
-            template,
-            user: req.user,
-            projectName,
-            environmentVariables: environmentVariables || [],
-            mode: mode || 'lite'
+        // ──── DUPLICATE DETECTION ────────────────────────────────
+        // Check if user already has a project from this template → redeploy instead of creating new
+        const existingProject = await Project.findOne({
+            owner: req.user._id,
+            templateId: template._id,
+            status: { $ne: 'deleted' }
         });
+
+        let result;
+        let isUpdate = false;
+
+        if (existingProject) {
+            // Redeploy: create new deployment for existing project
+            isUpdate = true;
+
+            logger.info(`User ${fullUser.email} re-deploying template ${template.name} → existing project ${existingProject.name}`);
+
+            result = await templateDeployer.deployTemplate({
+                template,
+                user: req.user,
+                projectName: existingProject.name, // keep original name
+                environmentVariables: environmentVariables || [],
+                mode: mode || 'lite',
+                existingProject: existingProject // pass existing project to reuse
+            });
+        } else {
+            // New project — check the max projects limit now
+            if (activeProjectCount >= maxProjects) {
+                return res.status(429).json({
+                    success: false,
+                    error: `Project limit reached (${maxProjects} for your plan). Delete unused projects or upgrade.`,
+                    limitReached: true,
+                    limitType: 'maxLiveProjects',
+                    current: activeProjectCount,
+                    max: maxProjects
+                });
+            }
+
+            result = await templateDeployer.deployTemplate({
+                template,
+                user: req.user,
+                projectName,
+                environmentVariables: environmentVariables || [],
+                mode: mode || 'lite'
+            });
+        }
 
         if (result.success) {
             // Increment template deploy count
             template.deployCount = (template.deployCount || 0) + 1;
             await template.save();
 
-            logger.info(`User ${fullUser.email} deployed template ${template.name} as project ${projectName}`);
-            res.status(201).json({
+            logger.info(`User ${fullUser.email} ${isUpdate ? 'redeployed' : 'deployed'} template ${template.name} as project ${isUpdate ? existingProject.name : projectName}`);
+            res.status(isUpdate ? 200 : 201).json({
                 success: true,
                 project: result.project,
                 deployment: result.deployment,
-                message: 'Template deployed successfully'
+                isUpdate,
+                message: isUpdate
+                    ? 'Template redeployed successfully (existing project updated)'
+                    : 'Template deployed successfully'
             });
         } else {
             res.status(400).json({

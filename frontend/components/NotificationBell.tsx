@@ -33,8 +33,17 @@ export default function NotificationBell() {
         fetchNotifications();
         const interval = setInterval(fetchNotifications, 60000);
 
-        const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
-        const socket = socketIO(socketUrl, { path: '/api/socket.io/', transports: ['websocket', 'polling'] });
+        const rawUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+        // Strip /api or /api/ suffix — socket.io connects to the server root, not the API path
+        const socketUrl = rawUrl.replace(/\/api\/?$/, '');
+        const socket = socketIO(socketUrl, {
+            path: '/api/socket.io/',
+            transports: ['websocket', 'polling'],
+            withCredentials: true,
+            reconnection: true,
+            reconnectionAttempts: 10,
+            reconnectionDelay: 2000
+        });
         socketRef.current = socket;
 
         socket.on('connect', () => {

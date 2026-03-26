@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useSelector } from 'react-redux';
-import { RootState } from '@/lib/store';
+import { useSelector, useDispatch } from 'react-redux';
+import { RootState, AppDispatch } from '@/lib/store';
+import { getCurrentUser } from '@/lib/slices/authSlice';
 import api from '@/lib/api';
 import {
     CreditCardIcon,
@@ -49,6 +50,7 @@ interface PaymentConfig {
 }
 
 export default function BillingPage() {
+    const dispatch = useDispatch<AppDispatch>();
     const { user } = useSelector((state: RootState) => state.auth);
     const [availablePlans, setAvailablePlans] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
@@ -128,6 +130,8 @@ export default function BillingPage() {
     };
 
     useEffect(() => {
+        // Refresh user data from server (fixes stale plan after admin verifies upgrade)
+        dispatch(getCurrentUser());
         loadBillingData();
         fetchManualPayments();
     }, []);
@@ -415,8 +419,16 @@ export default function BillingPage() {
                                 <p className="text-xl font-bold">{user?.displayedResources?.storage || user?.resourceAllocation?.storage || 0} GB</p>
                             </div>
                             <div className="space-y-1">
+                                <p className="text-xs text-purple-300">Bandwidth</p>
+                                <p className="text-xl font-bold">{user?.displayedResources?.bandwidth || user?.resourceAllocation?.bandwidth || 0} GB</p>
+                            </div>
+                            <div className="space-y-1">
                                 <p className="text-xs text-purple-300">Projects</p>
                                 <p className="text-xl font-bold">{user?.displayedResources?.projects || user?.resourceAllocation?.projects || 0}</p>
+                            </div>
+                            <div className="space-y-1">
+                                <p className="text-xs text-purple-300">Containers</p>
+                                <p className="text-xl font-bold">{user?.displayedResources?.containers || user?.resourceAllocation?.containers || 0}</p>
                             </div>
                         </div>
                     </div>
@@ -478,40 +490,71 @@ export default function BillingPage() {
                                     </div>
 
                                     <div className="flex-1">
-                                        <ul className="space-y-3 mb-6">
-                                            {plan.features && plan.features.length > 0 ? (
-                                                plan.features
+                                        {/* Resource Allocations - ALWAYS visible so users can compare plans */}
+                                        <div className="bg-gray-800/60 rounded-xl p-4 mb-4 border border-gray-700/50">
+                                            <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3 flex items-center gap-1.5">
+                                                <ServerIcon className="h-3.5 w-3.5" /> Resources Included
+                                            </h4>
+                                            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                                                <div className="flex items-center gap-2">
+                                                    <CpuChipIcon className="h-4 w-4 text-blue-400 flex-shrink-0" />
+                                                    <span className="text-gray-300 text-sm">
+                                                        <span className="font-semibold text-white">{displayResources.cpu || 0}</span> OCPU
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <ServerIcon className="h-4 w-4 text-purple-400 flex-shrink-0" />
+                                                    <span className="text-gray-300 text-sm">
+                                                        <span className="font-semibold text-white">{displayResources.ram || 0}</span> GB RAM
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <CloudArrowUpIcon className="h-4 w-4 text-green-400 flex-shrink-0" />
+                                                    <span className="text-gray-300 text-sm">
+                                                        <span className="font-semibold text-white">{displayResources.storage || 0}</span> GB Storage
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <CloudArrowUpIcon className="h-4 w-4 text-yellow-400 flex-shrink-0" />
+                                                    <span className="text-gray-300 text-sm">
+                                                        <span className="font-semibold text-white">{displayResources.bandwidth || 0}</span> GB BW
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <StarIcon className="h-4 w-4 text-orange-400 flex-shrink-0" />
+                                                    <span className="text-gray-300 text-sm">
+                                                        <span className="font-semibold text-white">{displayResources.projects || 0}</span> Projects
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <ServerIcon className="h-4 w-4 text-cyan-400 flex-shrink-0" />
+                                                    <span className="text-gray-300 text-sm">
+                                                        <span className="font-semibold text-white">{displayResources.containers || 0}</span> Containers
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Features List */}
+                                        {plan.features && plan.features.length > 0 && (
+                                            <ul className="space-y-2 mb-4">
+                                                {plan.features
                                                     .filter((feature: any) => {
                                                         if (typeof feature === 'string') return true;
                                                         return feature.enabled !== false;
                                                     })
                                                     .map((feature: any, index: number) => (
                                                         <li key={index} className="flex items-start space-x-2">
-                                                            <CheckIcon className="h-5 w-5 text-green-500 flex-shrink-0 mt-0.5" />
+                                                            <CheckIcon className="h-4 w-4 text-green-500 flex-shrink-0 mt-0.5" />
                                                             <span className="text-gray-300 text-sm">
                                                                 {typeof feature === 'string'
                                                                     ? feature
                                                                     : feature.displayName || feature.name || feature.description || feature.text || JSON.stringify(feature)}
                                                             </span>
                                                         </li>
-                                                    ))
-                                            ) : (
-                                                <>
-                                                    <li className="flex items-start space-x-2">
-                                                        <CheckIcon className="h-5 w-5 text-green-500 flex-shrink-0 mt-0.5" />
-                                                        <span className="text-gray-300 text-sm">{displayResources.ram} GB RAM</span>
-                                                    </li>
-                                                    <li className="flex items-start space-x-2">
-                                                        <CheckIcon className="h-5 w-5 text-green-500 flex-shrink-0 mt-0.5" />
-                                                        <span className="text-gray-300 text-sm">{displayResources.cpu} OCPU</span>
-                                                    </li>
-                                                    <li className="flex items-start space-x-2">
-                                                        <CheckIcon className="h-5 w-5 text-green-500 flex-shrink-0 mt-0.5" />
-                                                        <span className="text-gray-300 text-sm">{displayResources.storage} GB Storage</span>
-                                                    </li>
-                                                </>
-                                            )}
-                                        </ul>
+                                                    ))}
+                                            </ul>
+                                        )}
                                     </div>
 
                                     {(() => {

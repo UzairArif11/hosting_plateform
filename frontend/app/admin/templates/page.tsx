@@ -113,7 +113,9 @@ export default function TemplateManagement() {
         fetchTemplates();
 
         // Connect to Socket.IO for real-time updates with reconnection
-        const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
+        const rawSocketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+        // Strip /api or /api/ suffix — socket.io connects to the server root, not the API path
+        const socketUrl = rawSocketUrl.replace(/\/api\/?$/, '');
         socketRef.current = io(socketUrl, {
             path: '/api/socket.io/', // Match backend config
             reconnection: true,
@@ -121,6 +123,7 @@ export default function TemplateManagement() {
             reconnectionDelayMax: 5000,
             reconnectionAttempts: Infinity,
             transports: ['websocket', 'polling'],
+            withCredentials: true,
             timeout: 20000
         });
 
