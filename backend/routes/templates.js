@@ -515,6 +515,21 @@ router.post('/:id/deploy', requireAuth, async (req, res) => {
         let isUpdate = false;
 
         if (existingProject) {
+            // Block if this project already has a deployment in progress
+            const inProgressDeployment = await Deployment.findOne({
+                projectId: existingProject._id,
+                status: { $in: ['queued', 'building', 'deploying'] }
+            });
+
+            if (inProgressDeployment) {
+                return res.status(409).json({
+                    success: false,
+                    error: `This template is already deploying. Please wait for the current deployment to finish.`,
+                    existingDeploymentId: inProgressDeployment._id,
+                    projectId: existingProject._id
+                });
+            }
+
             // Redeploy: create new deployment for existing project
             isUpdate = true;
 

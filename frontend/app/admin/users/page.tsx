@@ -141,12 +141,12 @@ export default function UserManagement() {
 
     const handleChangePlan = async (userId: string, plan: string) => {
         try {
-            await api.put(`/admin/users/${userId}/plan`, {
+            const res = await api.put(`/admin/users/${userId}/plan`, {
                 plan,
                 containerType: plan === 'free' ? 'shared' : 'dedicated',
                 upgradeContainers: true
             });
-            toast.success(`User plan updated to ${plan}`);
+            toast.success(res.data?.message || `User plan updated to ${plan}`);
             fetchUsers();
         } catch (error: any) {
             const msg = error.response?.data?.error || 'Error updating plan';

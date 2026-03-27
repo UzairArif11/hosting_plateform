@@ -643,9 +643,22 @@ router.put('/users/:userId/plan', requireAuth, requireAdmin, async (req, res) =>
     containerUpgrade.upgradeUserContainer(user._id, oldPlanName, newPlan.name)
       .catch(err => logger.error(`Background container upgrade failed for ${user.email}:`, err));
 
+    // Build admin-facing message with resource update details
+    let resourceMsg = '';
+    if (!user.containerName || !user.assignedServer) {
+      resourceMsg = ' No active container found — resources will apply on next deployment.';
+    } else if (containerUpdateResult?.success) {
+      const ramGB = newPlan.actualResources?.ram || newPlan.resources?.ram || 0.5;
+      const cpu = newPlan.actualResources?.cpu || newPlan.resources?.cpu || 0.5;
+      resourceMsg = ` ✅ Container resources updated: ${ramGB * 1024}MB RAM, ${cpu} CPU.`;
+    } else {
+      resourceMsg = ` ⚠️ Container resource update failed: ${containerUpdateResult?.error || 'Unknown error'}. Background migration in progress.`;
+    }
+
     res.json({
       success: true,
-      message: `Plan updated to ${newPlan.displayName}. Container resource migration started in background.`,
+      message: `Plan updated to ${newPlan.displayName}.${resourceMsg}`,
+      containerUpdate: containerUpdateResult || { skipped: true, reason: 'No active container' },
       user: {
         id: user._id,
         plan: newPlan.name,
