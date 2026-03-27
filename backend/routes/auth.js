@@ -92,6 +92,18 @@ const handleGitHubCallback = async (req, res) => {
       return res.redirect(`${frontendURL}/login?error=auth_failed`);
     }
 
+    // Block deleted/banned users from OAuth login
+    if (req.user.status === 'deleted') {
+      const frontendURL = process.env.FRONTEND_URL || 'http://localhost:3000';
+      logger.warn(`Deleted user ${req.user.email} attempted OAuth login`);
+      return res.redirect(`${frontendURL}/login?error=${encodeURIComponent('Account has been deleted')}`);
+    }
+    if (req.user.status === 'banned') {
+      const frontendURL = process.env.FRONTEND_URL || 'http://localhost:3000';
+      logger.warn(`Banned user ${req.user.email} attempted OAuth login`);
+      return res.redirect(`${frontendURL}/login?error=${encodeURIComponent('Account has been banned')}`);
+    }
+
     // Generate JWT token
     logger.info('🔑 Step 1: Generating JWT token...');
     const token = generateToken(req.user);
