@@ -147,6 +147,11 @@ const requireAuth = async (req, res, next) => {
     }
 
     // Check if user account is active
+    if (user.status === 'deleted') {
+      logAuthEvent('Deleted user access attempt', user._id);
+      return createForbiddenResponse(res, 'Account has been deleted');
+    }
+
     if (user.status === 'banned') {
       logAuthEvent('Banned user access attempt', user._id);
       return createForbiddenResponse(res, 'Account has been banned');

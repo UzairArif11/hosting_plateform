@@ -39,6 +39,32 @@ const runMigration = async () => {
             logger.warn('Migration (remove-validators):', error.message);
         }
     }
+
+    // Auto-fix admin accounts stuck in suspended/deleted/banned status
+    // Admins should NEVER be locked out by automated lifecycle processes
+    try {
+        const User = require('../models/User');
+        const fixedAdmins = await User.updateMany(
+            { role: 'admin', status: { $in: ['suspended', 'deleted', 'banned'] } },
+            {
+                $set: {
+                    status: 'active',
+                    subscriptionStatus: 'active',
+                    isTrialActive: false,
+                    suspendedAt: null,
+                    suspensionReason: null,
+                    autoSuspended: false,
+                    deletedAt: null,
+                    recoveryDeadline: null
+                }
+            }
+        );
+        if (fixedAdmins.modifiedCount > 0) {
+            logger.info(`✅ Fixed ${fixedAdmins.modifiedCount} admin account(s) stuck in non-active status`);
+        }
+    } catch (error) {
+        logger.warn('Migration (fix-admin-status):', error.message);
+    }
 };
 
 module.exports = runMigration;

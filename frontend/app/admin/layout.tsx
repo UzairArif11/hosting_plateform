@@ -6,6 +6,8 @@ import { useDispatch, useSelector } from 'react-redux';
 import { getCurrentUser } from '@/lib/slices/authSlice';
 import { AppDispatch, RootState } from '@/lib/store';
 
+import NotificationBell from '@/components/NotificationBell';
+
 export default function AdminLayout({
     children,
 }: {
@@ -89,7 +91,10 @@ export default function AdminLayout({
                     </button>
                     <h1 className="text-lg font-bold text-white">Admin Panel</h1>
                 </div>
-                <span className="text-xs text-gray-500">{user?.displayName}</span>
+                <div className="flex items-center gap-3">
+                    <NotificationBell />
+                    <span className="text-xs text-gray-500">{user?.displayName}</span>
+                </div>
             </div>
 
             <div className="flex relative">
@@ -115,6 +120,9 @@ export default function AdminLayout({
                             <div>
                                 <h1 className="text-2xl font-bold text-white mb-1">Admin Panel</h1>
                                 <p className="text-sm text-gray-400">Platform Management</p>
+                            </div>
+                            <div className="hidden lg:block">
+                                <NotificationBell />
                             </div>
                             {/* Close button — mobile only */}
                             <button

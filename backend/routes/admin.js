@@ -630,7 +630,7 @@ router.put('/users/:userId/plan', requireAuth, requireAdmin, async (req, res) =>
   }
 });
 
-// Delete User (Soft)
+// Delete User (Soft) — stops containers, blocks login, 15-day recovery
 router.delete('/users/:userId', requireAuth, requireAdmin, async (req, res) => {
   try {
     const user = await User.findById(req.params.userId);
@@ -641,12 +641,28 @@ router.delete('/users/:userId', requireAuth, requireAdmin, async (req, res) => {
       return res.status(403).json({ error: 'Cannot delete admin accounts' });
     }
 
+    // Protect flagged accounts
+    if (user.isProtected) {
+      return res.status(403).json({ error: 'This account is protected. Remove protection first.' });
+    }
+
+    // Stop user's Docker container to free resources
+    if (user.containerName && user.assignedServer) {
+      try {
+        const freeTierContainer = require('../services/freeTierContainer');
+        await freeTierContainer.suspendUserContainer(user);
+        logger.info(`Suspended container for soft-deleted user ${user.email}`);
+      } catch (containerErr) {
+        logger.warn(`Failed to suspend container for ${user.email}: ${containerErr.message}`);
+      }
+    }
+
     user.status = 'deleted';
     user.deletedAt = new Date();
     user.recoveryDeadline = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000); // 15 days
     await user.save();
 
-    res.json({ success: true, message: 'User deleted (soft)' });
+    res.json({ success: true, message: 'User soft-deleted. Container stopped. 15-day recovery period.' });
   } catch (error) {
     logger.error('Delete user error:', error);
     res.status(500).json({ error: 'Failed to delete user' });
@@ -678,7 +694,7 @@ router.get('/projects', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-// Recover User
+// Recover User — restores account and restarts containers
 router.put('/users/:userId/recover', requireAuth, requireAdmin, async (req, res) => {
   try {
     const user = await User.findById(req.params.userId);
@@ -689,12 +705,91 @@ router.put('/users/:userId/recover', requireAuth, requireAdmin, async (req, res)
     user.status = 'active';
     user.deletedAt = null;
     user.recoveryDeadline = null;
+    user.recoveredAt = new Date();
     await user.save();
 
-    res.json({ success: true, message: 'User recovered' });
+    // Restart user's Docker container and restore PM2 processes
+    if (user.containerName && user.assignedServer) {
+      try {
+        const freeTierContainer = require('../services/freeTierContainer');
+        await freeTierContainer.reactivateUserContainer(user);
+        logger.info(`Reactivated container for recovered user ${user.email}`);
+      } catch (containerErr) {
+        logger.warn(`Could not reactivate container for ${user.email}: ${containerErr.message}`);
+      }
+    }
+
+    res.json({ success: true, message: 'User recovered. Container restarted.' });
   } catch (error) {
     logger.error('Recover user error:', error);
     res.status(500).json({ error: 'Failed to recover user' });
+  }
+});
+
+// Hard Delete User (Permanent) — removes ALL data, projects, deployments, containers
+router.delete('/users/:userId/permanent', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    if (user.role === 'admin') {
+      return res.status(403).json({ error: 'Cannot permanently delete admin accounts' });
+    }
+
+    if (user.isProtected) {
+      return res.status(403).json({ error: 'This account is protected. Remove protection first.' });
+    }
+
+    const cleanup = { containers: 0, projects: 0, deployments: 0 };
+
+    // 1. Remove Docker container from server
+    if (user.containerName && user.assignedServer) {
+      try {
+        const freeTierContainer = require('../services/freeTierContainer');
+        await freeTierContainer.removeUserContainer(user);
+        cleanup.containers = 1;
+        logger.info(`Removed container for permanently deleted user ${user.email}`);
+      } catch (containerErr) {
+        logger.warn(`Failed to remove container for ${user.email}: ${containerErr.message}`);
+      }
+    }
+
+    // 2. Deallocate server capacity
+    if (user.assignedServer && user.allocatedResources) {
+      try {
+        const serverCap = await ServerCapacity.findOne({ serverName: user.assignedServer });
+        if (serverCap) {
+          await serverCap.deallocate({
+            cpu: user.allocatedResources.cpu || 0,
+            ram: user.allocatedResources.ram || 0,
+            storage: user.allocatedResources.storage || 0,
+            bandwidth: user.allocatedResources.bandwidth || 0
+          });
+        }
+      } catch (capErr) {
+        logger.warn(`Failed to deallocate capacity for ${user.email}: ${capErr.message}`);
+      }
+    }
+
+    // 3. Delete all projects and deployments from DB
+    cleanup.projects = await Project.countDocuments({ owner: user._id });
+    cleanup.deployments = await Deployment.countDocuments({ userId: user._id });
+    await Project.deleteMany({ owner: user._id });
+    await Deployment.deleteMany({ userId: user._id });
+
+    // 4. Delete user record permanently
+    await User.findByIdAndDelete(user._id);
+
+    logger.info(`PERMANENT DELETE: ${user.email} — ${cleanup.projects} projects, ${cleanup.deployments} deployments, ${cleanup.containers} containers removed`);
+
+    res.json({
+      success: true,
+      message: `User ${user.email} permanently deleted`,
+      cleanup
+    });
+  } catch (error) {
+    logger.error('Permanent delete user error:', error);
+    res.status(500).json({ error: 'Failed to permanently delete user' });
   }
 });
 

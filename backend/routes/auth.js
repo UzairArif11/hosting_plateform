@@ -503,6 +503,9 @@ const handleDirectRegistration = async (req, res) => {
     // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
+      if (existingUser.status === 'deleted') {
+        return res.status(400).json({ error: 'This email belongs to a deleted account. Ask an admin to permanently delete it before re-registering.' });
+      }
       return res.status(400).json({ error: 'User already exists' });
     }
 
@@ -601,6 +604,14 @@ const handleLogin = async (req, res) => {
 
     if (!isValidPassword) {
       return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Block deleted and banned users at login
+    if (user.status === 'deleted') {
+      return res.status(403).json({ error: 'This account has been deleted. Contact support if you believe this is a mistake.' });
+    }
+    if (user.status === 'banned') {
+      return res.status(403).json({ error: 'This account has been banned.' });
     }
 
     // Generate token

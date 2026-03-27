@@ -106,10 +106,27 @@ export default function UserManagement() {
     const handleRecoverUser = async (userId: string) => {
         try {
             await api.put(`/admin/users/${userId}/recover`);
-            toast.success('User recovered successfully');
+            toast.success('User recovered successfully. Container restarting.');
             fetchUsers();
         } catch (error: any) {
             const msg = error.response?.data?.error || 'Error recovering user';
+            toast.error(msg);
+        }
+    };
+
+    const handlePermanentDelete = async (userId: string, email: string) => {
+        const confirmEmail = prompt(`⚠️ PERMANENT DELETE\n\nThis will remove ALL data: user record, projects, deployments, and Docker container.\n\nType the user's email to confirm:\n${email}`);
+        if (confirmEmail !== email) {
+            if (confirmEmail !== null) toast.error('Email did not match. Cancelled.');
+            return;
+        }
+        try {
+            const res = await api.delete(`/admin/users/${userId}/permanent`);
+            const cleanup = res.data.cleanup || {};
+            toast.success(`Permanently deleted. Removed: ${cleanup.projects || 0} projects, ${cleanup.deployments || 0} deployments, ${cleanup.containers || 0} containers`);
+            fetchUsers();
+        } catch (error: any) {
+            const msg = error.response?.data?.error || 'Error permanently deleting user';
             toast.error(msg);
         }
     };
@@ -283,6 +300,7 @@ export default function UserManagement() {
                                 onUnsuspend={() => handleUnsuspendUser(user._id)}
                                 onDelete={() => handleDeleteUser(user._id)}
                                 onRecover={() => handleRecoverUser(user._id)}
+                                onPermanentDelete={() => handlePermanentDelete(user._id, user.email)}
                                 onChangePlan={(plan: string) => handleChangePlan(user._id, plan)}
                                 onToggleProtection={async (isProtected: boolean) => {
                                     try {
@@ -314,7 +332,7 @@ export default function UserManagement() {
     );
 }
 
-function UserRow({ user, selected, onSelect, onSuspend, onUnsuspend, onDelete, onRecover, onChangePlan, onToggleProtection }: any) {
+function UserRow({ user, selected, onSelect, onSuspend, onUnsuspend, onDelete, onRecover, onPermanentDelete, onChangePlan, onToggleProtection }: any) {
     const [showActions, setShowActions] = useState(false);
     const [isProtecting, setIsProtecting] = useState(false);
 
@@ -461,16 +479,24 @@ function UserRow({ user, selected, onSelect, onSuspend, onUnsuspend, onDelete, o
                         )}
 
                         {user.status === 'deleted' && (
-                            <button
-                                onClick={() => {
-                                    if (confirm('Recover this user account?')) {
-                                        onRecover();
-                                    }
-                                }}
-                                className="text-xs bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 px-3 py-1 rounded border border-blue-500/30 transition"
-                            >
-                                Recover Account
-                            </button>
+                            <>
+                                <button
+                                    onClick={() => {
+                                        if (confirm('Recover this user account? Container will restart.')) {
+                                            onRecover();
+                                        }
+                                    }}
+                                    className="text-xs bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 px-3 py-1 rounded border border-blue-500/30 transition"
+                                >
+                                    Recover Account
+                                </button>
+                                <button
+                                    onClick={onPermanentDelete}
+                                    className="text-xs bg-red-700/30 hover:bg-red-700/50 text-red-300 px-3 py-1 rounded border border-red-600/40 transition font-bold"
+                                >
+                                    🗑️ Permanent Delete
+                                </button>
+                            </>
                         )}
                     </div>
                 </div>
