@@ -607,10 +607,38 @@ router.put('/users/:userId/plan', requireAuth, requireAdmin, async (req, res) =>
     // Update DB record
     user.plan = newPlan._id;
     user.planType = newPlan.name;
+    user.resourceAllocation = newPlan.resources;
+    user.displayedResources = newPlan.displayResources;
     await user.save();
 
-    // Trigger background upgrade if user has active deployments
-    // We don't await this to keep the response fast, but we log the start
+    // IMMEDIATE: Update existing container resource limits (memory/CPU) in-place
+    // This is the PRIMARY mechanism — fast and reliable, no restart needed
+    let containerUpdateResult = null;
+    if (user.containerName && user.assignedServer) {
+      try {
+        const docker = require('../services/docker');
+        const host = process.env[`${user.assignedServer}_HOST`] || process.env.EC3_SERVER_IP;
+        const ramGB = newPlan.actualResources?.ram || newPlan.resources?.ram || 0.5;
+        const cpu = newPlan.actualResources?.cpu || newPlan.resources?.cpu || 0.5;
+        const memoryMB = ramGB * 1024; // GB to MB
+
+        containerUpdateResult = await docker.updateContainerResources(user.containerName, {
+          memory: memoryMB,
+          cpu: cpu
+        }, host);
+
+        if (containerUpdateResult.success) {
+          logger.info(`✅ Container ${user.containerName} resources updated immediately: ${memoryMB}MB RAM, ${cpu} CPU`);
+        } else {
+          logger.warn(`⚠️ Container ${user.containerName} in-place update failed: ${containerUpdateResult.error}`);
+        }
+      } catch (dockerErr) {
+        logger.warn(`⚠️ Direct container update failed for ${user.email}: ${dockerErr.message}`);
+      }
+    }
+
+    // BACKGROUND: Full migration (creates new container if architecture change needed)
+    // This handles shared↔dedicated transitions, data migration, Nginx updates
     logger.info(`Admin triggering container upgrade for ${user.email} due to plan change: ${oldPlanName} -> ${newPlan.name}`);
     containerUpgrade.upgradeUserContainer(user._id, oldPlanName, newPlan.name)
       .catch(err => logger.error(`Background container upgrade failed for ${user.email}:`, err));
@@ -2235,6 +2263,20 @@ router.post('/manual-payments/:id/verify', requireAuth, requireAdmin, async (req
         } catch (reactivateErr) {
           logger.warn(`[VERIFY] Container reactivation failed for ${user.email}: ${reactivateErr.message}`);
           // Don't fail the verify — container will be auto-created on next deploy
+        }
+      }
+
+      // IMMEDIATE: Update container resource limits to match new plan
+      if (user.containerName && user.assignedServer) {
+        try {
+          const docker = require('../services/docker');
+          const host = process.env[`${user.assignedServer}_HOST`] || process.env.EC3_SERVER_IP;
+          const ramGB = plan.actualResources?.ram || plan.resources?.ram || 0.5;
+          const cpu = plan.actualResources?.cpu || plan.resources?.cpu || 0.5;
+          await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);
+          logger.info(`[VERIFY] ✅ Container ${user.containerName} resources updated: ${ramGB * 1024}MB RAM, ${cpu} CPU`);
+        } catch (dockerErr) {
+          logger.warn(`[VERIFY] Container resource update failed for ${user.email}: ${dockerErr.message}`);
         }
       }
 

@@ -425,8 +425,8 @@ export default function ProjectDetailPage() {
             )}
 
             {/* Tabs */}
-            <div className="border-b border-gray-800">
-                <div className="flex space-x-8">
+            <div className="border-b border-gray-800 overflow-x-auto">
+                <div className="flex space-x-8 min-w-max">
                     <button
                         onClick={() => setActiveTab('deployments')}
                         className={`pb-4 px-1 border-b-2 transition-colors ${activeTab === 'deployments'

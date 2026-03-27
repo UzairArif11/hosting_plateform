@@ -375,23 +375,29 @@ const getContainerLogs = async (containerName, host = null, tail = 100) => {
   }
 };
 
-// Update container resources
+// Update container resources (live, no restart)
 const updateContainerResources = async (containerName, resources, host = null) => {
   try {
     const docker = createDockerClient(host);
     const container = docker.getContainer(containerName);
 
+    const memoryBytes = Math.floor(resources.memory * 1024 * 1024); // MB to bytes
+
     const updateConfig = {
-      Memory: resources.memory * 1024 * 1024, // MB to bytes
-      CpuShares: resources.cpu * 1024
+      Memory: memoryBytes,                               // Hard memory limit
+      MemorySwap: memoryBytes,                            // No swap (same as memory = disable swap)
+      NanoCpus: Math.floor(resources.cpu * 1000000000),   // Hard CPU limit (1 CPU = 1e9 NanoCPU)
+      CpuShares: Math.round(resources.cpu * 1024)         // Soft CPU weight (relative priority)
     };
 
     await container.update(updateConfig);
 
-    logger.info('Container resources updated', {
+    logger.info('Container resources updated (hard limits)', {
       containerName,
-      memory: resources.memory,
-      cpu: resources.cpu
+      memoryMB: resources.memory,
+      cpu: resources.cpu,
+      memoryBytes,
+      nanoCpus: updateConfig.NanoCpus
     });
 
     return {

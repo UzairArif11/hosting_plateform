@@ -507,6 +507,20 @@ router.post('/jazzcash', express.urlencoded({ extended: true }), async (req, res
             user.autoSuspended = false;
             await user.save();
 
+            // IMMEDIATE: Update container resource limits
+            if (user.containerName && user.assignedServer) {
+              try {
+                const docker = require('../services/docker');
+                const host = process.env[`${user.assignedServer}_HOST`] || process.env.EC3_SERVER_IP;
+                const ramGB = plan.actualResources?.ram || plan.resources?.ram || 0.5;
+                const cpu = plan.actualResources?.cpu || plan.resources?.cpu || 0.5;
+                await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);
+                logger.info(`[JazzCash] ✅ Container ${user.containerName} resources updated: ${ramGB * 1024}MB RAM`);
+              } catch (dockerErr) {
+                logger.warn(`[JazzCash] Container resource update failed: ${dockerErr.message}`);
+              }
+            }
+
             logger.info('User plan upgraded via JazzCash', {
               userId: user._id,
               planName: plan.displayName,
@@ -593,6 +607,20 @@ router.post('/easypaisa', express.urlencoded({ extended: true }), async (req, re
             user.suspensionReason = null;
             user.autoSuspended = false;
             await user.save();
+
+            // IMMEDIATE: Update container resource limits
+            if (user.containerName && user.assignedServer) {
+              try {
+                const docker = require('../services/docker');
+                const host = process.env[`${user.assignedServer}_HOST`] || process.env.EC3_SERVER_IP;
+                const ramGB = plan.actualResources?.ram || plan.resources?.ram || 0.5;
+                const cpu = plan.actualResources?.cpu || plan.resources?.cpu || 0.5;
+                await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);
+                logger.info(`[EasyPaisa] ✅ Container ${user.containerName} resources updated: ${ramGB * 1024}MB RAM`);
+              } catch (dockerErr) {
+                logger.warn(`[EasyPaisa] Container resource update failed: ${dockerErr.message}`);
+              }
+            }
 
             logger.info('User plan upgraded via EasyPaisa', {
               userId: user._id,

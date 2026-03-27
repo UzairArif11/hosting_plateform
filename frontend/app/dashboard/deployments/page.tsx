@@ -79,7 +79,7 @@ export default function DeploymentsPage() {
                     <p className="text-gray-400">No deployments yet</p>
                 </div>
             ) : (
-                <div className="bg-gray-800 rounded-lg shadow overflow-hidden">
+                <div className="bg-gray-800 rounded-lg shadow overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-700">
                         <thead className="bg-gray-900">
                             <tr>
