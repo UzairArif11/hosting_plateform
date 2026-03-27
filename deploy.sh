@@ -138,6 +138,54 @@ EOF
 echo -e "${GREEN}✅ Services restarted${NC}"
 
 echo ""
+echo -e "${GREEN}Step 4b: Ensuring Nginx WebSocket proxy for Socket.io...${NC}"
+
+NGINX_CONF="/etc/nginx/sites-available/platform-foodpanda-site.conf"
+NGINX_CHANGED=false
+
+if [ -f "$NGINX_CONF" ]; then
+    if ! grep -q "socket.io" "$NGINX_CONF"; then
+        echo "  Adding Socket.io WebSocket proxy block..."
+        # Insert the socket.io location BEFORE the first 'location /api/' block
+        sed -i '/location \/api\//i \
+    # Socket.io WebSocket proxy (auto-added by deploy.sh)\
+    location /api/socket.io/ {\
+        proxy_pass http://127.0.0.1:5000;\
+        proxy_http_version 1.1;\
+        proxy_set_header Upgrade $http_upgrade;\
+        proxy_set_header Connection "upgrade";\
+        proxy_set_header Host $host;\
+        proxy_set_header X-Real-IP $remote_addr;\
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\
+        proxy_set_header X-Forwarded-Proto $scheme;\
+        proxy_cache_bypass $http_upgrade;\
+        proxy_read_timeout 86400;\
+        proxy_send_timeout 86400;\
+    }\
+' "$NGINX_CONF"
+        NGINX_CHANGED=true
+        echo -e "${GREEN}✅ Socket.io proxy block added${NC}"
+    else
+        echo -e "${GREEN}✅ Socket.io proxy already configured${NC}"
+    fi
+
+    if [ "$NGINX_CHANGED" = true ]; then
+        echo "  Testing Nginx config..."
+        if nginx -t 2>&1; then
+            systemctl reload nginx
+            echo -e "${GREEN}✅ Nginx reloaded${NC}"
+        else
+            echo -e "${RED}❌ Nginx config test failed! Check manually:${NC}"
+            echo "  sudo nano $NGINX_CONF"
+        fi
+    fi
+else
+    echo -e "${YELLOW}⚠️  Nginx config not found at $NGINX_CONF${NC}"
+    echo "  Socket.io WebSocket proxy must be configured manually."
+    echo "  Check: ls /etc/nginx/sites-available/"
+fi
+
+echo ""
 echo -e "${GREEN}Step 5: Health checks...${NC}"
 
 # Wait for services to start

@@ -71,7 +71,7 @@ const userSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['active', 'suspended', 'banned', 'trial'],
+    enum: ['active', 'suspended', 'banned', 'trial', 'deleted'],
     default: 'trial'
   },
   isProtected: {
@@ -528,6 +528,10 @@ userSchema.virtual('resourceUsagePercentage').get(function () {
 
 // Pre-save middleware to check trial expiry
 userSchema.pre('save', function (next) {
+  // Don't override deleted or banned status with suspended
+  if (this.status === 'deleted' || this.status === 'banned') {
+    return next();
+  }
   if (this.isTrialActive && new Date() > this.trialExpiry) {
     this.isTrialActive = false;
     if (this.subscriptionStatus === 'trial') {
