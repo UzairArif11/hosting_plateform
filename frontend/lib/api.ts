@@ -55,9 +55,27 @@ api.interceptors.response.use(
             } catch (refreshError) {
                 // Refresh failed, redirect to login
                 if (typeof window !== 'undefined') {
+                    localStorage.removeItem('token');
                     window.location.href = '/login';
                 }
                 return Promise.reject(refreshError);
+            }
+        }
+
+        // If 403 with deleted/banned account — force logout immediately
+        if (error.response?.status === 403 && typeof window !== 'undefined') {
+            const errMsg = error.response?.data?.error || '';
+            const errCode = error.response?.data?.code || '';
+            if (
+                errMsg.includes('deleted') ||
+                errMsg.includes('banned') ||
+                errCode === 'FORBIDDEN'
+            ) {
+                localStorage.removeItem('token');
+                // Avoid redirect loop if already on login page
+                if (!window.location.pathname.startsWith('/login')) {
+                    window.location.href = `/login?error=${encodeURIComponent(errMsg)}`;
+                }
             }
         }
 

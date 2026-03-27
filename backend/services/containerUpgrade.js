@@ -125,9 +125,47 @@ async function upgradeUserContainer(userId, oldPlan, newPlan) {
         }
 
         if (deployments.length === 0) {
-            logger.info(`[${userId}] No active deployments found. Skipping migration.`);
+            logger.info(`[${userId}] No active deployments found.`);
             result.steps.findDeployments = true;
-            result.success = true;
+
+            // FALLBACK: Even with no deployments, user may have a running container
+            // that needs its resource limits updated to match the new plan
+            if (user.containerName && user.assignedServer) {
+                logger.info(`[${userId}] User has container ${user.containerName} on ${user.assignedServer} — performing in-place resource update`);
+                try {
+                    const planDetails = await Plan.findOne({ name: newPlan });
+                    if (planDetails) {
+                        const resources = await getResourcesForPlan(planDetails);
+                        const host = process.env[`${user.assignedServer}_HOST`] || process.env.EC3_SERVER_IP;
+
+                        // Update container memory/CPU limits live (no restart)
+                        await docker.updateContainerResources(user.containerName, {
+                            memory: resources.memory / (1024 * 1024), // bytes → MB (docker.updateContainerResources expects MB)
+                            cpu: resources.cpu
+                        }, host);
+
+                        // Update user's DB resource allocation
+                        user.resourceAllocation = planDetails.resources;
+                        user.displayedResources = planDetails.displayResources;
+                        user.plan = planDetails._id;
+                        user.planType = planDetails.name;
+                        await user.save();
+
+                        logger.info(`[${userId}] ✅ In-place container resource update complete: ${resources.memory / (1024 * 1024)}MB RAM, ${resources.cpu} CPU`);
+                        result.success = true;
+                        result.inPlaceUpdate = true;
+                    } else {
+                        logger.warn(`[${userId}] Plan ${newPlan} not found for in-place update`);
+                    }
+                } catch (updateErr) {
+                    logger.error(`[${userId}] In-place container resource update failed:`, updateErr.message);
+                    result.errors.push(`In-place update: ${updateErr.message}`);
+                }
+            } else {
+                logger.info(`[${userId}] No container assigned — skipping resource update`);
+                result.success = true;
+            }
+
             return result;
         }
 

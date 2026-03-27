@@ -1661,13 +1661,13 @@ router.get('/servers/:serverKey/docker-stats', requireAuth, requireAdmin, async 
     if (userIds.length > 0) {
       try {
         const users = await User.find({ _id: { $in: userIds } })
-          .select('_id email displayName username plan status createdAt')
+          .select('_id email displayName username planType status createdAt')
           .lean();
         users.forEach(u => {
           usersMap[u._id.toString()] = {
             email: u.email,
             displayName: u.displayName || u.username || 'Unknown',
-            plan: u.plan || 'free',
+            plan: u.planType || 'free',
             status: u.status || 'active',
             createdAt: u.createdAt
           };
