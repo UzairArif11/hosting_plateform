@@ -703,6 +703,19 @@ router.delete('/users/:userId', requireAuth, requireAdmin, async (req, res) => {
     user.recoveryDeadline = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000); // 15 days
     await user.save();
 
+    // Force-logout the deleted user's active browser session via WebSocket
+    try {
+      const websocketService = require('../services/websocket');
+      const io = websocketService.getIO();
+      if (io) {
+        io.to(`user-${user._id}`).emit('force-logout', {
+          reason: 'Your account has been deleted by an administrator.'
+        });
+      }
+    } catch (wsErr) {
+      logger.warn(`Failed to emit force-logout for ${user.email}: ${wsErr.message}`);
+    }
+
     res.json({ success: true, message: 'User soft-deleted. Container stopped. 15-day recovery period.' });
   } catch (error) {
     logger.error('Delete user error:', error);
@@ -818,7 +831,20 @@ router.delete('/users/:userId/permanent', requireAuth, requireAdmin, async (req,
     await Project.deleteMany({ owner: user._id });
     await Deployment.deleteMany({ userId: user._id });
 
-    // 4. Delete user record permanently
+    // 4. Force-logout the user's active browser session via WebSocket BEFORE deleting
+    try {
+      const websocketService = require('../services/websocket');
+      const io = websocketService.getIO();
+      if (io) {
+        io.to(`user-${user._id}`).emit('force-logout', {
+          reason: 'Your account has been permanently deleted.'
+        });
+      }
+    } catch (wsErr) {
+      logger.warn(`Failed to emit force-logout for ${user.email}: ${wsErr.message}`);
+    }
+
+    // 5. Delete user record permanently
     await User.findByIdAndDelete(user._id);
 
     logger.info(`PERMANENT DELETE: ${user.email} — ${cleanup.projects} projects, ${cleanup.deployments} deployments, ${cleanup.containers} containers removed`);

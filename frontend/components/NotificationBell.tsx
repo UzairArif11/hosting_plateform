@@ -60,6 +60,13 @@ export default function NotificationBell() {
         socket.on('notification', handleNewNotification);
         socket.on('admin-notification', handleNewNotification);
 
+        // Force-logout: admin deleted/banned this account → clear token and redirect
+        socket.on('force-logout', (data: { reason?: string }) => {
+            localStorage.removeItem('token');
+            alert(data?.reason || 'Your account has been deleted. You will be redirected to the login page.');
+            window.location.href = '/login';
+        });
+
         return () => {
             clearInterval(interval);
             socket.disconnect();
