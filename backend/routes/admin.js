@@ -1648,16 +1648,56 @@ router.get('/servers/:serverKey/docker-stats', requireAuth, requireAdmin, async 
       };
     });
 
-    const running = containerList.filter(c => c.state === 'running').length;
+    // --- Resolve user details from container names ---
+    // Container names follow pattern: EC2-user-{mongoObjectId}
+    const userIdMap = {};
+    containerList.forEach(c => {
+      const match = c.name.match(/^EC\d+-user-([a-f0-9]{24})$/i);
+      if (match) userIdMap[match[1]] = c.name;
+    });
+
+    const userIds = Object.keys(userIdMap);
+    let usersMap = {};
+    if (userIds.length > 0) {
+      try {
+        const users = await User.find({ _id: { $in: userIds } })
+          .select('_id email displayName username plan status createdAt')
+          .lean();
+        users.forEach(u => {
+          usersMap[u._id.toString()] = {
+            email: u.email,
+            displayName: u.displayName || u.username || 'Unknown',
+            plan: u.plan || 'free',
+            status: u.status || 'active',
+            createdAt: u.createdAt
+          };
+        });
+      } catch (e) {
+        logger.warn('Failed to lookup users for containers:', e.message);
+      }
+    }
+
+    // Attach user info to each container
+    const enrichedList = containerList.map(c => {
+      const match = c.name.match(/^EC\d+-user-([a-f0-9]{24})$/i);
+      const userId = match ? match[1] : null;
+      return {
+        ...c,
+        userId: userId,
+        user: userId && usersMap[userId] ? usersMap[userId] : null
+      };
+    });
+
+    const running = enrichedList.filter(c => c.state === 'running').length;
 
     res.json({
       success: true,
       docker: {
         containers: {
-          total: containerList.length,
+          total: enrichedList.length,
           running,
-          stopped: containerList.length - running,
-          list: containerList
+          stopped: enrichedList.length - running,
+          list: enrichedList
         },
         system: systemInfo.success ? {
           version: systemInfo.version || 'Unknown',

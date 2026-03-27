@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
+import ConfirmDeleteModal from '@/components/ConfirmDeleteModal';
 
 interface User {
     _id: string;
@@ -114,20 +115,27 @@ export default function UserManagement() {
         }
     };
 
-    const handlePermanentDelete = async (userId: string, email: string) => {
-        const confirmEmail = prompt(`⚠️ PERMANENT DELETE\n\nThis will remove ALL data: user record, projects, deployments, and Docker container.\n\nType the user's email to confirm:\n${email}`);
-        if (confirmEmail !== email) {
-            if (confirmEmail !== null) toast.error('Email did not match. Cancelled.');
-            return;
-        }
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState<{ id: string; email: string } | null>(null);
+
+    const handlePermanentDelete = (userId: string, email: string) => {
+        setDeleteTarget({ id: userId, email });
+        setDeleteModalOpen(true);
+    };
+
+    const confirmPermanentDelete = async () => {
+        if (!deleteTarget) return;
+        setDeleteModalOpen(false);
         try {
-            const res = await api.delete(`/admin/users/${userId}/permanent`);
+            const res = await api.delete(`/admin/users/${deleteTarget.id}/permanent`);
             const cleanup = res.data.cleanup || {};
             toast.success(`Permanently deleted. Removed: ${cleanup.projects || 0} projects, ${cleanup.deployments || 0} deployments, ${cleanup.containers || 0} containers`);
             fetchUsers();
         } catch (error: any) {
             const msg = error.response?.data?.error || 'Error permanently deleting user';
             toast.error(msg);
+        } finally {
+            setDeleteTarget(null);
         }
     };
 
@@ -327,6 +335,14 @@ export default function UserManagement() {
                         onCancel={() => setShowConfirmDialog(null)}
                     />
                 )}
+
+                {/* Permanent Delete Modal */}
+                <ConfirmDeleteModal
+                    isOpen={deleteModalOpen}
+                    email={deleteTarget?.email || ''}
+                    onConfirm={confirmPermanentDelete}
+                    onCancel={() => { setDeleteModalOpen(false); setDeleteTarget(null); }}
+                />
             </div>
         </div>
     );

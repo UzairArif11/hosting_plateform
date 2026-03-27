@@ -41,14 +41,14 @@ export default function DeploymentsPage() {
     const getStatusColor = (status: string) => {
         switch (status) {
             case 'success':
-                return 'bg-green-100 text-green-800';
+                return 'bg-green-500/10 text-green-400';
             case 'failed':
-                return 'bg-red-100 text-red-800';
+                return 'bg-red-500/10 text-red-400';
             case 'building':
             case 'deploying':
-                return 'bg-blue-100 text-blue-800';
+                return 'bg-blue-500/10 text-blue-400';
             default:
-                return 'bg-gray-100 text-gray-800';
+                return 'bg-gray-700 text-gray-300';
         }
     };
 
@@ -62,8 +62,8 @@ export default function DeploymentsPage() {
 
     if (error) {
         return (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                <p className="text-red-800">Error loading deployments: {error}</p>
+            <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-4">
+                <p className="text-red-400">Error loading deployments: {error}</p>
             </div>
         );
     }

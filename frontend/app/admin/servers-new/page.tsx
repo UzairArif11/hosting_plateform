@@ -13,12 +13,22 @@ import {
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 
+interface ContainerUser {
+    email: string;
+    displayName: string;
+    plan: string;
+    status: string;
+    createdAt?: string;
+}
+
 interface ContainerStats {
     id: string;
     name: string;
     image: string;
     state: string;
     status: string;
+    userId?: string | null;
+    user?: ContainerUser | null;
     stats: {
         cpu?: string;
         memory?: {
@@ -370,6 +380,9 @@ export default function ServersPage() {
                                         Container
                                     </th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                                        User
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
                                         Status
                                     </th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
@@ -394,6 +407,29 @@ export default function ServersPage() {
                                                 <p className="text-sm font-medium text-white">{container.name}</p>
                                                 <p className="text-xs text-gray-500 font-mono">{container.id}</p>
                                             </div>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            {container.user ? (
+                                                <div>
+                                                    <p className="text-sm font-medium text-white">{container.user.displayName}</p>
+                                                    <p className="text-xs text-gray-500">{container.user.email}</p>
+                                                    <div className="flex items-center gap-1.5 mt-1">
+                                                        <span className={`px-1.5 py-0.5 text-[10px] rounded font-medium ${
+                                                            container.user.plan === 'pro' ? 'bg-purple-500/20 text-purple-400' :
+                                                            container.user.plan === 'starter' ? 'bg-blue-500/20 text-blue-400' :
+                                                            'bg-gray-500/20 text-gray-400'
+                                                        }`}>{container.user.plan}</span>
+                                                        <span className={`px-1.5 py-0.5 text-[10px] rounded font-medium ${
+                                                            container.user.status === 'active' ? 'bg-green-500/20 text-green-400' :
+                                                            container.user.status === 'suspended' ? 'bg-yellow-500/20 text-yellow-400' :
+                                                            container.user.status === 'deleted' ? 'bg-red-500/20 text-red-400' :
+                                                            'bg-gray-500/20 text-gray-400'
+                                                        }`}>{container.user.status}</span>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <span className="text-xs text-gray-600 italic">System</span>
+                                            )}
                                         </td>
                                         <td className="px-6 py-4">
                                             <span
