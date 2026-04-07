@@ -193,28 +193,34 @@ export default function PricingPage() {
 
                                     {/* Resources */}
                                     <div className="space-y-2 mb-6 text-sm">
-                                        {plan.resources?.cpu && (
+                                        {plan.resources?.cpu != null && (
                                             <div className="flex items-center gap-2">
-                                                <span className="text-purple-400">CPU</span>
-                                                <span className="text-gray-300">{plan.resources.cpu} {typeof plan.resources.cpu === 'number' ? 'vCPU' : ''}</span>
+                                                <span className="text-blue-400">CPU</span>
+                                                <span className="text-gray-300"><span className="font-semibold text-white">{plan.resources.cpu}</span> OCPU</span>
                                             </div>
                                         )}
-                                        {plan.resources?.ram && (
+                                        {plan.resources?.ram != null && (
                                             <div className="flex items-center gap-2">
                                                 <span className="text-purple-400">RAM</span>
-                                                <span className="text-gray-300">{plan.resources.ram} {typeof plan.resources.ram === 'number' ? 'MB' : ''}</span>
+                                                <span className="text-gray-300"><span className="font-semibold text-white">{plan.resources.ram}</span> GB</span>
                                             </div>
                                         )}
-                                        {plan.resources?.storage && (
+                                        {plan.resources?.storage != null && (
                                             <div className="flex items-center gap-2">
-                                                <span className="text-purple-400">Storage</span>
-                                                <span className="text-gray-300">{plan.resources.storage} {typeof plan.resources.storage === 'number' ? 'MB' : ''}</span>
+                                                <span className="text-green-400">Storage</span>
+                                                <span className="text-gray-300"><span className="font-semibold text-white">{plan.resources.storage}</span> GB</span>
                                             </div>
                                         )}
-                                        {plan.resources?.projects && (
+                                        {plan.resources?.bandwidth != null && (
                                             <div className="flex items-center gap-2">
-                                                <span className="text-purple-400">Projects</span>
-                                                <span className="text-gray-300">{plan.resources.projects}</span>
+                                                <span className="text-yellow-400">Bandwidth</span>
+                                                <span className="text-gray-300"><span className="font-semibold text-white">{plan.resources.bandwidth}</span> GB</span>
+                                            </div>
+                                        )}
+                                        {plan.resources?.projects != null && (
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-orange-400">Projects</span>
+                                                <span className="text-gray-300"><span className="font-semibold text-white">{plan.resources.projects}</span></span>
                                             </div>
                                         )}
                                     </div>
