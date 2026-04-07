@@ -61,8 +61,6 @@ web_modules/
 .yarn-integrity
 
 # Environment variables
-.env
-.env.local
 .env.development.local
 .env.test.local
 .env.production.local
@@ -360,3 +358,4 @@ Icon
 Network Trash Folder
 Temporary Items
 .apdisk
+config.bat
