@@ -716,6 +716,19 @@ router.delete('/users/:userId', requireAuth, requireAdmin, async (req, res) => {
       logger.warn(`Failed to emit force-logout for ${user.email}: ${wsErr.message}`);
     }
 
+    // Force-logout the deleted user's active browser session via WebSocket
+    try {
+      const websocketService = require('../services/websocket');
+      const io = websocketService.getIO();
+      if (io) {
+        io.to(`user-${user._id}`).emit('force-logout', {
+          reason: 'Your account has been deleted by an administrator.'
+        });
+      }
+    } catch (wsErr) {
+      logger.warn(`Failed to emit force-logout for ${user.email}: ${wsErr.message}`);
+    }
+
     res.json({ success: true, message: 'User soft-deleted. Container stopped. 15-day recovery period.' });
   } catch (error) {
     logger.error('Delete user error:', error);
