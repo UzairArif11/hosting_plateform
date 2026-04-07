@@ -142,6 +142,11 @@ export default function PricingPage() {
                         <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
                         <p className="text-gray-500">Loading plans...</p>
                     </div>
+                ) : plans.length === 0 ? (
+                    <div className="text-center py-20">
+                        <p className="text-gray-400 text-lg mb-2">Unable to load plans right now.</p>
+                        <p className="text-gray-500">Please try again later or <Link href="/login" className="text-purple-400 hover:text-purple-300">sign in</Link> to view plans.</p>
+                    </div>
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                         {plans.map((plan) => {

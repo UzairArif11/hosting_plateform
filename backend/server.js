@@ -147,6 +147,54 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', requireAuth, projectRoutes);
 app.use('/api/deployments', requireAuth, deploymentRoutes);
+// Public billing endpoint (no auth) - for pricing page
+const Plan = require('./models/Plan');
+app.get('/api/billing/plans', async (req, res) => {
+  try {
+    const { currency = 'usd' } = req.query;
+    const plans = await Plan.findActivePlans();
+
+    const formattedPlans = plans.map(plan => {
+      const basePrice = plan.getPricingForCurrency(currency);
+      const defaultPeriods = [
+        { months: 1, discountPercent: 0, gracePeriodDays: 10, enabled: true },
+        { months: 3, discountPercent: 5, gracePeriodDays: 15, enabled: true },
+        { months: 6, discountPercent: 10, gracePeriodDays: 20, enabled: true },
+        { months: 12, discountPercent: 20, gracePeriodDays: 30, enabled: true }
+      ];
+      const periods = (plan.billingPeriods && plan.billingPeriods.length > 0)
+        ? plan.billingPeriods.filter(p => p.enabled)
+        : defaultPeriods;
+
+      const billingPeriods = periods.map(p => ({
+        months: p.months,
+        discountPercent: p.discountPercent || 0,
+        monthlyPrice: Math.round(basePrice * (1 - (p.discountPercent || 0) / 100) * 100) / 100,
+        totalPrice: Math.round(basePrice * p.months * (1 - (p.discountPercent || 0) / 100) * 100) / 100,
+        savings: Math.round(basePrice * p.months * (p.discountPercent || 0) / 100 * 100) / 100,
+        label: p.months === 1 ? 'Monthly' : p.months === 3 ? 'Quarterly' : p.months === 6 ? 'Semi-Annual' : 'Annual'
+      }));
+
+      return {
+        id: plan._id,
+        name: plan.name,
+        displayName: plan.displayName,
+        description: plan.description,
+        price: basePrice,
+        formattedPrice: plan.formattedPricing[currency.toLowerCase()],
+        resources: plan.displayResources || plan.resources,
+        features: plan.features.filter(f => f.enabled),
+        billingPeriods,
+        isDefault: plan.isDefault,
+        isTrial: plan.isTrial
+      };
+    });
+
+    res.json({ success: true, plans: formattedPlans, currency: currency.toUpperCase() });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to fetch plans' });
+  }
+});
 app.use('/api/billing', requireAuth, billingRoutes);
 app.use('/api/admin', requireAuth, requireAdmin, adminRoutes);
 app.use('/api/settings', settingsRoutes); // Settings (public domain lookup, admin for updates)
