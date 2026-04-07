@@ -1,6 +1,9 @@
 'use client';
 
+import { useState } from 'react';
+
 export default function Home() {
+  const [menuOpen, setMenuOpen] = useState(false);
   return (
     <>
       <style dangerouslySetInnerHTML={{
@@ -560,6 +563,69 @@ export default function Home() {
           }
         }
 
+        /* Mobile Nav */
+        .mobile-nav {
+          display: none;
+          background: rgba(17, 24, 39, 0.95);
+          backdrop-filter: blur(20px);
+          border-top: 1px solid rgba(255, 255, 255, 0.1);
+          padding: 1rem 2rem;
+          position: sticky;
+          top: 73px;
+          z-index: 99;
+        }
+
+        .mobile-nav a {
+          display: block;
+          color: #d1d5db;
+          text-decoration: none;
+          padding: 0.75rem 0;
+          font-weight: 500;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+          transition: color 0.3s ease;
+        }
+
+        .mobile-nav a:last-child {
+          border-bottom: none;
+        }
+
+        .mobile-nav a:hover {
+          color: #fff;
+        }
+
+        .mobile-nav .mobile-cta {
+          display: block;
+          text-align: center;
+          margin-top: 0.75rem;
+          padding: 0.75rem;
+          background: linear-gradient(135deg, #9333ea, #ec4899);
+          border-radius: 12px;
+          color: #fff;
+          font-weight: 600;
+          text-decoration: none;
+        }
+
+        .hamburger {
+          display: none;
+          background: none;
+          border: none;
+          cursor: pointer;
+          padding: 0.5rem;
+        }
+
+        .hamburger svg {
+          stroke: #d1d5db;
+        }
+
+        /* Footer links responsive */
+        .footer-links {
+          display: flex;
+          justify-content: center;
+          gap: 2rem;
+          margin-bottom: 1rem;
+          flex-wrap: wrap;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
           .main-heading {
@@ -568,6 +634,12 @@ export default function Home() {
           .nav-links {
             display: none;
           }
+          .hamburger {
+            display: block;
+          }
+          .mobile-nav.open {
+            display: block;
+          }
           .buttons {
             flex-direction: column;
             width: 100%;
@@ -575,6 +647,10 @@ export default function Home() {
           .btn {
             width: 100%;
             justify-content: center;
+          }
+          .footer-links {
+            gap: 1rem;
+            font-size: 0.8rem;
           }
         }
       `}} />
@@ -604,12 +680,32 @@ export default function Home() {
               </div>
               <div className="nav-links">
                 <a href="#features" className="nav-link">Features</a>
-                <a href="#pricing" className="nav-link">Pricing</a>
-                <a href="#docs" className="nav-link">Docs</a>
-                <button className="cta-button">Get Started</button>
+                <a href="/pricing" className="nav-link">Pricing</a>
+                <a href="/terms" className="nav-link">Terms</a>
+                <a href="/privacy" className="nav-link">Privacy</a>
+                <a href="/refund" className="nav-link">Refund</a>
+                <a href="/login" className="cta-button" style={{ textDecoration: 'none' }}>Get Started</a>
               </div>
+              <button className="hamburger" onClick={() => setMenuOpen(!menuOpen)} aria-label="Toggle menu">
+                <svg width="28" height="28" fill="none" strokeWidth="2" viewBox="0 0 24 24">
+                  {menuOpen ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                  )}
+                </svg>
+              </button>
             </div>
           </nav>
+          {/* Mobile Navigation */}
+          <div className={`mobile-nav ${menuOpen ? 'open' : ''}`}>
+            <a href="#features" onClick={() => setMenuOpen(false)}>Features</a>
+            <a href="/pricing">Pricing</a>
+            <a href="/terms">Terms</a>
+            <a href="/privacy">Privacy</a>
+            <a href="/refund">Refund</a>
+            <a href="/login" className="mobile-cta">Get Started</a>
+          </div>
 
           {/* Hero */}
           <section className="hero">
@@ -706,7 +802,13 @@ export default function Home() {
 
           {/* Footer */}
           <footer>
-            <p>© 2025 DeployHub. Built with <span className="heart">❤️</span> for developers.</p>
+            <div className="footer-links">
+              <a href="/pricing" className="nav-link" style={{ fontSize: '0.875rem' }}>Pricing</a>
+              <a href="/terms" className="nav-link" style={{ fontSize: '0.875rem' }}>Terms of Service</a>
+              <a href="/privacy" className="nav-link" style={{ fontSize: '0.875rem' }}>Privacy Policy</a>
+              <a href="/refund" className="nav-link" style={{ fontSize: '0.875rem' }}>Refund Policy</a>
+            </div>
+            <p>&copy; 2025 DeployHub. Built with <span className="heart">&hearts;</span> for developers.</p>
             <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.5rem' }}>Powered by Oracle Cloud Infrastructure</p>
           </footer>
         </div>

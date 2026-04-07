@@ -3,9 +3,9 @@
 import Link from 'next/link';
 
 export default function PrivacyPage() {
-    const platformName = 'CloudHost Platform';
+    const platformName = 'DeployHub';
     const lastUpdated = 'March 3, 2026';
-    const contactEmail = 'support@cloudhost.com';
+    const contactEmail = 'support@deployhub.com';
 
     return (
         <div className="min-h-screen bg-gray-950 text-gray-300">
@@ -15,9 +15,11 @@ export default function PrivacyPage() {
                     <Link href="/" className="text-white font-bold text-lg hover:text-blue-400 transition-colors">
                         ← Back to Home
                     </Link>
-                    <Link href="/terms" className="text-gray-400 hover:text-white text-sm transition-colors">
-                        ← Terms of Service
-                    </Link>
+                    <div className="flex gap-4">
+                        <Link href="/pricing" className="text-gray-400 hover:text-white text-sm transition-colors">Pricing</Link>
+                        <Link href="/terms" className="text-gray-400 hover:text-white text-sm transition-colors">Terms</Link>
+                        <Link href="/refund" className="text-gray-400 hover:text-white text-sm transition-colors">Refund</Link>
+                    </div>
                 </div>
             </header>
 
@@ -178,11 +180,13 @@ export default function PrivacyPage() {
 
             {/* Footer */}
             <footer className="border-t border-gray-800 mt-16">
-                <div className="max-w-4xl mx-auto px-6 py-6 flex items-center justify-between text-sm text-gray-500">
-                    <p>© {new Date().getFullYear()} {platformName}. All rights reserved.</p>
+                <div className="max-w-4xl mx-auto px-6 py-6 flex flex-wrap items-center justify-between gap-2 text-sm text-gray-500">
+                    <p>&copy; {new Date().getFullYear()} {platformName}. All rights reserved.</p>
                     <div className="flex gap-4">
+                        <Link href="/pricing" className="hover:text-white transition-colors">Pricing</Link>
                         <Link href="/terms" className="hover:text-white transition-colors">Terms</Link>
                         <Link href="/privacy" className="text-blue-400">Privacy</Link>
+                        <Link href="/refund" className="hover:text-white transition-colors">Refund</Link>
                     </div>
                 </div>
             </footer>
