@@ -109,6 +109,16 @@ const userSchema = new mongoose.Schema({
     default: 'trial'
   },
 
+  // Paddle payment info
+  paddleCustomerId: {
+    type: String,
+    default: null
+  },
+  paddleSubscriptionId: {
+    type: String,
+    default: null
+  },
+
   // Payoneer payment info
   payoneerCustomerId: {
     type: String,

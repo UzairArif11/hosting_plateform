@@ -67,7 +67,21 @@ export default function AdminSettingsPage() {
 
     // Payment Configuration
     const [paymentConfig, setPaymentConfig] = useState({
-        payoneer: { enabled: false },
+        paddle: {
+            enabled: false,
+            testMode: true,
+            sandboxSellerId: '',
+            sandboxApiKey: '',
+            sandboxClientToken: '',
+            sandboxWebhookSecret: '',
+            liveSellerId: '',
+            liveApiKey: '',
+            liveClientToken: '',
+            liveWebhookSecret: '',
+            processingFeePercent: 5,
+            cryptoDiscountPercent: 3
+        },
+        btcpay: { enabled: false, serverUrl: '', apiKey: '', storeId: '', webhookSecret: '', testMode: true },
         jazzcashEasypaisa: { enabled: false },
         manualBank: {
             enabled: false,
@@ -121,7 +135,28 @@ export default function AdminSettingsPage() {
                 if (data.resourceLimits) setResourceLimits(data.resourceLimits);
                 if (data.paymentConfig) {
                     setPaymentConfig({
-                        payoneer: { enabled: data.paymentConfig.payoneer?.enabled || false },
+                        paddle: {
+                            enabled: data.paymentConfig.paddle?.enabled || false,
+                            testMode: data.paymentConfig.paddle?.testMode !== false,
+                            sandboxSellerId: data.paymentConfig.paddle?.sandboxSellerId || '',
+                            sandboxApiKey: data.paymentConfig.paddle?.sandboxApiKey || '',
+                            sandboxClientToken: data.paymentConfig.paddle?.sandboxClientToken || '',
+                            sandboxWebhookSecret: data.paymentConfig.paddle?.sandboxWebhookSecret || '',
+                            liveSellerId: data.paymentConfig.paddle?.liveSellerId || '',
+                            liveApiKey: data.paymentConfig.paddle?.liveApiKey || '',
+                            liveClientToken: data.paymentConfig.paddle?.liveClientToken || '',
+                            liveWebhookSecret: data.paymentConfig.paddle?.liveWebhookSecret || '',
+                            processingFeePercent: data.paymentConfig.paddle?.processingFeePercent ?? 5,
+                            cryptoDiscountPercent: data.paymentConfig.paddle?.cryptoDiscountPercent ?? 3
+                        },
+                        btcpay: {
+                            enabled: data.paymentConfig.btcpay?.enabled || false,
+                            serverUrl: data.paymentConfig.btcpay?.serverUrl || '',
+                            apiKey: data.paymentConfig.btcpay?.apiKey || '',
+                            storeId: data.paymentConfig.btcpay?.storeId || '',
+                            webhookSecret: data.paymentConfig.btcpay?.webhookSecret || '',
+                            testMode: data.paymentConfig.btcpay?.testMode !== false
+                        },
                         jazzcashEasypaisa: { enabled: data.paymentConfig.jazzcashEasypaisa?.enabled || false },
                         manualBank: {
                             enabled: data.paymentConfig.manualBank?.enabled || false,
@@ -459,25 +494,200 @@ export default function AdminSettingsPage() {
                                     Toggle which payment methods are available to your users. Only enabled methods will appear on the billing page.
                                 </p>
 
-                                {/* Toggle: Payoneer */}
-                                <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700 space-y-2">
+                                {/* Toggle: Paddle (Card/PayPal) */}
+                                <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700 space-y-3">
                                     <div className="flex items-center justify-between">
                                         <div>
-                                            <p className="text-white font-medium text-lg">💳 Payoneer (Automatic)</p>
-                                            <p className="text-sm text-gray-400">Users pay via Payoneer checkout. Plan upgrades automatically on successful payment.</p>
+                                            <p className="text-white font-medium text-lg">Paddle — Card / PayPal (Automatic)</p>
+                                            <p className="text-sm text-gray-400">Merchant of Record. Handles taxes, chargebacks, Visa/MC/PayPal/Apple Pay. Auto-upgrade on payment.</p>
+                                        </div>
+                                        <label className="relative inline-flex items-center cursor-pointer">
+                                            <input type="checkbox" checked={paymentConfig.paddle.enabled}
+                                                onChange={(e) => setPaymentConfig({ ...paymentConfig, paddle: { ...paymentConfig.paddle, enabled: e.target.checked } })}
+                                                className="sr-only peer" />
+                                            <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                                        </label>
+                                    </div>
+                                    {paymentConfig.paddle.enabled && (
+                                        <div className="space-y-4 pt-2 border-t border-gray-700">
+                                            {/* Test Mode Toggle */}
+                                            <div className="flex items-center justify-between bg-gray-900 rounded-lg p-3">
+                                                <div>
+                                                    <p className="text-white font-medium text-sm">Test Mode (Sandbox)</p>
+                                                    <p className="text-xs text-gray-400">ON = sandbox (fake payments), OFF = live (real charges)</p>
+                                                </div>
+                                                <label className="relative inline-flex items-center cursor-pointer">
+                                                    <input type="checkbox" checked={paymentConfig.paddle.testMode}
+                                                        onChange={(e) => setPaymentConfig({ ...paymentConfig, paddle: { ...paymentConfig.paddle, testMode: e.target.checked } })}
+                                                        className="sr-only peer" />
+                                                    <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-yellow-600"></div>
+                                                </label>
+                                            </div>
+
+                                            {/* Sandbox Credentials */}
+                                            <div className="space-y-2">
+                                                <p className="text-sm font-medium text-yellow-400">Sandbox Credentials (Test Mode)</p>
+                                                <p className="text-xs text-gray-500">Get these from sandbox-vendors.paddle.com &rarr; Developer Tools &rarr; Authentication</p>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                    <div>
+                                                        <label className="block text-xs text-gray-400 mb-1">Sandbox Seller ID</label>
+                                                        <input type="text" value={paymentConfig.paddle.sandboxSellerId}
+                                                            onChange={(e) => setPaymentConfig({ ...paymentConfig, paddle: { ...paymentConfig.paddle, sandboxSellerId: e.target.value } })}
+                                                            placeholder="Seller ID" className="w-full bg-gray-900 border border-gray-600 text-white rounded-lg p-2 text-sm" />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs text-gray-400 mb-1">Sandbox API Key</label>
+                                                        <input type="password" value={paymentConfig.paddle.sandboxApiKey}
+                                                            onChange={(e) => setPaymentConfig({ ...paymentConfig, paddle: { ...paymentConfig.paddle, sandboxApiKey: e.target.value } })}
+                                                            placeholder="pdl_sdbx_..." className="w-full bg-gray-900 border border-gray-600 text-white rounded-lg p-2 text-sm" />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs text-gray-400 mb-1">Sandbox Client Token</label>
+                                                        <input type="text" value={paymentConfig.paddle.sandboxClientToken}
+                                                            onChange={(e) => setPaymentConfig({ ...paymentConfig, paddle: { ...paymentConfig.paddle, sandboxClientToken: e.target.value } })}
+                                                            placeholder="test_..." className="w-full bg-gray-900 border border-gray-600 text-white rounded-lg p-2 text-sm" />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs text-gray-400 mb-1">Sandbox Webhook Secret</label>
+                                                        <input type="password" value={paymentConfig.paddle.sandboxWebhookSecret}
+                                                            onChange={(e) => setPaymentConfig({ ...paymentConfig, paddle: { ...paymentConfig.paddle, sandboxWebhookSecret: e.target.value } })}
+                                                            placeholder="pdl_ntfset_..." className="w-full bg-gray-900 border border-gray-600 text-white rounded-lg p-2 text-sm" />
+                                                    </div>
+                                                </div>
+                                                {/* Sandbox validation */}
+                                                <div className="flex flex-wrap gap-2 text-xs">
+                                                    {paymentConfig.paddle.sandboxSellerId ? <span className="text-green-400">Seller ID set</span> : <span className="text-red-400">Seller ID missing</span>}
+                                                    {paymentConfig.paddle.sandboxApiKey ? <span className="text-green-400">API Key set</span> : <span className="text-red-400">API Key missing</span>}
+                                                    {paymentConfig.paddle.sandboxClientToken ? <span className="text-green-400">Client Token set</span> : <span className="text-red-400">Client Token missing</span>}
+                                                    {paymentConfig.paddle.sandboxWebhookSecret ? <span className="text-green-400">Webhook Secret set</span> : <span className="text-red-400">Webhook Secret missing</span>}
+                                                </div>
+                                            </div>
+
+                                            {/* Live Credentials */}
+                                            <div className="space-y-2">
+                                                <p className="text-sm font-medium text-red-400">Live Credentials (Production)</p>
+                                                <p className="text-xs text-gray-500">Get these from vendors.paddle.com &rarr; Developer Tools &rarr; Authentication</p>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                    <div>
+                                                        <label className="block text-xs text-gray-400 mb-1">Live Seller ID</label>
+                                                        <input type="text" value={paymentConfig.paddle.liveSellerId}
+                                                            onChange={(e) => setPaymentConfig({ ...paymentConfig, paddle: { ...paymentConfig.paddle, liveSellerId: e.target.value } })}
+                                                            placeholder="Seller ID" className="w-full bg-gray-900 border border-gray-600 text-white rounded-lg p-2 text-sm" />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs text-gray-400 mb-1">Live API Key</label>
+                                                        <input type="password" value={paymentConfig.paddle.liveApiKey}
+                                                            onChange={(e) => setPaymentConfig({ ...paymentConfig, paddle: { ...paymentConfig.paddle, liveApiKey: e.target.value } })}
+                                                            placeholder="pdl_live_..." className="w-full bg-gray-900 border border-gray-600 text-white rounded-lg p-2 text-sm" />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs text-gray-400 mb-1">Live Client Token</label>
+                                                        <input type="text" value={paymentConfig.paddle.liveClientToken}
+                                                            onChange={(e) => setPaymentConfig({ ...paymentConfig, paddle: { ...paymentConfig.paddle, liveClientToken: e.target.value } })}
+                                                            placeholder="live_..." className="w-full bg-gray-900 border border-gray-600 text-white rounded-lg p-2 text-sm" />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs text-gray-400 mb-1">Live Webhook Secret</label>
+                                                        <input type="password" value={paymentConfig.paddle.liveWebhookSecret}
+                                                            onChange={(e) => setPaymentConfig({ ...paymentConfig, paddle: { ...paymentConfig.paddle, liveWebhookSecret: e.target.value } })}
+                                                            placeholder="pdl_ntfset_..." className="w-full bg-gray-900 border border-gray-600 text-white rounded-lg p-2 text-sm" />
+                                                    </div>
+                                                </div>
+                                                {/* Live validation */}
+                                                <div className="flex flex-wrap gap-2 text-xs">
+                                                    {paymentConfig.paddle.liveSellerId ? <span className="text-green-400">Seller ID set</span> : <span className="text-gray-500">Seller ID not set</span>}
+                                                    {paymentConfig.paddle.liveApiKey ? <span className="text-green-400">API Key set</span> : <span className="text-gray-500">API Key not set</span>}
+                                                    {paymentConfig.paddle.liveClientToken ? <span className="text-green-400">Client Token set</span> : <span className="text-gray-500">Client Token not set</span>}
+                                                    {paymentConfig.paddle.liveWebhookSecret ? <span className="text-green-400">Webhook Secret set</span> : <span className="text-gray-500">Webhook Secret not set</span>}
+                                                </div>
+                                            </div>
+
+                                            {/* Fee Settings */}
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="block text-xs text-gray-400 mb-1">Processing Fee % (added to customer price)</label>
+                                                    <input type="number" min="0" max="20" step="1" value={paymentConfig.paddle.processingFeePercent}
+                                                        onChange={(e) => setPaymentConfig({ ...paymentConfig, paddle: { ...paymentConfig.paddle, processingFeePercent: parseInt(e.target.value) || 0 } })}
+                                                        className="w-full bg-gray-900 border border-gray-600 text-white rounded-lg p-2 text-sm" />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs text-gray-400 mb-1">Crypto Discount % (discount for crypto payments)</label>
+                                                    <input type="number" min="0" max="10" step="1" value={paymentConfig.paddle.cryptoDiscountPercent}
+                                                        onChange={(e) => setPaymentConfig({ ...paymentConfig, paddle: { ...paymentConfig.paddle, cryptoDiscountPercent: parseInt(e.target.value) || 0 } })}
+                                                        className="w-full bg-gray-900 border border-gray-600 text-white rounded-lg p-2 text-sm" />
+                                                </div>
+                                            </div>
+
+                                            {/* Info */}
+                                            <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 text-xs text-blue-300">
+                                                <p className="font-medium mb-1">Webhook URL (set in Paddle dashboard):</p>
+                                                <code className="bg-gray-900 px-2 py-1 rounded text-xs break-all">
+                                                    {typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/paddle
+                                                </code>
+                                                <p className="mt-2 text-gray-400">Configure payout frequency and minimum threshold in your Paddle dashboard (recommended: Monthly, $200+ minimum).</p>
+                                                <p className="mt-1 text-gray-400">Price IDs for each plan are set in Admin &rarr; Plans.</p>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Toggle: BTCPay Server (Crypto Automatic) */}
+                                <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-white font-medium text-lg">Crypto Payment - BTCPay Server (Automatic)</p>
+                                            <p className="text-sm text-gray-400">Users pay with BTC/crypto via your self-hosted BTCPay Server. Blockchain verified, auto-upgrade.</p>
                                         </div>
                                         <label className="relative inline-flex items-center cursor-pointer">
                                             <input
                                                 type="checkbox"
-                                                checked={paymentConfig.payoneer.enabled}
-                                                onChange={(e) => setPaymentConfig({ ...paymentConfig, payoneer: { enabled: e.target.checked } })}
+                                                checked={paymentConfig.btcpay.enabled}
+                                                onChange={(e) => setPaymentConfig({ ...paymentConfig, btcpay: { ...paymentConfig.btcpay, enabled: e.target.checked } })}
                                                 className="sr-only peer"
                                             />
                                             <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
                                         </label>
                                     </div>
-                                    {paymentConfig.payoneer.enabled && (
-                                        <p className="text-xs text-green-400">✅ Active — Requires PAYONEER env variables to be set</p>
+                                    {paymentConfig.btcpay.enabled && (
+                                        <div className="space-y-3 pt-2 border-t border-gray-700">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="block text-sm text-gray-400 mb-1">BTCPay Server URL *</label>
+                                                    <input type="text" value={paymentConfig.btcpay.serverUrl}
+                                                        onChange={(e) => setPaymentConfig({ ...paymentConfig, btcpay: { ...paymentConfig.btcpay, serverUrl: e.target.value } })}
+                                                        placeholder="https://pay.yourdomain.com" className="w-full bg-gray-900 border border-gray-600 text-white rounded-lg p-2.5 text-sm" />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm text-gray-400 mb-1">API Key *</label>
+                                                    <input type="password" value={paymentConfig.btcpay.apiKey}
+                                                        onChange={(e) => setPaymentConfig({ ...paymentConfig, btcpay: { ...paymentConfig.btcpay, apiKey: e.target.value } })}
+                                                        placeholder="BTCPay API Key" className="w-full bg-gray-900 border border-gray-600 text-white rounded-lg p-2.5 text-sm" />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm text-gray-400 mb-1">Store ID *</label>
+                                                    <input type="text" value={paymentConfig.btcpay.storeId}
+                                                        onChange={(e) => setPaymentConfig({ ...paymentConfig, btcpay: { ...paymentConfig.btcpay, storeId: e.target.value } })}
+                                                        placeholder="BTCPay Store ID" className="w-full bg-gray-900 border border-gray-600 text-white rounded-lg p-2.5 text-sm" />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm text-gray-400 mb-1">Webhook Secret *</label>
+                                                    <input type="password" value={paymentConfig.btcpay.webhookSecret}
+                                                        onChange={(e) => setPaymentConfig({ ...paymentConfig, btcpay: { ...paymentConfig.btcpay, webhookSecret: e.target.value } })}
+                                                        placeholder="BTCPay Webhook Secret" className="w-full bg-gray-900 border border-gray-600 text-white rounded-lg p-2.5 text-sm" />
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <input type="checkbox" checked={paymentConfig.btcpay.testMode}
+                                                    onChange={(e) => setPaymentConfig({ ...paymentConfig, btcpay: { ...paymentConfig.btcpay, testMode: e.target.checked } })}
+                                                    className="rounded border-gray-600 bg-gray-900 text-purple-600" />
+                                                <span className="text-sm text-gray-400">Test Mode (use Bitcoin Testnet — no real money)</span>
+                                            </div>
+                                            {paymentConfig.btcpay.testMode && (
+                                                <p className="text-xs text-yellow-400">Testnet active — invoices use fake BTC. Switch off for production.</p>
+                                            )}
+                                            <p className="text-xs text-green-400">Webhook URL: <code className="bg-gray-900 px-1 rounded">{typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/btcpay</code></p>
+                                            <p className="text-xs text-gray-500">See PAYMENT-SETUP.md for BTCPay Server installation guide</p>
+                                        </div>
                                     )}
                                 </div>
 

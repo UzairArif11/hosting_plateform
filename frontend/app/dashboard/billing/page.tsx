@@ -20,8 +20,22 @@ import {
 import toast from 'react-hot-toast';
 import { QRCodeSVG } from 'qrcode.react';
 
+declare global {
+    interface Window {
+        Paddle?: any;
+    }
+}
+
 interface PaymentConfig {
-    payoneer: { enabled: boolean };
+    paddle: {
+        enabled: boolean;
+        clientToken: string | null;
+        environment: string;
+        processingFeePercent: number;
+        cryptoDiscountPercent: number;
+        testMode: boolean;
+    };
+    btcpay: { enabled: boolean };
     jazzcashEasypaisa: { enabled: boolean };
     manualBank: {
         enabled: boolean;
@@ -163,12 +177,30 @@ export default function BillingPage() {
         }
     };
 
+    // Initialize Paddle.js when payment config is loaded
+    const [paddleInitialized, setPaddleInitialized] = useState(false);
+
+    useEffect(() => {
+        if (paymentConfig?.paddle?.enabled && paymentConfig.paddle.clientToken && window.Paddle && !paddleInitialized) {
+            try {
+                window.Paddle.Initialize({
+                    token: paymentConfig.paddle.clientToken,
+                    environment: paymentConfig.paddle.environment || 'sandbox'
+                });
+                setPaddleInitialized(true);
+            } catch (err) {
+                console.error('Paddle initialization error:', err);
+            }
+        }
+    }, [paymentConfig, paddleInitialized]);
+
     const handleUpgrade = (plan: any) => {
         if (!paymentConfig) {
             toast.error('Payment methods are not configured. Contact admin.');
             return;
         }
-        const hasAnyMethod = paymentConfig.payoneer.enabled ||
+        const hasAnyMethod = paymentConfig.paddle?.enabled ||
+            paymentConfig.btcpay?.enabled ||
             paymentConfig.jazzcashEasypaisa.enabled ||
             paymentConfig.manualBank.enabled ||
             paymentConfig.crypto?.enabled;
@@ -184,20 +216,62 @@ export default function BillingPage() {
         setShowPaymentModal(true);
     };
 
-    const handlePayoneerCheckout = async () => {
+    const handlePaddleCheckout = async () => {
         setPaymentLoading(true);
         try {
-            const res = await api.post('/billing/create-session', { 
+            const res = await api.post('/billing/create-paddle-checkout', {
                 planId: selectedPlan.id,
-                billingPeriod: selectedBillingPeriod 
+                billingPeriod: selectedBillingPeriod
             });
-            if (res.data.success && res.data.session?.checkoutUrl) {
-                window.location.href = res.data.session.checkoutUrl;
+
+            if (res.data.success && res.data.transactionId) {
+                // Initialize Paddle if not done yet
+                if (!paddleInitialized && res.data.clientToken && window.Paddle) {
+                    window.Paddle.Initialize({
+                        token: res.data.clientToken,
+                        environment: res.data.environment || 'sandbox'
+                    });
+                    setPaddleInitialized(true);
+                }
+
+                // Open Paddle checkout overlay
+                if (window.Paddle) {
+                    window.Paddle.Checkout.open({
+                        transactionId: res.data.transactionId,
+                        settings: {
+                            displayMode: 'overlay',
+                            theme: 'dark',
+                            successUrl: `${window.location.origin}/dashboard/billing?payment=success&gateway=paddle`
+                        }
+                    });
+                    setShowPaymentModal(false);
+                } else {
+                    toast.error('Paddle checkout is not loaded. Please refresh the page.');
+                }
             } else {
-                toast.error('Failed to create payment session');
+                toast.error(res.data.error || 'Failed to create checkout');
             }
         } catch (error: any) {
-            toast.error(error.response?.data?.error || 'Payment session creation failed');
+            toast.error(error.response?.data?.error || 'Paddle checkout creation failed');
+        } finally {
+            setPaymentLoading(false);
+        }
+    };
+
+    const handleBTCPayCheckout = async () => {
+        setPaymentLoading(true);
+        try {
+            const res = await api.post('/billing/create-btcpay-invoice', {
+                planId: selectedPlan.id,
+                billingPeriod: selectedBillingPeriod
+            });
+            if (res.data.success && res.data.checkoutUrl) {
+                window.location.href = res.data.checkoutUrl;
+            } else {
+                toast.error('Failed to create crypto payment invoice');
+            }
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'Crypto payment creation failed');
         } finally {
             setPaymentLoading(false);
         }
@@ -590,10 +664,17 @@ export default function BillingPage() {
                 <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
                     <h3 className="text-lg font-semibold text-white mb-4">Available Payment Methods</h3>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        {paymentConfig.payoneer.enabled && (
+                        {paymentConfig.paddle?.enabled && (
                             <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 text-center hover:border-purple-500 transition">
                                 <CreditCardIcon className="h-8 w-8 text-blue-400 mx-auto mb-2" />
-                                <p className="text-white text-sm font-medium">Payoneer</p>
+                                <p className="text-white text-sm font-medium">Card/PayPal</p>
+                                <p className="text-gray-500 text-xs">Automatic</p>
+                            </div>
+                        )}
+                        {paymentConfig.btcpay?.enabled && (
+                            <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 text-center hover:border-purple-500 transition">
+                                <span className="text-3xl block mx-auto mb-2">&#8383;</span>
+                                <p className="text-white text-sm font-medium">Crypto (Auto)</p>
                                 <p className="text-gray-500 text-xs">Automatic</p>
                             </div>
                         )}
@@ -713,16 +794,37 @@ export default function BillingPage() {
                             <div className="space-y-3">
                                 <p className="text-gray-300 text-sm font-medium">Choose payment method:</p>
 
-                                {paymentConfig.payoneer.enabled && (
+                                {paymentConfig.paddle?.enabled && (
                                     <button
-                                        onClick={() => setPaymentMethod('payoneer')}
-                                        className="w-full flex items-center gap-4 p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-purple-500 transition text-left"
+                                        onClick={() => setPaymentMethod('paddle')}
+                                        className="w-full flex items-center gap-4 p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-purple-500 transition text-left relative"
                                     >
                                         <CreditCardIcon className="h-8 w-8 text-blue-400" />
-                                        <div>
-                                            <p className="text-white font-medium">Payoneer</p>
-                                            <p className="text-gray-400 text-sm">Pay with card via Payoneer. Auto-upgrade.</p>
+                                        <div className="flex-1">
+                                            <p className="text-white font-medium">Card / PayPal</p>
+                                            <p className="text-gray-400 text-sm">Visa, Mastercard, PayPal, Apple Pay. Secure & instant.</p>
                                         </div>
+                                        {paymentConfig.paddle.testMode && (
+                                            <span className="absolute top-2 right-2 bg-yellow-500/20 text-yellow-400 text-[10px] font-bold px-2 py-0.5 rounded-full">TEST</span>
+                                        )}
+                                    </button>
+                                )}
+
+                                {paymentConfig.btcpay?.enabled && (
+                                    <button
+                                        onClick={() => setPaymentMethod('btcpay')}
+                                        className="w-full flex items-center gap-4 p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-orange-500 transition text-left relative"
+                                    >
+                                        <span className="text-3xl">&#8383;</span>
+                                        <div className="flex-1">
+                                            <p className="text-white font-medium">Pay with Crypto (Automatic)</p>
+                                            <p className="text-gray-400 text-sm">BTC Lightning, On-chain, Litecoin. Auto-upgrade.</p>
+                                        </div>
+                                        {(paymentConfig.paddle?.cryptoDiscountPercent || 0) > 0 && (
+                                            <span className="absolute top-2 right-2 bg-green-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                                                Save {paymentConfig.paddle.cryptoDiscountPercent}%
+                                            </span>
+                                        )}
                                     </button>
                                 )}
 
@@ -779,17 +881,64 @@ export default function BillingPage() {
                             </div>
                         )}
 
-                        {/* Payoneer Checkout */}
-                        {paymentMethod === 'payoneer' && (
+                        {/* Paddle Card/PayPal Checkout */}
+                        {paymentMethod === 'paddle' && (
                             <div className="space-y-4">
-                                <button onClick={() => setPaymentMethod('')} className="text-sm text-purple-400 hover:text-purple-300">← Back to methods</button>
-                                <p className="text-gray-300 text-sm">You will be redirected to Payoneer's secure checkout to complete your payment.</p>
+                                <button onClick={() => setPaymentMethod('')} className="text-sm text-purple-400 hover:text-purple-300">&larr; Back to methods</button>
+
+                                {/* Price breakdown with processing fee */}
+                                <div className="bg-gray-800 rounded-xl p-4 space-y-2">
+                                    {(() => {
+                                        const pp = getSelectedPeriodPrice(selectedPlan, selectedBillingPeriod);
+                                        const sym = getCurrencySymbol(getDisplayCurrency());
+                                        const feePercent = paymentConfig?.paddle?.processingFeePercent || 5;
+                                        const fee = Math.round(pp.total * feePercent / 100 * 100) / 100;
+                                        const totalWithFee = Math.round((pp.total + fee) * 100) / 100;
+                                        return (
+                                            <>
+                                                <div className="flex justify-between text-sm">
+                                                    <span className="text-gray-400">Base price ({selectedBillingPeriod > 1 ? `${selectedBillingPeriod}mo` : 'monthly'})</span>
+                                                    <span className="text-white">{sym}{pp.total}</span>
+                                                </div>
+                                                <div className="flex justify-between text-sm">
+                                                    <span className="text-gray-400">Processing fee ({feePercent}%)</span>
+                                                    <span className="text-gray-300">+{sym}{fee}</span>
+                                                </div>
+                                                <div className="border-t border-gray-700 pt-2 flex justify-between font-bold">
+                                                    <span className="text-white">Total</span>
+                                                    <span className="text-purple-400">{sym}{totalWithFee}</span>
+                                                </div>
+                                            </>
+                                        );
+                                    })()}
+                                </div>
+
+                                <p className="text-gray-400 text-xs flex items-center gap-1">
+                                    <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>
+                                    Payments processed securely by Paddle. We never store your card details.
+                                </p>
+
                                 <button
-                                    onClick={handlePayoneerCheckout}
+                                    onClick={handlePaddleCheckout}
                                     disabled={paymentLoading}
-                                    className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold transition disabled:opacity-50"
+                                    className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-xl font-bold transition disabled:opacity-50"
                                 >
-                                    {paymentLoading ? 'Redirecting...' : `Pay ${getCurrencySymbol(getDisplayCurrency())}${getSelectedPeriodPrice(selectedPlan, selectedBillingPeriod).total} with Payoneer`}
+                                    {paymentLoading ? 'Preparing checkout...' : 'Pay with Card / PayPal'}
+                                </button>
+                            </div>
+                        )}
+
+                        {/* BTCPay Crypto Checkout */}
+                        {paymentMethod === 'btcpay' && (
+                            <div className="space-y-4">
+                                <button onClick={() => setPaymentMethod('')} className="text-sm text-purple-400 hover:text-purple-300">&larr; Back to methods</button>
+                                <p className="text-gray-300 text-sm">You will be redirected to a crypto payment page with a QR code. Payment is verified automatically on the blockchain.</p>
+                                <button
+                                    onClick={handleBTCPayCheckout}
+                                    disabled={paymentLoading}
+                                    className="w-full bg-orange-600 hover:bg-orange-700 text-white py-3 rounded-xl font-bold transition disabled:opacity-50"
+                                >
+                                    {paymentLoading ? 'Redirecting...' : `Pay ${getCurrencySymbol(getDisplayCurrency())}${getSelectedPeriodPrice(selectedPlan, selectedBillingPeriod).total} with Crypto`}
                                 </button>
                             </div>
                         )}

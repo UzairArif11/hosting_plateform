@@ -119,12 +119,39 @@ const settingsSchema = new mongoose.Schema({
 
     // Payment Methods Configuration (Admin toggles)
     paymentConfig: {
-        payoneer: {
-            enabled: { type: Boolean, default: false }
+        // Paddle (Merchant of Record — card/PayPal)
+        paddle: {
+            enabled: { type: Boolean, default: false },
+            testMode: { type: Boolean, default: true }, // true=sandbox, false=live
+
+            // Sandbox credentials
+            sandboxSellerId: { type: String, default: '' },
+            sandboxApiKey: { type: String, default: '' },         // pdl_sdbx_...
+            sandboxClientToken: { type: String, default: '' },    // test_...
+            sandboxWebhookSecret: { type: String, default: '' },  // pdl_ntfset_...
+
+            // Live credentials
+            liveSellerId: { type: String, default: '' },
+            liveApiKey: { type: String, default: '' },            // pdl_live_...
+            liveClientToken: { type: String, default: '' },       // live_...
+            liveWebhookSecret: { type: String, default: '' },     // pdl_ntfset_...
+
+            // Fee settings
+            processingFeePercent: { type: Number, default: 5 },   // passed to customer
+            cryptoDiscountPercent: { type: Number, default: 3 }    // discount for crypto payments
+        },
+        btcpay: {
+            enabled: { type: Boolean, default: false },
+            serverUrl: { type: String, default: '' },       // e.g. https://pay.yourdomain.com
+            apiKey: { type: String, default: '' },
+            storeId: { type: String, default: '' },
+            webhookSecret: { type: String, default: '' },
+            testMode: { type: Boolean, default: true }      // true = testnet, false = mainnet
         },
         jazzcashEasypaisa: {
             enabled: { type: Boolean, default: false }
         },
+        // Manual payment methods (admin verifies)
         manualBank: {
             enabled: { type: Boolean, default: false },
             accounts: [{

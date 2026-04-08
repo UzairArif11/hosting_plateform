@@ -66,8 +66,38 @@ export default function PricingPage() {
         if (plan.price === 0) return { monthlyPrice: 0, totalPrice: 0, savings: 0, label: 'Free' };
         const period = plan.billingPeriods?.find(p => p.months === billingPeriod);
         if (period) return period;
-        return { monthlyPrice: plan.price, totalPrice: plan.price * billingPeriod, savings: 0, label: 'Monthly' };
+        // Plan doesn't have this period enabled — fall back to monthly
+        const monthly = plan.billingPeriods?.find(p => p.months === 1);
+        if (monthly) return monthly;
+        return { monthlyPrice: plan.price, totalPrice: plan.price, savings: 0, label: 'Monthly' };
     };
+
+    // Build available billing periods dynamically from what plans actually have enabled
+    const availablePeriods = (() => {
+        if (plans.length === 0) return [{ m: 1, label: 'Monthly' }];
+        const paidPlans = plans.filter(p => p.price > 0 && !p.isTrial);
+        // Collect all unique periods from paid plans
+        const periodMap = new Map<number, string>();
+        paidPlans.forEach(plan => {
+            plan.billingPeriods?.forEach(bp => {
+                if (!periodMap.has(bp.months)) {
+                    periodMap.set(bp.months, bp.label);
+                }
+            });
+        });
+        // Sort by months ascending
+        const periods = Array.from(periodMap.entries())
+            .sort((a, b) => a[0] - b[0])
+            .map(([m, label]) => ({ m, label }));
+        return periods.length > 0 ? periods : [{ m: 1, label: 'Monthly' }];
+    })();
+
+    // Reset billing period if current selection isn't available
+    useEffect(() => {
+        if (availablePeriods.length > 0 && !availablePeriods.some(p => p.m === billingPeriod)) {
+            setBillingPeriod(availablePeriods[0].m);
+        }
+    }, [plans, billingPeriod]);
 
     const currencySymbol = currency === 'usd' ? '$' : currency === 'pkr' ? 'Rs' : currency === 'eur' ? '\u20ac' : '\u00a3';
 
@@ -117,21 +147,27 @@ export default function PricingPage() {
                         ))}
                     </div>
 
-                    {/* Billing Period */}
-                    <div className="flex bg-gray-900 rounded-lg p-1 border border-gray-800">
-                        {[
-                            { m: 1, label: 'Monthly' },
-                            { m: 3, label: 'Quarterly' },
-                            { m: 6, label: '6 Months' },
-                            { m: 12, label: 'Annual' }
-                        ].map(p => (
-                            <button key={p.m} onClick={() => setBillingPeriod(p.m)}
-                                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${billingPeriod === p.m ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}>
-                                {p.label}
-                                {p.m === 12 && <span className="ml-1 text-xs text-green-400">-20%</span>}
-                            </button>
-                        ))}
-                    </div>
+                    {/* Billing Period — only show periods that at least one paid plan supports */}
+                    {availablePeriods.length > 1 && (
+                        <div className="flex bg-gray-900 rounded-lg p-1 border border-gray-800">
+                            {availablePeriods.map(p => {
+                                // Get max discount for this period from any paid plan
+                                const maxDiscount = plans
+                                    .filter(plan => plan.price > 0 && !plan.isTrial)
+                                    .reduce((max, plan) => {
+                                        const period = plan.billingPeriods?.find((bp: any) => bp.months === p.m);
+                                        return Math.max(max, period?.discountPercent || 0);
+                                    }, 0);
+                                return (
+                                    <button key={p.m} onClick={() => setBillingPeriod(p.m)}
+                                        className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${billingPeriod === p.m ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}>
+                                        {p.label}
+                                        {maxDiscount > 0 && <span className="ml-1 text-xs text-green-400">-{maxDiscount}%</span>}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
             </section>
 
@@ -150,9 +186,11 @@ export default function PricingPage() {
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                         {plans.map((plan) => {
-                            const isFree = plan.price === 0 || plan.name?.toLowerCase() === 'free';
+                            const isFree = plan.price === 0 || plan.isTrial || plan.name?.toLowerCase() === 'free' || plan.name?.toLowerCase() === 'free-trial';
                             const pricing = getPriceForPeriod(plan);
                             const isPopular = plan.name?.toLowerCase() === 'pro' || plan.name?.toLowerCase() === 'starter';
+                            // Free plans only support monthly — ignore the global billing period selector
+                            const hasMultiplePeriods = plan.billingPeriods && plan.billingPeriods.length > 1;
 
                             return (
                                 <div key={plan.id}
@@ -172,14 +210,17 @@ export default function PricingPage() {
                                     {/* Price */}
                                     <div className="mb-6">
                                         {isFree ? (
-                                            <div className="text-4xl font-bold text-white">Free</div>
+                                            <>
+                                                <div className="text-4xl font-bold text-white">Free</div>
+                                                <p className="text-sm text-gray-500 mt-1">30-day trial</p>
+                                            </>
                                         ) : (
                                             <>
                                                 <div className="flex items-baseline gap-1">
                                                     <span className="text-4xl font-bold text-white">{currencySymbol}{pricing.monthlyPrice?.toFixed(2)}</span>
                                                     <span className="text-gray-500">/mo</span>
                                                 </div>
-                                                {billingPeriod > 1 && (
+                                                {billingPeriod > 1 && hasMultiplePeriods && (
                                                     <div className="mt-1 text-sm text-gray-500">
                                                         {currencySymbol}{pricing.totalPrice?.toFixed(2)} total
                                                         {pricing.savings > 0 && (

@@ -8,7 +8,6 @@ const Plan = require('../models/Plan');
 const Payment = require('../models/Payment');
 const ManualPayment = require('../models/ManualPayment');
 const Settings = require('../models/Settings');
-const payoneerService = require('../services/payoneer');
 const jazzcashService = require('../services/jazzcash');
 const easypaisaService = require('../services/easypaisa');
 const logger = require('../utils/logger');
@@ -78,7 +77,13 @@ router.get('/plans', async (req, res) => {
         ? plan.billingPeriods.filter(p => p.enabled)
         : defaultPeriods;
 
-      const billingPeriods = periods.map(p => ({
+      // Free/trial plans only get monthly — no quarterly/annual options
+      const isFreeOrTrial = plan.isTrial || basePrice === 0;
+      const applicablePeriods = isFreeOrTrial
+        ? periods.filter(p => p.months === 1)
+        : periods;
+
+      const billingPeriods = applicablePeriods.map(p => ({
         months: p.months,
         discountPercent: p.discountPercent || 0,
         gracePeriodDays: p.gracePeriodDays || 10,
@@ -121,6 +126,10 @@ router.get('/info', async (req, res) => {
   try {
     const user = await User.findById(req.user._id).populate('plan');
 
+    // Get enabled payment methods from settings
+    const settings = await Settings.getSettings();
+    const paymentConfig = settings.paymentConfig || {};
+
     const billingInfo = {
       currentPlan: user.plan ? {
         id: user.plan._id,
@@ -151,7 +160,25 @@ router.get('/info', async (req, res) => {
         brand: pm.brand,
         isDefault: pm.isDefault,
         createdAt: pm.createdAt
-      }))
+      })),
+      // Enabled payment gateways (for frontend to show/hide options)
+      enabledGateways: {
+        paddle: paymentConfig.paddle?.enabled || false,
+        btcpay: paymentConfig.btcpay?.enabled || false,
+        jazzcashEasypaisa: paymentConfig.jazzcashEasypaisa?.enabled || false,
+        manualBank: paymentConfig.manualBank?.enabled || false,
+        manualCrypto: paymentConfig.crypto?.enabled || false
+      },
+      // Paddle-specific config for frontend
+      paddleConfig: paymentConfig.paddle?.enabled ? {
+        clientToken: paymentConfig.paddle.testMode !== false
+          ? paymentConfig.paddle.sandboxClientToken
+          : paymentConfig.paddle.liveClientToken,
+        environment: paymentConfig.paddle.testMode !== false ? 'sandbox' : 'production',
+        processingFeePercent: paymentConfig.paddle.processingFeePercent ?? 5,
+        cryptoDiscountPercent: paymentConfig.paddle.cryptoDiscountPercent ?? 3,
+        testMode: paymentConfig.paddle.testMode !== false
+      } : null
     };
 
     res.json({
@@ -164,131 +191,280 @@ router.get('/info', async (req, res) => {
   }
 });
 
-// Create payment session for plan upgrade
-router.post('/create-session', [
+// Create Paddle checkout transaction (card/PayPal)
+router.post('/create-paddle-checkout', [
   body('planId').isMongoId().withMessage('Valid plan ID is required'),
-  body('currency').optional().isIn(['USD', 'PKR', 'EUR', 'GBP']).withMessage('Invalid currency'),
-  body('returnUrl').optional().isURL().withMessage('Invalid return URL'),
-  body('cancelUrl').optional().isURL().withMessage('Invalid cancel URL')
+  body('billingPeriod').optional().isInt({ min: 1, max: 12 }).withMessage('Invalid billing period'),
+  body('currency').optional().isIn(['USD', 'PKR', 'EUR', 'GBP']).withMessage('Invalid currency')
 ], handleValidationErrors, async (req, res) => {
   try {
-    const { planId, currency = 'USD', returnUrl, cancelUrl } = req.body;
+    const paddleService = require('../services/paddle');
+    const { planId, billingPeriod = 1, currency = 'USD' } = req.body;
     const user = req.user;
 
-    // Get the selected plan
+    // Check if Paddle is enabled
+    const settings = await Settings.getSettings();
+    if (!settings.paymentConfig?.paddle?.enabled) {
+      return res.status(400).json({ success: false, error: 'Paddle payments are not enabled' });
+    }
+
     const plan = await Plan.findById(planId);
     if (!plan || !plan.isActive) {
-      return res.status(404).json({
-        success: false,
-        error: 'Plan not found or inactive'
-      });
+      return res.status(404).json({ success: false, error: 'Plan not found or inactive' });
     }
 
-    // Check if user can upgrade to this plan
-    if (user.plan && !plan.canUpgradeFrom(user.plan)) {
+    const basePrice = plan.getPricingForCurrency(currency.toLowerCase());
+    if (basePrice === 0) {
+      return res.status(400).json({ success: false, error: 'Cannot create payment for free plan' });
+    }
+
+    // Determine which Paddle Price ID to use
+    const isTest = settings.paymentConfig.paddle.testMode !== false;
+    const env = isTest ? 'sandbox' : 'live';
+    const periodMap = { 1: 'monthly', 3: 'quarterly', 6: 'semiannual', 12: 'annual' };
+    const periodKey = periodMap[billingPeriod] || 'monthly';
+    const priceId = plan.paddlePriceIds?.[env]?.[periodKey];
+
+    if (!priceId) {
       return res.status(400).json({
         success: false,
-        error: 'Cannot downgrade to a lower plan'
+        error: `No Paddle Price ID configured for ${plan.displayName} - ${periodKey} (${env}). Admin must set this in Plans settings.`
       });
     }
 
-    // Create Payoneer customer if doesn't exist
-    if (!user.payoneerCustomerId) {
-      const customerResult = await payoneerService.createCustomer({
-        userId: user._id,
-        email: user.email,
-        displayName: user.displayName,
-        username: user.username,
-        country: currency === 'PKR' ? 'PK' : 'US',
-        currency: currency
-      });
-
-      if (customerResult.success) {
-        user.payoneerCustomerId = customerResult.customerId;
-        await user.save();
-      } else {
-        return res.status(500).json({
-          success: false,
-          error: 'Failed to create payment profile'
-        });
-      }
-    }
-
-    // Get plan price for selected currency
-    const amount = plan.getPricingForCurrency(currency.toLowerCase());
-
-    if (amount === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Cannot create payment session for free plan'
-      });
-    }
-
-    // Create payment session
-    const sessionResult = await payoneerService.createPaymentSession({
-      customerId: user.payoneerCustomerId,
-      amount: amount,
-      currency: currency,
-      description: `${plan.displayName} Plan - Monthly Subscription`,
-      planId: plan._id,
-      planName: plan.displayName,
+    // Create Paddle transaction
+    const result = await paddleService.createTransaction({
       userId: user._id,
-      orderId: `upgrade_${user._id}_${plan._id}_${Date.now()}`,
-      returnUrl: returnUrl || `${process.env.FRONTEND_URL}/dashboard/billing?success=true`,
-      cancelUrl: cancelUrl || `${process.env.FRONTEND_URL}/dashboard/billing?cancelled=true`,
-      webhookUrl: `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/webhooks/payoneer`,
-      billingCycle: plan.billingCycle
+      planId: plan._id,
+      priceId,
+      customerEmail: user.email,
+      billingPeriod,
+      planName: plan.displayName
     });
 
-    if (!sessionResult.success) {
-      logger.error('Payment session creation failed:', sessionResult.error);
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to create payment session'
-      });
+    if (!result.success) {
+      return res.status(500).json({ success: false, error: result.error });
     }
 
-    // Record pending payment in database
+    // Record pending payment
+    const periodConfig = plan.billingPeriods?.find(p => p.months === billingPeriod && p.enabled);
+    const discount = periodConfig?.discountPercent || 0;
+    const totalPrice = Math.round(basePrice * billingPeriod * (1 - discount / 100) * 100) / 100;
+
+    // Add processing fee for display
+    const processingFee = settings.paymentConfig.paddle.processingFeePercent || 5;
+    const totalWithFee = Math.round(totalPrice * (1 + processingFee / 100) * 100) / 100;
+
     try {
       await Payment.createFromSession({
         userId: user._id,
-        sessionId: sessionResult.sessionId,
-        amount: amount,
-        currency: currency,
+        transactionId: result.transactionId,
+        amount: totalWithFee,
+        currency,
         type: 'subscription',
+        gateway: 'paddle',
         planId: plan._id,
         planName: plan.displayName,
-        billingCycle: plan.billingCycle || 'monthly',
-        description: `${plan.displayName} Plan - Monthly Subscription`
+        billingCycle: billingPeriod === 12 ? 'yearly' : 'monthly',
+        description: `${plan.displayName} Plan - ${billingPeriod} month(s) via Paddle`
       });
-    } catch (paymentDbError) {
-      logger.error('Failed to record pending payment:', paymentDbError.message);
-      // Don't fail the session creation if DB record fails
+    } catch (dbErr) {
+      logger.error('Failed to record pending Paddle payment:', dbErr.message);
     }
 
-    logger.billing('Payment session created', {
-      userId: user._id,
-      planId: plan._id,
-      amount: amount,
-      currency: currency,
-      sessionId: sessionResult.sessionId
+    // Get client token for frontend
+    const credentials = await paddleService.getActiveCredentials();
+
+    logger.billing('Paddle checkout created', {
+      userId: user._id, planId: plan._id, transactionId: result.transactionId, amount: totalWithFee, currency
     });
 
     res.json({
       success: true,
-      session: {
-        id: sessionResult.sessionId,
-        checkoutUrl: sessionResult.checkoutUrl
-      },
-      plan: {
-        name: plan.displayName,
-        price: amount,
-        currency: currency
-      }
+      transactionId: result.transactionId,
+      clientToken: credentials.clientToken,
+      environment: credentials.environment,
+      plan: { name: plan.displayName, price: totalWithFee, currency }
     });
   } catch (error) {
-    logger.error('Create payment session error:', error.message);
-    res.status(500).json({ success: false, error: 'Failed to create payment session' });
+    logger.error('Create Paddle checkout error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to create Paddle checkout' });
+  }
+});
+
+// Cancel Paddle subscription
+router.post('/paddle-subscription-cancel', async (req, res) => {
+  try {
+    const paddleService = require('../services/paddle');
+    const user = await User.findById(req.user._id);
+
+    if (!user.paddleSubscriptionId) {
+      return res.status(400).json({ success: false, error: 'No active Paddle subscription found' });
+    }
+
+    const result = await paddleService.cancelSubscription(user.paddleSubscriptionId);
+    if (!result.success) {
+      return res.status(500).json({ success: false, error: result.error });
+    }
+
+    // Don't change status here — webhook will handle it
+    logger.billing('Paddle subscription cancel requested', {
+      userId: user._id, subscriptionId: user.paddleSubscriptionId
+    });
+
+    res.json({
+      success: true,
+      message: 'Subscription will be cancelled at the end of the current billing period'
+    });
+  } catch (error) {
+    logger.error('Paddle subscription cancel error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to cancel subscription' });
+  }
+});
+
+// Update Paddle subscription (change plan)
+router.post('/paddle-subscription-update', [
+  body('newPlanId').isMongoId().withMessage('Valid plan ID is required')
+], handleValidationErrors, async (req, res) => {
+  try {
+    const paddleService = require('../services/paddle');
+    const { newPlanId } = req.body;
+    const user = await User.findById(req.user._id);
+
+    if (!user.paddleSubscriptionId) {
+      return res.status(400).json({ success: false, error: 'No active Paddle subscription found' });
+    }
+
+    const newPlan = await Plan.findById(newPlanId);
+    if (!newPlan || !newPlan.isActive) {
+      return res.status(404).json({ success: false, error: 'Plan not found or inactive' });
+    }
+
+    // Get the new price ID
+    const settings = await Settings.getSettings();
+    const isTest = settings.paymentConfig?.paddle?.testMode !== false;
+    const env = isTest ? 'sandbox' : 'live';
+    const newPriceId = newPlan.paddlePriceIds?.[env]?.monthly; // default to monthly for updates
+
+    if (!newPriceId) {
+      return res.status(400).json({ success: false, error: 'No Paddle Price ID configured for this plan' });
+    }
+
+    const result = await paddleService.updateSubscription(user.paddleSubscriptionId, newPriceId);
+    if (!result.success) {
+      return res.status(500).json({ success: false, error: result.error });
+    }
+
+    logger.billing('Paddle subscription update requested', {
+      userId: user._id, subscriptionId: user.paddleSubscriptionId, newPlanId
+    });
+
+    res.json({
+      success: true,
+      message: `Subscription will be updated to ${newPlan.displayName}`
+    });
+  } catch (error) {
+    logger.error('Paddle subscription update error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to update subscription' });
+  }
+});
+
+// Verify Paddle Price ID (admin use)
+router.post('/verify-paddle-price', [
+  body('priceId').isString().withMessage('Price ID is required')
+], handleValidationErrors, async (req, res) => {
+  try {
+    const paddleService = require('../services/paddle');
+    const { priceId } = req.body;
+
+    const result = await paddleService.verifyPriceId(priceId);
+    res.json(result);
+  } catch (error) {
+    logger.error('Verify Paddle price error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to verify price ID' });
+  }
+});
+
+// Create BTCPay invoice for plan upgrade (crypto)
+router.post('/create-btcpay-invoice', [
+  body('planId').isMongoId().withMessage('Valid plan ID is required'),
+  body('currency').optional().isIn(['USD', 'PKR', 'EUR', 'GBP']).withMessage('Invalid currency'),
+  body('billingPeriod').optional().isInt({ min: 1, max: 12 }).withMessage('Invalid billing period')
+], handleValidationErrors, async (req, res) => {
+  try {
+    const btcpayService = require('../services/btcpay');
+    const { planId, currency = 'USD', billingPeriod = 1 } = req.body;
+    const user = req.user;
+
+    // Check if BTCPay is enabled
+    const settings = await Settings.getSettings();
+    if (!settings.paymentConfig?.btcpay?.enabled) {
+      return res.status(400).json({ success: false, error: 'BTCPay crypto payments are not enabled' });
+    }
+
+    const plan = await Plan.findById(planId);
+    if (!plan || !plan.isActive) {
+      return res.status(404).json({ success: false, error: 'Plan not found or inactive' });
+    }
+
+    // Calculate price with billing period discount
+    const basePrice = plan.getPricingForCurrency(currency.toLowerCase());
+    if (basePrice === 0) {
+      return res.status(400).json({ success: false, error: 'Cannot create payment for free plan' });
+    }
+
+    const periodConfig = plan.billingPeriods?.find(p => p.months === billingPeriod && p.enabled);
+    const discount = periodConfig?.discountPercent || 0;
+    const totalPrice = Math.round(basePrice * billingPeriod * (1 - discount / 100) * 100) / 100;
+
+    // Create BTCPay invoice
+    const invoiceResult = await btcpayService.createInvoice({
+      userId: user._id,
+      planId: plan._id,
+      planName: plan.displayName,
+      amount: totalPrice,
+      currency: currency,
+      billingPeriod,
+      buyerEmail: user.email,
+      returnUrl: `${process.env.FRONTEND_URL}/dashboard/billing?payment=success&gateway=btcpay`
+    });
+
+    if (!invoiceResult.success) {
+      return res.status(500).json({ success: false, error: invoiceResult.error });
+    }
+
+    // Record pending payment
+    try {
+      await Payment.createFromSession({
+        userId: user._id,
+        invoiceId: invoiceResult.invoiceId,
+        amount: totalPrice,
+        currency: currency,
+        type: 'subscription',
+        gateway: 'btcpay',
+        planId: plan._id,
+        planName: plan.displayName,
+        billingCycle: billingPeriod === 12 ? 'yearly' : 'monthly',
+        description: `${plan.displayName} Plan - ${billingPeriod} month(s) (Crypto)`
+      });
+    } catch (dbErr) {
+      logger.error('Failed to record pending BTCPay payment:', dbErr.message);
+    }
+
+    logger.billing('BTCPay invoice created', {
+      userId: user._id, planId: plan._id, invoiceId: invoiceResult.invoiceId, amount: totalPrice
+    });
+
+    res.json({
+      success: true,
+      invoiceId: invoiceResult.invoiceId,
+      checkoutUrl: invoiceResult.checkoutUrl,
+      expirationTime: invoiceResult.expirationTime,
+      plan: { name: plan.displayName, price: totalPrice, currency }
+    });
+  } catch (error) {
+    logger.error('Create BTCPay invoice error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to create BTCPay invoice' });
   }
 });
 
@@ -350,7 +526,8 @@ router.get('/payments', async (req, res) => {
 
     const payments = result.payments.map(p => ({
       id: p._id,
-      payoneerPaymentId: p.payoneerPaymentId,
+      paymentId: p.paddleTransactionId || p.payoneerPaymentId || p.btcpayInvoiceId || p._id,
+      gateway: p.gateway || 'manual',
       amount: p.amount,
       currency: p.currency,
       formattedAmount: p.formattedAmount,
@@ -425,11 +602,11 @@ router.get('/invoices', async (req, res) => {
 
 // Update payment method
 router.post('/payment-method', [
-  body('type').isIn(['card', 'payoneer_wallet']).withMessage('Invalid payment method type'),
-  body('payoneerPaymentMethodId').isString().withMessage('Payment method ID is required')
+  body('type').isIn(['card', 'paddle', 'btcpay', 'jazzcash', 'easypaisa']).withMessage('Invalid payment method type'),
+  body('paymentMethodId').optional().isString().withMessage('Payment method ID is required')
 ], handleValidationErrors, async (req, res) => {
   try {
-    const { type, payoneerPaymentMethodId, makeDefault = false } = req.body;
+    const { type, paymentMethodId, makeDefault = false } = req.body;
     const user = req.user;
 
     // If making this the default, set all others to non-default
@@ -440,11 +617,10 @@ router.post('/payment-method', [
     // Add new payment method
     user.paymentMethods.push({
       type,
-      payoneerPaymentMethodId,
+      paymentMethodId,
       isDefault: makeDefault || user.paymentMethods.length === 0,
-      // These would normally come from Payoneer
       last4: '****',
-      brand: type === 'card' ? 'visa' : 'payoneer'
+      brand: type
     });
 
     await user.save();
@@ -503,20 +679,33 @@ router.delete('/payment-method/:id', async (req, res) => {
   }
 });
 
-// Get exchange rates (for PKR users)
+// Get exchange rates (from settings config)
 router.get('/exchange-rates', async (req, res) => {
   try {
     const { from = 'USD', to = 'PKR' } = req.query;
 
-    const rateResult = await payoneerService.getExchangeRate(from, to);
+    const settings = await Settings.getSettings();
+    const rates = settings.currencyConfig?.exchangeRates || {};
+
+    // Map currency pair to stored rate
+    const rateMap = {
+      'USD-PKR': rates.usdToPkr || 278,
+      'USD-EUR': rates.usdToEur || 0.92,
+      'USD-GBP': rates.usdToGbp || 0.79,
+      'PKR-USD': 1 / (rates.usdToPkr || 278),
+      'EUR-USD': 1 / (rates.usdToEur || 0.92),
+      'GBP-USD': 1 / (rates.usdToGbp || 0.79)
+    };
+
+    const rate = rateMap[`${from}-${to}`] || 1;
 
     res.json({
       success: true,
       exchangeRate: {
-        from: from,
-        to: to,
-        rate: rateResult.rate,
-        timestamp: rateResult.timestamp
+        from,
+        to,
+        rate,
+        timestamp: new Date().toISOString()
       }
     });
   } catch (error) {
@@ -533,7 +722,17 @@ router.get('/payment-config', async (req, res) => {
     const currencyConfig = settings.currencyConfig || { displayCurrency: 'usd', exchangeRates: { usdToPkr: 278, usdToEur: 0.92, usdToGbp: 0.79 } };
 
     const response = {
-      payoneer: { enabled: config.payoneer?.enabled || false },
+      paddle: {
+        enabled: config.paddle?.enabled || false,
+        clientToken: config.paddle?.enabled
+          ? (config.paddle.testMode !== false ? config.paddle.sandboxClientToken : config.paddle.liveClientToken)
+          : null,
+        environment: config.paddle?.testMode !== false ? 'sandbox' : 'production',
+        processingFeePercent: config.paddle?.processingFeePercent ?? 5,
+        cryptoDiscountPercent: config.paddle?.cryptoDiscountPercent ?? 3,
+        testMode: config.paddle?.testMode !== false
+      },
+      btcpay: { enabled: config.btcpay?.enabled || false },
       jazzcashEasypaisa: { enabled: config.jazzcashEasypaisa?.enabled || false },
       manualBank: {
         enabled: config.manualBank?.enabled || false,
@@ -783,7 +982,8 @@ router.post('/create-session-jazzcash', [
         type: 'subscription',
         planId: plan._id,
         planName: plan.displayName,
-        description: `${plan.displayName} Plan via JazzCash`
+        description: `${plan.displayName} Plan via JazzCash`,
+        gateway: 'jazzcash'
       });
     } catch (err) {
       logger.error('Failed to record JazzCash pending payment:', err.message);
@@ -846,7 +1046,8 @@ router.post('/create-session-easypaisa', [
         type: 'subscription',
         planId: plan._id,
         planName: plan.displayName,
-        description: `${plan.displayName} Plan via EasyPaisa`
+        description: `${plan.displayName} Plan via EasyPaisa`,
+        gateway: 'easypaisa'
       });
     } catch (err) {
       logger.error('Failed to record EasyPaisa pending payment:', err.message);

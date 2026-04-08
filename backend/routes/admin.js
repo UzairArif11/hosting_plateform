@@ -1454,7 +1454,8 @@ router.post('/plans', requireAuth, requireAdmin, async (req, res) => {
       isTrial: isTrial || false,
       isActive: isActive !== undefined ? isActive : true,
       billingCycle: billingCycle || 'monthly',
-      oracleConfig: oracleConfig || { accountType: 'shared' }
+      oracleConfig: oracleConfig || { accountType: 'shared' },
+      paddlePriceIds: req.body.paddlePriceIds || undefined
     });
 
     await plan.save();
@@ -1499,7 +1500,8 @@ router.put('/plans/:id', requireAuth, requireAdmin, async (req, res) => {
       features,
       isActive,
       billingCycle,
-      oracleConfig
+      oracleConfig,
+      paddlePriceIds
     } = req.body;
 
     // Update allowed fields
@@ -1511,6 +1513,7 @@ router.put('/plans/:id', requireAuth, requireAdmin, async (req, res) => {
     if (isActive !== undefined) plan.isActive = isActive;
     if (billingCycle) plan.billingCycle = billingCycle;
     if (oracleConfig) plan.oracleConfig = oracleConfig;
+    if (paddlePriceIds) plan.paddlePriceIds = paddlePriceIds;
 
     await plan.save();
 

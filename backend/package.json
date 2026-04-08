@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@octokit/rest": "^20.1.1",
+    "@paddle/paddle-node-sdk": "^3.6.1",
     "acme-client": "^5.4.0",
     "axios": "^1.6.2",
     "bcryptjs": "^2.4.3",

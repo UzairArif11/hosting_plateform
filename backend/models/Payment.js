@@ -17,6 +17,32 @@ const paymentSchema = new mongoose.Schema({
         type: String
     },
 
+    // BTCPay fields
+    btcpayInvoiceId: {
+        type: String,
+        index: true
+    },
+
+    // Paddle fields
+    paddleTransactionId: {
+        type: String,
+        index: true
+    },
+    paddleSubscriptionId: {
+        type: String,
+        index: true
+    },
+    paddleCustomerId: {
+        type: String
+    },
+
+    // Payment gateway used
+    gateway: {
+        type: String,
+        enum: ['paddle', 'payoneer', 'btcpay', 'jazzcash', 'easypaisa', 'manual'],
+        default: 'manual'
+    },
+
     // Amount & currency
     amount: {
         type: Number,
@@ -171,11 +197,10 @@ paymentSchema.statics.findUserInvoices = async function (userId, { page = 1, lim
     return { invoices, total, page, limit, totalPages: Math.ceil(total / limit) };
 };
 
-// Static: create payment from Payoneer session
+// Static: create payment from session (supports all gateways)
 paymentSchema.statics.createFromSession = async function (sessionData) {
-    return this.create({
+    const paymentDoc = {
         user: sessionData.userId,
-        payoneerSessionId: sessionData.sessionId,
         amount: sessionData.amount,
         currency: sessionData.currency,
         status: 'pending',
@@ -184,32 +209,57 @@ paymentSchema.statics.createFromSession = async function (sessionData) {
         planName: sessionData.planName,
         billingCycle: sessionData.billingCycle || 'monthly',
         description: sessionData.description,
+        gateway: sessionData.gateway || 'manual',
         metadata: sessionData.metadata || {}
-    });
+    };
+
+    // Set gateway-specific fields
+    if (sessionData.gateway === 'paddle') {
+        paymentDoc.paddleTransactionId = sessionData.transactionId;
+    } else if (sessionData.gateway === 'btcpay') {
+        paymentDoc.btcpayInvoiceId = sessionData.invoiceId;
+    } else if (sessionData.gateway === 'payoneer') {
+        paymentDoc.payoneerSessionId = sessionData.sessionId;
+    }
+
+    return this.create(paymentDoc);
 };
 
-// Static: mark payment as completed
-paymentSchema.statics.markCompleted = async function (payoneerPaymentId, paymentData = {}) {
+// Static: mark payment as completed (supports all gateways)
+paymentSchema.statics.markCompleted = async function (paymentRef, paymentData = {}) {
+    // Find by any gateway reference
     const payment = await this.findOne({
         $or: [
-            { payoneerPaymentId },
-            { payoneerSessionId: paymentData.sessionId }
+            { paddleTransactionId: paymentRef },
+            { payoneerPaymentId: paymentRef },
+            { payoneerSessionId: paymentData.sessionId },
+            { btcpayInvoiceId: paymentRef }
         ]
     });
 
     if (payment) {
         payment.status = 'completed';
-        payment.payoneerPaymentId = payoneerPaymentId;
         payment.completedAt = new Date();
         payment.paymentMethod = paymentData.paymentMethod || 'card';
+
+        // Set gateway-specific ref
+        if (paymentData.gateway === 'paddle') {
+            payment.paddleTransactionId = paymentRef;
+            if (paymentData.subscriptionId) payment.paddleSubscriptionId = paymentData.subscriptionId;
+            if (paymentData.customerId) payment.paddleCustomerId = paymentData.customerId;
+        } else if (paymentData.gateway === 'btcpay') {
+            payment.btcpayInvoiceId = paymentRef;
+        } else {
+            payment.payoneerPaymentId = paymentRef;
+        }
+
         if (paymentData.metadata) payment.metadata = { ...payment.metadata, ...paymentData.metadata };
         return payment.save();
     }
 
     // If no pending payment found, create a new completed one
-    return this.create({
+    const newPayment = {
         user: paymentData.userId,
-        payoneerPaymentId,
         amount: paymentData.amount,
         currency: paymentData.currency,
         status: 'completed',
@@ -218,15 +268,35 @@ paymentSchema.statics.markCompleted = async function (payoneerPaymentId, payment
         planName: paymentData.planName,
         description: paymentData.description,
         completedAt: new Date(),
+        gateway: paymentData.gateway || 'manual',
         paymentMethod: paymentData.paymentMethod || 'card',
         metadata: paymentData.metadata || {}
-    });
+    };
+
+    if (paymentData.gateway === 'paddle') {
+        newPayment.paddleTransactionId = paymentRef;
+        if (paymentData.subscriptionId) newPayment.paddleSubscriptionId = paymentData.subscriptionId;
+        if (paymentData.customerId) newPayment.paddleCustomerId = paymentData.customerId;
+    } else if (paymentData.gateway === 'btcpay') {
+        newPayment.btcpayInvoiceId = paymentRef;
+    } else {
+        newPayment.payoneerPaymentId = paymentRef;
+    }
+
+    return this.create(newPayment);
 };
 
 // Static: mark payment as failed
-paymentSchema.statics.markFailed = async function (payoneerPaymentId, failureReason) {
+paymentSchema.statics.markFailed = async function (paymentRef, failureReason) {
     return this.findOneAndUpdate(
-        { $or: [{ payoneerPaymentId }, { payoneerSessionId: payoneerPaymentId }] },
+        {
+            $or: [
+                { paddleTransactionId: paymentRef },
+                { payoneerPaymentId: paymentRef },
+                { payoneerSessionId: paymentRef },
+                { btcpayInvoiceId: paymentRef }
+            ]
+        },
         {
             status: 'failed',
             failureReason,

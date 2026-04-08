@@ -91,6 +91,13 @@ interface ResourceSet {
     projects: number;
 }
 
+interface PaddlePriceSet {
+    monthly: string;
+    quarterly: string;
+    semiannual: string;
+    annual: string;
+}
+
 interface Plan {
     _id: string;
     name: string;
@@ -112,6 +119,10 @@ interface Plan {
         accountType: string;
     };
     activeUsers?: number;
+    paddlePriceIds?: {
+        sandbox: PaddlePriceSet;
+        live: PaddlePriceSet;
+    };
 }
 
 export default function PlanManagement() {
@@ -935,6 +946,64 @@ export default function PlanManagement() {
                                     <span className="text-sm text-gray-300">Active</span>
                                 </label>
                             </div>
+
+                            {/* Paddle Price IDs */}
+                            {!editingPlan.isTrial && editingPlan.pricing?.usd > 0 && (
+                                <div className="space-y-3 pt-4 border-t border-gray-800">
+                                    <h4 className="text-sm font-semibold text-purple-400">Paddle Price IDs</h4>
+                                    <p className="text-xs text-gray-500">Paste the Paddle Price ID (pri_...) for each billing period. Create prices in your Paddle dashboard.</p>
+
+                                    {/* Sandbox */}
+                                    <div className="space-y-2">
+                                        <p className="text-xs font-medium text-yellow-400">Sandbox (Test)</p>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {(['monthly', 'quarterly', 'semiannual', 'annual'] as const).map((period) => (
+                                                <div key={`sandbox-${period}`}>
+                                                    <label className="block text-xs text-gray-500 mb-0.5 capitalize">{period}</label>
+                                                    <input
+                                                        type="text"
+                                                        value={editingPlan.paddlePriceIds?.sandbox?.[period] || ''}
+                                                        onChange={(e) => setEditingPlan({
+                                                            ...editingPlan,
+                                                            paddlePriceIds: {
+                                                                sandbox: { ...(editingPlan.paddlePriceIds?.sandbox || { monthly: '', quarterly: '', semiannual: '', annual: '' }), [period]: e.target.value },
+                                                                live: editingPlan.paddlePriceIds?.live || { monthly: '', quarterly: '', semiannual: '', annual: '' }
+                                                            }
+                                                        })}
+                                                        placeholder="pri_..."
+                                                        className="w-full bg-gray-900 border border-gray-700 text-white rounded px-2 py-1.5 text-xs font-mono"
+                                                    />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Live */}
+                                    <div className="space-y-2">
+                                        <p className="text-xs font-medium text-red-400">Live (Production)</p>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {(['monthly', 'quarterly', 'semiannual', 'annual'] as const).map((period) => (
+                                                <div key={`live-${period}`}>
+                                                    <label className="block text-xs text-gray-500 mb-0.5 capitalize">{period}</label>
+                                                    <input
+                                                        type="text"
+                                                        value={editingPlan.paddlePriceIds?.live?.[period] || ''}
+                                                        onChange={(e) => setEditingPlan({
+                                                            ...editingPlan,
+                                                            paddlePriceIds: {
+                                                                sandbox: editingPlan.paddlePriceIds?.sandbox || { monthly: '', quarterly: '', semiannual: '', annual: '' },
+                                                                live: { ...(editingPlan.paddlePriceIds?.live || { monthly: '', quarterly: '', semiannual: '', annual: '' }), [period]: e.target.value }
+                                                            }
+                                                        })}
+                                                        placeholder="pri_..."
+                                                        className="w-full bg-gray-900 border border-gray-700 text-white rounded px-2 py-1.5 text-xs font-mono"
+                                                    />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="flex justify-end gap-3 pt-4 border-t border-gray-800">
                                 <button

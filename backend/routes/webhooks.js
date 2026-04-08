@@ -5,7 +5,15 @@ const logger = require('../utils/logger');
 const Project = require('../models/Project');
 const Deployment = require('../models/Deployment');
 const Payment = require('../models/Payment');
-const payoneerService = require('../services/payoneer');
+let payoneerService;
+try {
+  payoneerService = require('../services/payoneer');
+} catch (e) {
+  payoneerService = {
+    verifyWebhookSignature: () => false,
+    handleWebhook: async () => ({ success: false, error: 'Payoneer service removed' })
+  };
+}
 const { hasFeature } = require('../utils/featureCheck');
 const notify = require('../services/notificationService');
 
@@ -648,6 +656,161 @@ router.post('/easypaisa', express.urlencoded({ extended: true }), async (req, re
     }
   } catch (error) {
     logger.error('EasyPaisa webhook error:', error.message);
+  }
+});
+
+/**
+ * POST /api/webhooks/btcpay - Handle BTCPay Server payment webhooks
+ * Automatically verifies crypto payments via blockchain
+ */
+router.post('/btcpay', express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }), async (req, res) => {
+  try {
+    const btcpayService = require('../services/btcpay');
+    const signature = req.headers['btcpay-sig'];
+    const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body);
+
+    // Verify webhook signature
+    if (signature) {
+      const isValid = await btcpayService.verifyWebhookSignature(rawBody, signature);
+      if (!isValid) {
+        logger.error('BTCPay webhook: Invalid signature');
+        return res.status(401).json({ error: 'Invalid webhook signature' });
+      }
+    }
+
+    // Quick acknowledgment
+    res.status(200).json({ received: true });
+
+    const event = req.body;
+    logger.info('BTCPay webhook received', { type: event.type, invoiceId: event.invoiceId });
+
+    // Handle the webhook event
+    const result = await btcpayService.handleWebhook(event);
+
+    if (!result.success) {
+      logger.error('BTCPay webhook handler error:', result.error);
+      return;
+    }
+
+    // On payment settled (fully confirmed) - activate user plan
+    if (result.action === 'payment_settled' || result.action === 'payment_confirmed') {
+      const invoiceId = result.invoiceId;
+
+      // Get invoice details from BTCPay to extract metadata
+      const invoiceResult = await btcpayService.getInvoice(invoiceId);
+      if (!invoiceResult.success) {
+        logger.error('BTCPay: Failed to fetch invoice details', { invoiceId });
+        return;
+      }
+
+      const metadata = invoiceResult.data.metadata || {};
+      const userId = metadata.userId;
+      const planId = metadata.planId;
+      const billingPeriod = metadata.billingPeriod || 1;
+
+      if (!userId || !planId) {
+        logger.error('BTCPay webhook: Missing userId or planId in invoice metadata', { invoiceId });
+        return;
+      }
+
+      // Record payment as completed
+      try {
+        await Payment.markCompleted(invoiceId, {
+          gateway: 'btcpay',
+          userId,
+          planId,
+          planName: metadata.planName,
+          amount: invoiceResult.data.amount,
+          currency: invoiceResult.data.currency,
+          paymentMethod: 'crypto_btcpay',
+          metadata: { invoiceId, btcpayStatus: invoiceResult.data.status }
+        });
+        logger.info('BTCPay payment recorded', { invoiceId, userId });
+      } catch (dbError) {
+        logger.error('Failed to record BTCPay payment:', dbError.message);
+      }
+
+      // Upgrade user plan
+      try {
+        const User = require('../models/User');
+        const Plan = require('../models/Plan');
+        const user = await User.findById(userId);
+        const plan = await Plan.findById(planId);
+
+        if (user && plan) {
+          // Reset resource deletion flags if account was suspended
+          if (user.resourcesDeleted) {
+            user.resourcesDeleted = false;
+            user.resourcesDeletedAt = null;
+            user.oracleAccountId = null;
+            user.containerId = null;
+            user.containerName = null;
+            user.assignedServer = null;
+            user.assignedPort = null;
+          }
+
+          // Calculate plan expiry based on billing period
+          const now = new Date();
+          const expiryDate = new Date(now);
+          expiryDate.setMonth(expiryDate.getMonth() + billingPeriod);
+
+          user.plan = plan._id;
+          user.subscriptionStatus = 'active';
+          user.status = 'active';
+          user.isTrialActive = false;
+          user.billingPeriod = billingPeriod;
+          user.planExpiresAt = expiryDate;
+          user.suspendedAt = null;
+          user.suspensionReason = null;
+          user.autoSuspended = false;
+          user.gracePeriodEndsAt = null;
+          user.scheduledDeletionAt = null;
+          await user.save();
+
+          // Update container resource limits if container exists
+          if (user.containerName && user.assignedServer) {
+            try {
+              const docker = require('../services/docker');
+              const host = process.env[`${user.assignedServer}_HOST`] || process.env.EC3_SERVER_IP;
+              const ramGB = plan.actualResources?.ram || plan.resources?.ram || 0.5;
+              const cpu = plan.actualResources?.cpu || plan.resources?.cpu || 0.5;
+              await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);
+              logger.info(`[BTCPay] Container ${user.containerName} resources updated`);
+            } catch (dockerErr) {
+              logger.warn(`[BTCPay] Container resource update failed: ${dockerErr.message}`);
+            }
+          }
+
+          logger.info('User plan upgraded via BTCPay', {
+            userId: user._id,
+            planName: plan.displayName,
+            amount: invoiceResult.data.amount
+          });
+
+          // Send notifications
+          try {
+            await notify.paymentVerified(user, plan.displayName, invoiceResult.data.amount, invoiceResult.data.currency);
+            await notify.planUpgraded(user, plan.displayName);
+          } catch (notifyErr) {
+            logger.warn('BTCPay notification failed:', notifyErr.message);
+          }
+        }
+      } catch (upgradeErr) {
+        logger.error('Failed to upgrade user after BTCPay payment:', upgradeErr.message);
+      }
+    }
+
+    // On invoice expired
+    if (result.action === 'invoice_expired') {
+      try {
+        await Payment.markFailed(result.invoiceId, 'BTCPay invoice expired - customer did not pay in time');
+      } catch (dbErr) {
+        logger.error('Failed to record BTCPay expiry:', dbErr.message);
+      }
+    }
+
+  } catch (error) {
+    logger.error('BTCPay webhook error:', error.message);
   }
 });
 

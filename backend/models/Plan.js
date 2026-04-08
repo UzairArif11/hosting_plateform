@@ -255,6 +255,22 @@ const planSchema = new mongoose.Schema({
     default: null // If this is a custom plan for a specific user
   },
 
+  // Paddle Price ID mapping (sandbox + live)
+  paddlePriceIds: {
+    sandbox: {
+      monthly: { type: String, default: '' },
+      quarterly: { type: String, default: '' },
+      semiannual: { type: String, default: '' },
+      annual: { type: String, default: '' }
+    },
+    live: {
+      monthly: { type: String, default: '' },
+      quarterly: { type: String, default: '' },
+      semiannual: { type: String, default: '' },
+      annual: { type: String, default: '' }
+    }
+  },
+
   // Pricing strategy
   billingCycle: {
     type: String,

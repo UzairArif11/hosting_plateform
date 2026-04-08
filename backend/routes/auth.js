@@ -4,7 +4,6 @@ const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const User = require('../models/User');
 const Plan = require('../models/Plan');
-const payoneerService = require('../services/payoneer');
 const { assignUserToServer } = require('../services/containerOrchestrator');
 const logger = require('../utils/logger');
 const notify = require('../services/notificationService');

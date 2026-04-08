@@ -191,17 +191,6 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
                         logger.warn('Container assignment deferred:', containerErr.message);
                     }
 
-                    // Create Payoneer customer
-                    try {
-                        const payoneerService = require('../services/payoneer');
-                        await payoneerService.createCustomer({
-                            userId: user._id,
-                            email: user.email,
-                            name: user.displayName
-                        });
-                    } catch (payErr) {
-                        logger.warn('Payoneer customer creation failed (non-fatal):', payErr.message);
-                    }
 
                     logger.info('New Google user created', { email: user.email, userId: user._id });
 
@@ -492,17 +481,6 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
                         // Don't fail user creation if container assignment fails
                     }
 
-                    // Create Payoneer customer for billing
-                    try {
-                        const payoneerService = require('../services/payoneer');
-                        await payoneerService.createCustomer({
-                            userId: user._id,
-                            email: user.email,
-                            name: user.displayName
-                        });
-                    } catch (payErr) {
-                        logger.warn('Payoneer customer creation failed (non-fatal):', payErr.message);
-                    }
 
                     try {
                         await notify.welcomeUser(user);
