@@ -19,13 +19,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <head>
+      <body className={inter.className}>
         <Script
           src="https://cdn.paddle.com/paddle/v2/paddle.js"
           strategy="lazyOnload"
         />
-      </head>
-      <body className={inter.className}>
         <Providers>
           {children}
           <Toaster
