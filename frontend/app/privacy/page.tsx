@@ -49,7 +49,7 @@ export default function PrivacyPage() {
 
                         <h3 className="text-lg font-medium text-gray-200 mb-2 mt-4">Payment Information</h3>
                         <ul className="list-disc pl-6 space-y-1">
-                            <li>Payment is processed by Payoneer — we do <strong className="text-white">NOT</strong> store credit card numbers</li>
+                            <li>Payment is processed by Paddle (Merchant of Record) — we do <strong className="text-white">NOT</strong> store credit card numbers</li>
                             <li>We store: plan type, billing cycle, and payment status</li>
                             <li>Transaction IDs for record-keeping</li>
                         </ul>
@@ -105,8 +105,8 @@ export default function PrivacyPage() {
                                         <td className="px-4 py-2">OAuth tokens</td>
                                     </tr>
                                     <tr>
-                                        <td className="px-4 py-2 text-white">Payoneer</td>
-                                        <td className="px-4 py-2">Payment processing</td>
+                                        <td className="px-4 py-2 text-white">Paddle</td>
+                                        <td className="px-4 py-2">Payment processing (Merchant of Record)</td>
                                         <td className="px-4 py-2">Email, plan details, amounts</td>
                                     </tr>
                                 </tbody>

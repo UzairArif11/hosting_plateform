@@ -86,9 +86,9 @@ export default function TermsPage() {
                         <h2 className="text-xl font-semibold text-white mb-3">6. Paid Plans & Billing</h2>
                         <ul className="list-disc pl-6 space-y-2">
                             <li>Paid subscriptions are billed monthly or annually as selected.</li>
-                            <li>Payments are processed securely through our payment provider (Payoneer). We do not store credit card information.</li>
+                            <li>Payments are processed securely through our payment provider (Paddle). We do not store credit card information.</li>
                             <li>You may cancel your subscription at any time. Access continues until the end of the billing period.</li>
-                            <li>Refunds are handled on a case-by-case basis. Contact support for refund requests.</li>
+                            <li>We offer a 14-day money-back guarantee on all paid plans. See our <a href="/refund" className="text-blue-400 hover:text-blue-300">Refund Policy</a> for details.</li>
                             <li>We reserve the right to change pricing with 30 days advance notice.</li>
                         </ul>
                     </section>

@@ -4,7 +4,7 @@ import Link from 'next/link';
 
 export default function RefundPage() {
     const platformName = 'DeployHub';
-    const lastUpdated = 'April 7, 2026';
+    const lastUpdated = 'April 8, 2026';
     const contactEmail = 'support@deployhub.com';
 
     return (
@@ -32,9 +32,8 @@ export default function RefundPage() {
                     <section>
                         <h2 className="text-xl font-semibold text-white mb-3">1. Overview</h2>
                         <p>
-                            At {platformName}, we want you to be completely satisfied with our services.
-                            This refund policy outlines the conditions under which we offer refunds for our
-                            hosting and deployment services.
+                            At {platformName}, your satisfaction is our priority. We offer a straightforward,
+                            no-questions-asked refund policy for all paid subscriptions.
                         </p>
                     </section>
 
@@ -48,39 +47,23 @@ export default function RefundPage() {
                     </section>
 
                     <section>
-                        <h2 className="text-xl font-semibold text-white mb-3">3. Paid Subscriptions</h2>
-                        <p className="mb-4">For paid plans, we offer refunds under the following conditions:</p>
-                        <ul className="list-disc list-inside space-y-2 ml-4">
-                            <li>
-                                <strong className="text-white">Within 7 days of purchase:</strong> Full refund, no questions asked.
-                                If you are not satisfied with our service within the first 7 days of your paid subscription,
-                                contact us for a complete refund.
-                            </li>
-                            <li>
-                                <strong className="text-white">After 7 days:</strong> Pro-rated refund for the unused portion
-                                of your billing period may be available on a case-by-case basis.
-                            </li>
-                            <li>
-                                <strong className="text-white">Annual plans:</strong> Refund requests for annual plans must be
-                                made within 14 days of purchase. After 14 days, you may downgrade to a lower plan but
-                                refunds are not available.
-                            </li>
-                        </ul>
+                        <h2 className="text-xl font-semibold text-white mb-3">3. Refund Policy</h2>
+                        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-4">
+                            <p className="text-lg text-white font-medium mb-2">14-Day Money-Back Guarantee</p>
+                            <p>
+                                If you are not satisfied with our service for any reason, you can request a
+                                full refund within <strong className="text-white">14 days</strong> of your purchase.
+                                No questions asked.
+                            </p>
+                        </div>
+                        <p>This applies to all paid plans — monthly and annual subscriptions alike. If you request
+                            a refund within 14 days of purchase, you will receive a <strong className="text-white">complete refund</strong> of
+                            the amount charged.
+                        </p>
                     </section>
 
                     <section>
-                        <h2 className="text-xl font-semibold text-white mb-3">4. Non-Refundable Items</h2>
-                        <p className="mb-4">The following are not eligible for refunds:</p>
-                        <ul className="list-disc list-inside space-y-2 ml-4">
-                            <li>Domain registration fees (if applicable)</li>
-                            <li>Setup or migration fees (if applicable)</li>
-                            <li>Accounts suspended or terminated for violations of our Terms of Service</li>
-                            <li>Partial months of service after the 7-day refund window</li>
-                        </ul>
-                    </section>
-
-                    <section>
-                        <h2 className="text-xl font-semibold text-white mb-3">5. Cancellation</h2>
+                        <h2 className="text-xl font-semibold text-white mb-3">4. Cancellation</h2>
                         <p>
                             You can cancel your subscription at any time from your dashboard. When you cancel:
                         </p>
@@ -93,11 +76,11 @@ export default function RefundPage() {
                     </section>
 
                     <section>
-                        <h2 className="text-xl font-semibold text-white mb-3">6. How to Request a Refund</h2>
-                        <p className="mb-4">To request a refund, you can:</p>
+                        <h2 className="text-xl font-semibold text-white mb-3">5. How to Request a Refund</h2>
+                        <p className="mb-4">To request a refund, simply:</p>
                         <ul className="list-disc list-inside space-y-2 ml-4">
                             <li>Email us at <a href={`mailto:${contactEmail}`} className="text-blue-400 hover:text-blue-300">{contactEmail}</a></li>
-                            <li>Include your account email and the reason for your refund request</li>
+                            <li>Include your account email address</li>
                         </ul>
                         <p className="mt-4">
                             We aim to process all refund requests within <strong className="text-white">5-10 business days</strong>.
@@ -106,16 +89,16 @@ export default function RefundPage() {
                     </section>
 
                     <section>
-                        <h2 className="text-xl font-semibold text-white mb-3">7. Chargebacks</h2>
+                        <h2 className="text-xl font-semibold text-white mb-3">6. Chargebacks</h2>
                         <p>
                             If you have a billing concern, please contact us before initiating a chargeback
                             with your payment provider. We are committed to resolving any issues fairly
-                            and promptly. Unauthorized chargebacks may result in account suspension.
+                            and promptly.
                         </p>
                     </section>
 
                     <section>
-                        <h2 className="text-xl font-semibold text-white mb-3">8. Changes to This Policy</h2>
+                        <h2 className="text-xl font-semibold text-white mb-3">7. Changes to This Policy</h2>
                         <p>
                             We may update this refund policy from time to time. Any changes will be posted
                             on this page with an updated revision date. Continued use of our services after
