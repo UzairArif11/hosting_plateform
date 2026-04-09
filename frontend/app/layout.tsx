@@ -19,12 +19,6 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <head>
-        <Script
-          src="https://cdn.paddle.com/paddle/v2/paddle.js"
-          strategy="lazyOnload"
-        />
-      </head>
       <body className={inter.className}>
         <Providers>
           {children}
@@ -51,6 +45,10 @@ export default function RootLayout({
             }}
           />
         </Providers>
+        <Script
+          src="https://cdn.paddle.com/paddle/v2/paddle.js"
+          strategy="lazyOnload"
+        />
       </body>
     </html>
   );
