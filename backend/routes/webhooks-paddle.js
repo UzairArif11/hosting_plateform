@@ -149,6 +149,17 @@ async function handleTransactionCompleted(data) {
     if (customerId) user.paddleCustomerId = customerId;
     if (subscriptionId) user.paddleSubscriptionId = subscriptionId;
 
+    // Reset suspension/deletion flags if user was previously suspended
+    if (user.resourcesDeleted) {
+      user.resourcesDeleted = false;
+      user.resourcesDeletedAt = null;
+      user.oracleAccountId = null;
+      user.containerId = null;
+      user.containerName = null;
+      user.assignedServer = null;
+      user.assignedPort = null;
+    }
+
     // Activate plan
     user.plan = plan._id;
     user.planType = plan.isTrial || plan.pricing.usd === 0 ? 'free' : plan.name;
@@ -160,7 +171,11 @@ async function handleTransactionCompleted(data) {
     // Set expiration
     const now = new Date();
     user.planExpiresAt = new Date(now.getTime() + billingPeriod * 30 * 24 * 60 * 60 * 1000);
+    user.suspendedAt = null;
+    user.suspensionReason = null;
+    user.autoSuspended = false;
     user.gracePeriodEndsAt = null;
+    user.scheduledDeletionAt = null;
     user.scheduledDowngradeTo = null;
     user.scheduledDowngradeAt = null;
 
@@ -192,6 +207,20 @@ async function handleTransactionCompleted(data) {
     };
 
     await user.save();
+
+    // Immediately update container resource limits if container exists
+    if (user.containerName && user.assignedServer) {
+      try {
+        const docker = require('../services/docker');
+        const host = process.env[`${user.assignedServer}_HOST`] || process.env.EC3_SERVER_IP;
+        const ramGB = plan.actualResources?.ram || plan.resources?.ram || 0.5;
+        const cpu = plan.actualResources?.cpu || plan.resources?.cpu || 0.5;
+        await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);
+        logger.info(`[Paddle] Container ${user.containerName} resources updated: ${ramGB}GB RAM, ${cpu} CPU`);
+      } catch (dockerErr) {
+        logger.warn(`[Paddle] Container resource update failed: ${dockerErr.message}`);
+      }
+    }
 
     // Update plan user count
     await Plan.findByIdAndUpdate(planId, { $inc: { userCount: 1 } });
@@ -287,7 +316,49 @@ async function handleSubscriptionUpdated(data) {
         const user = await User.findById(userId);
         if (user) {
           user.plan = plan._id;
+          user.planType = plan.isTrial || plan.pricing.usd === 0 ? 'free' : plan.name;
+
+          // Update resource allocation to match new plan
+          user.resourceAllocation = {
+            projects: plan.resources.projects,
+            deployments: plan.limits?.deploymentsPerDay || 100,
+            cpu: plan.resources.cpu,
+            ram: plan.resources.ram,
+            storage: plan.resources.storage,
+            bandwidth: plan.resources.bandwidth,
+            containers: plan.resources.containers
+          };
+          user.displayedResources = {
+            cpu: plan.displayResources?.cpu || plan.resources.cpu,
+            ram: plan.displayResources?.ram || plan.resources.ram,
+            storage: plan.displayResources?.storage || plan.resources.storage,
+            bandwidth: plan.displayResources?.bandwidth || plan.resources.bandwidth,
+            projects: plan.displayResources?.projects || plan.resources.projects
+          };
+          user.allocatedResources = {
+            cpu: plan.actualResources?.cpu || plan.resources.cpu,
+            ram: plan.actualResources?.ram || plan.resources.ram,
+            storage: plan.actualResources?.storage || plan.resources.storage,
+            bandwidth: plan.actualResources?.bandwidth || plan.resources.bandwidth,
+            projects: plan.actualResources?.projects || plan.resources.projects
+          };
+
           await user.save();
+
+          // Update container resources if container exists
+          if (user.containerName && user.assignedServer) {
+            try {
+              const docker = require('../services/docker');
+              const host = process.env[`${user.assignedServer}_HOST`] || process.env.EC3_SERVER_IP;
+              const ramGB = plan.actualResources?.ram || plan.resources?.ram || 0.5;
+              const cpu = plan.actualResources?.cpu || plan.resources?.cpu || 0.5;
+              await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);
+              logger.info(`[Paddle] Container ${user.containerName} resources updated on subscription change`);
+            } catch (dockerErr) {
+              logger.warn(`[Paddle] Container resource update failed on subscription change: ${dockerErr.message}`);
+            }
+          }
+
           logger.info('User plan updated via subscription change', { userId, planId: plan._id });
         }
       }

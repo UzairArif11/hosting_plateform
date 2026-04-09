@@ -85,6 +85,10 @@ const paymentSchema = new mongoose.Schema({
         enum: ['monthly', 'yearly'],
         default: 'monthly'
     },
+    billingPeriod: {
+        type: Number,
+        default: 1 // months — dynamic, matches plan billing periods
+    },
 
     // Description
     description: {

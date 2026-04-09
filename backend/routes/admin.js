@@ -2267,6 +2267,7 @@ router.post('/manual-payments/:id/verify', requireAuth, requireAdmin, async (req
         user.assignedPort = null;
       }
       user.plan = plan._id;
+      user.planType = plan.isTrial || plan.pricing.usd === 0 ? 'free' : plan.name;
       user.subscriptionStatus = 'active';
       user.status = 'active';
       user.isTrialActive = false;
@@ -2295,6 +2296,13 @@ router.post('/manual-payments/:id/verify', requireAuth, requireAdmin, async (req
           storage: plan.displayResources?.storage || plan.resources.storage,
           bandwidth: plan.displayResources?.bandwidth || plan.resources.bandwidth || 1024,
           projects: plan.displayResources?.projects || plan.resources.projects || 10
+        };
+        user.allocatedResources = {
+          cpu: plan.actualResources?.cpu || plan.resources.cpu,
+          ram: plan.actualResources?.ram || plan.resources.ram,
+          storage: plan.actualResources?.storage || plan.resources.storage,
+          bandwidth: plan.actualResources?.bandwidth || plan.resources.bandwidth || 1024,
+          projects: plan.actualResources?.projects || plan.resources.projects || 10
         };
       }
 

@@ -70,6 +70,7 @@ const createPaymentSession = async (paymentData) => {
             userId: paymentData.userId,
             planId: paymentData.planId,
             planName: paymentData.planName,
+            billingPeriod: paymentData.billingPeriod || 1,
             orderId: orderId
         };
 

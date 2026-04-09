@@ -143,6 +143,20 @@ async function paymentSubmitted(user, planName, paymentType) {
     });
 }
 
+async function paymentFailed(user, reason) {
+    await createNotification(user._id, {
+        title: 'Payment Failed',
+        message: reason || 'Your payment could not be processed. Please try again.',
+        type: 'error'
+    });
+    if (!shouldSendEmail(user, 'billing')) return;
+    await sendEmail(user.email, `❌ Payment Failed — ${platformName()}`, loadTemplate('paymentRejected', {
+        platformName: platformName(), userName: user.displayName || user.username,
+        planName: 'your plan', reason: reason || 'Payment could not be processed.',
+        billingUrl: `${frontendUrl()}/dashboard/billing`
+    }));
+}
+
 // ─── ACCOUNT ───────────────────────────────────────────────
 
 async function welcomeUser(user) {
@@ -351,7 +365,7 @@ async function deploymentFailedEmail(user, projectName, error) {
 
 module.exports = {
     sendEmail, createNotification, notifyAdmins, resetTransporter,
-    paymentVerified, paymentRejected, planUpgraded, subscriptionCancelled, paymentSubmitted,
+    paymentVerified, paymentRejected, planUpgraded, subscriptionCancelled, paymentSubmitted, paymentFailed,
     welcomeUser, trialExpiring, accountSuspended, accountReactivated,
     deploymentSucceeded, deploymentFailed,
     newUserSignup, adminSuspendedUser, adminUnsuspendedUser,

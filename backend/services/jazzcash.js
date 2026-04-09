@@ -78,7 +78,7 @@ const createPaymentSession = async (paymentData) => {
             ppmpf_2: paymentData.userId || '',
             ppmpf_3: paymentData.planId || '',
             ppmpf_4: paymentData.planName || '',
-            ppmpf_5: ''
+            ppmpf_5: String(paymentData.billingPeriod || 1)
         };
 
         const response = await axios.post(config.baseURL, payload, {
@@ -167,7 +167,8 @@ const handleCallback = async (data) => {
             metadata: {
                 user_id: data.ppmpf_2,
                 plan_id: data.ppmpf_3,
-                plan_name: data.ppmpf_4
+                plan_name: data.ppmpf_4,
+                billing_period: data.ppmpf_5 || '1'
             }
         };
     } catch (error) {

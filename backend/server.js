@@ -118,8 +118,22 @@ app.use(passport.session());
 // Cookie parsing middleware
 app.use(cookieParser());
 
+// ⚠️ Paddle webhook MUST be mounted BEFORE express.json() — it needs the raw body
+// for HMAC signature verification. If express.json() runs first, req.body is already
+// a parsed object and toString() returns "[object Object]", breaking the signature check.
+app.use('/api/webhooks/paddle', require('./routes/webhooks-paddle'));
+
 // Body parsing middleware
-app.use(express.json({ limit: '10mb' }));
+// The verify callback captures raw body for webhook signature verification (BTCPay, etc.)
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, _res, buf) => {
+    // Only capture raw body for webhook routes (needed for signature verification)
+    if (req.originalUrl && req.originalUrl.startsWith('/api/webhooks')) {
+      req.rawBody = buf;
+    }
+  }
+}));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // MongoDB and migrations are now initialized in the async IIFE at the end of this file
@@ -199,7 +213,7 @@ app.use('/api/billing', requireAuth, billingRoutes);
 app.use('/api/admin', requireAuth, requireAdmin, adminRoutes);
 app.use('/api/settings', settingsRoutes); // Settings (public domain lookup, admin for updates)
 app.use('/api/test', require('./routes/test')); // Test endpoints (no auth required)
-app.use('/api/webhooks/paddle', require('./routes/webhooks-paddle')); // Paddle webhooks (public, no auth)
+// Paddle webhooks mounted above express.json() for raw body signature verification
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/analytics', analyticsRoutes);
