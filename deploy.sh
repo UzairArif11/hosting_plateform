@@ -41,7 +41,7 @@ cd "$USER_HOME/hosting_plateform" || {
 }
 
 # Switch to actual user for git operations
-sudo -u $ACTUAL_USER git pull origin optimization2 || {
+sudo -u $ACTUAL_USER git pull origin payment || {
     echo -e "${YELLOW}WARNING: Git pull failed. Continuing anyway...${NC}"
 }
 
