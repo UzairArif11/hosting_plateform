@@ -14,8 +14,8 @@ async function fixValidator() {
     // Update validator to match actual schema:
     // - email: required string ✓
     // - createdAt: required date ✓ (Mongoose adds this automatically)
-    // - planType: enum ["free", "pro", "enterprise"] ✓ (this is what should be validated)
-    // - plan: ObjectId or null (not enum!)
+    // - planType: dynamic string (set from plan.name by admin — NO enum restriction)
+    // - plan: ObjectId or null
     await db.command({
       collMod: 'users',
       validator: {
@@ -32,8 +32,8 @@ async function fixValidator() {
               description: 'Account creation date (required)'
             },
             planType: {
-              enum: ['free', 'pro', 'enterprise'],
-              description: 'User subscription plan type'
+              bsonType: 'string',
+              description: 'User subscription plan type (dynamic, set from plan name)'
             },
             plan: {
               bsonType: ['objectId', 'null'],
@@ -60,7 +60,7 @@ async function fixValidator() {
               description: 'User avatar URL'
             },
             status: {
-              enum: ['active', 'suspended', 'banned', 'trial'],
+              enum: ['active', 'suspended', 'banned', 'trial', 'deleted'],
               description: 'User account status'
             }
           }

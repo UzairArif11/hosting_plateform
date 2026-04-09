@@ -506,13 +506,49 @@ router.post('/jazzcash', express.urlencoded({ extended: true }), async (req, res
               user.assignedServer = null;
               user.assignedPort = null;
             }
+            const billingPeriod = parseInt(result.metadata?.billing_period) || 1;
+            const expiryDate = new Date();
+            expiryDate.setMonth(expiryDate.getMonth() + billingPeriod);
+
             user.plan = plan._id;
+            user.planType = plan.isTrial || plan.pricing.usd === 0 ? 'free' : plan.name;
             user.subscriptionStatus = 'active';
             user.status = 'active';
             user.isTrialActive = false;
+            user.billingPeriod = billingPeriod;
+            user.planExpiresAt = expiryDate;
             user.suspendedAt = null;
             user.suspensionReason = null;
             user.autoSuspended = false;
+            user.gracePeriodEndsAt = null;
+            user.scheduledDeletionAt = null;
+            user.scheduledDowngradeTo = null;
+            user.scheduledDowngradeAt = null;
+
+            user.resourceAllocation = {
+              projects: plan.resources.projects,
+              deployments: plan.limits?.deploymentsPerDay || 100,
+              cpu: plan.resources.cpu,
+              ram: plan.resources.ram,
+              storage: plan.resources.storage,
+              bandwidth: plan.resources.bandwidth,
+              containers: plan.resources.containers
+            };
+            user.displayedResources = {
+              cpu: plan.displayResources?.cpu || plan.resources.cpu,
+              ram: plan.displayResources?.ram || plan.resources.ram,
+              storage: plan.displayResources?.storage || plan.resources.storage,
+              bandwidth: plan.displayResources?.bandwidth || plan.resources.bandwidth,
+              projects: plan.displayResources?.projects || plan.resources.projects
+            };
+            user.allocatedResources = {
+              cpu: plan.actualResources?.cpu || plan.resources.cpu,
+              ram: plan.actualResources?.ram || plan.resources.ram,
+              storage: plan.actualResources?.storage || plan.resources.storage,
+              bandwidth: plan.actualResources?.bandwidth || plan.resources.bandwidth,
+              projects: plan.actualResources?.projects || plan.resources.projects
+            };
+
             await user.save();
 
             // IMMEDIATE: Update container resource limits
@@ -607,13 +643,49 @@ router.post('/easypaisa', express.urlencoded({ extended: true }), async (req, re
               user.assignedServer = null;
               user.assignedPort = null;
             }
+            const billingPeriod = pendingPayment.billingPeriod || 1;
+            const expiryDate = new Date();
+            expiryDate.setMonth(expiryDate.getMonth() + billingPeriod);
+
             user.plan = plan._id;
+            user.planType = plan.isTrial || plan.pricing.usd === 0 ? 'free' : plan.name;
             user.subscriptionStatus = 'active';
             user.status = 'active';
             user.isTrialActive = false;
+            user.billingPeriod = billingPeriod;
+            user.planExpiresAt = expiryDate;
             user.suspendedAt = null;
             user.suspensionReason = null;
             user.autoSuspended = false;
+            user.gracePeriodEndsAt = null;
+            user.scheduledDeletionAt = null;
+            user.scheduledDowngradeTo = null;
+            user.scheduledDowngradeAt = null;
+
+            user.resourceAllocation = {
+              projects: plan.resources.projects,
+              deployments: plan.limits?.deploymentsPerDay || 100,
+              cpu: plan.resources.cpu,
+              ram: plan.resources.ram,
+              storage: plan.resources.storage,
+              bandwidth: plan.resources.bandwidth,
+              containers: plan.resources.containers
+            };
+            user.displayedResources = {
+              cpu: plan.displayResources?.cpu || plan.resources.cpu,
+              ram: plan.displayResources?.ram || plan.resources.ram,
+              storage: plan.displayResources?.storage || plan.resources.storage,
+              bandwidth: plan.displayResources?.bandwidth || plan.resources.bandwidth,
+              projects: plan.displayResources?.projects || plan.resources.projects
+            };
+            user.allocatedResources = {
+              cpu: plan.actualResources?.cpu || plan.resources.cpu,
+              ram: plan.actualResources?.ram || plan.resources.ram,
+              storage: plan.actualResources?.storage || plan.resources.storage,
+              bandwidth: plan.actualResources?.bandwidth || plan.resources.bandwidth,
+              projects: plan.actualResources?.projects || plan.resources.projects
+            };
+
             await user.save();
 
             // IMMEDIATE: Update container resource limits
@@ -755,6 +827,7 @@ router.post('/btcpay', express.json({ verify: (req, _res, buf) => { req.rawBody 
           expiryDate.setMonth(expiryDate.getMonth() + billingPeriod);
 
           user.plan = plan._id;
+          user.planType = plan.isTrial || plan.pricing.usd === 0 ? 'free' : plan.name;
           user.subscriptionStatus = 'active';
           user.status = 'active';
           user.isTrialActive = false;
@@ -765,6 +838,36 @@ router.post('/btcpay', express.json({ verify: (req, _res, buf) => { req.rawBody 
           user.autoSuspended = false;
           user.gracePeriodEndsAt = null;
           user.scheduledDeletionAt = null;
+          user.scheduledDowngradeTo = null;
+          user.scheduledDowngradeAt = null;
+
+          // Set resource allocation from plan (must match Paddle webhook behavior)
+          user.resourceAllocation = {
+            projects: plan.resources.projects,
+            deployments: plan.limits?.deploymentsPerDay || 100,
+            cpu: plan.resources.cpu,
+            ram: plan.resources.ram,
+            storage: plan.resources.storage,
+            bandwidth: plan.resources.bandwidth,
+            containers: plan.resources.containers
+          };
+
+          user.displayedResources = {
+            cpu: plan.displayResources?.cpu || plan.resources.cpu,
+            ram: plan.displayResources?.ram || plan.resources.ram,
+            storage: plan.displayResources?.storage || plan.resources.storage,
+            bandwidth: plan.displayResources?.bandwidth || plan.resources.bandwidth,
+            projects: plan.displayResources?.projects || plan.resources.projects
+          };
+
+          user.allocatedResources = {
+            cpu: plan.actualResources?.cpu || plan.resources.cpu,
+            ram: plan.actualResources?.ram || plan.resources.ram,
+            storage: plan.actualResources?.storage || plan.resources.storage,
+            bandwidth: plan.actualResources?.bandwidth || plan.resources.bandwidth,
+            projects: plan.actualResources?.projects || plan.resources.projects
+          };
+
           await user.save();
 
           // Update container resource limits if container exists

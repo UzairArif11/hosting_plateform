@@ -87,7 +87,6 @@ const userSchema = new mongoose.Schema({
   },
   planType: {
     type: String,
-    enum: ['free', 'pro', 'enterprise'],
     default: 'free',
     index: true
   },
@@ -127,7 +126,7 @@ const userSchema = new mongoose.Schema({
   paymentMethods: [{
     type: {
       type: String,
-      enum: ['card', 'payoneer_wallet']
+      enum: ['card', 'payoneer_wallet', 'paddle', 'btcpay', 'jazzcash', 'easypaisa']
     },
     last4: String,
     brand: String,
@@ -460,8 +459,7 @@ const userSchema = new mongoose.Schema({
   },
   billingPeriod: {
     type: Number,
-    default: 1, // months (1, 3, 6, 12)
-    enum: [1, 3, 6, 12]
+    default: 1 // months — dynamic, set by admin per plan
   },
   gracePeriodEndsAt: {
     type: Date,

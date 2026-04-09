@@ -194,7 +194,7 @@ router.get('/info', async (req, res) => {
 // Create Paddle checkout transaction (card/PayPal)
 router.post('/create-paddle-checkout', [
   body('planId').isMongoId().withMessage('Valid plan ID is required'),
-  body('billingPeriod').optional().isInt({ min: 1, max: 12 }).withMessage('Invalid billing period'),
+  body('billingPeriod').optional().isInt({ min: 1, max: 60 }).withMessage('Invalid billing period'),
   body('currency').optional().isIn(['USD', 'PKR', 'EUR', 'GBP']).withMessage('Invalid currency')
 ], handleValidationErrors, async (req, res) => {
   try {
@@ -389,7 +389,7 @@ router.post('/verify-paddle-price', [
 router.post('/create-btcpay-invoice', [
   body('planId').isMongoId().withMessage('Valid plan ID is required'),
   body('currency').optional().isIn(['USD', 'PKR', 'EUR', 'GBP']).withMessage('Invalid currency'),
-  body('billingPeriod').optional().isInt({ min: 1, max: 12 }).withMessage('Invalid billing period')
+  body('billingPeriod').optional().isInt({ min: 1, max: 60 }).withMessage('Invalid billing period')
 ], handleValidationErrors, async (req, res) => {
   try {
     const btcpayService = require('../services/btcpay');
@@ -942,10 +942,11 @@ router.get('/manual-payments', async (req, res) => {
 // Create JazzCash payment session
 router.post('/create-session-jazzcash', [
   body('planId').isMongoId().withMessage('Valid plan ID is required'),
-  body('mobileNumber').isString().withMessage('Mobile number is required')
+  body('mobileNumber').isString().withMessage('Mobile number is required'),
+  body('billingPeriod').optional().isInt({ min: 1, max: 60 }).withMessage('Invalid billing period')
 ], handleValidationErrors, async (req, res) => {
   try {
-    const { planId, mobileNumber } = req.body;
+    const { planId, mobileNumber, billingPeriod = 1 } = req.body;
     const user = req.user;
 
     const plan = await Plan.findById(planId);
@@ -953,10 +954,16 @@ router.post('/create-session-jazzcash', [
       return res.status(404).json({ success: false, error: 'Plan not found' });
     }
 
-    const amount = plan.getPricingForCurrency('pkr');
-    if (!amount || amount === 0) {
+    const baseAmount = plan.getPricingForCurrency('pkr');
+    if (!baseAmount || baseAmount === 0) {
       return res.status(400).json({ success: false, error: 'PKR pricing not available for this plan' });
     }
+
+    // Apply billing period discount
+    const periodConfig = (plan.billingPeriods || []).find(p => p.months === billingPeriod);
+    const discount = periodConfig?.discountPercent || 0;
+    const amount = Math.round(baseAmount * billingPeriod * (1 - discount / 100));
+    const periodLabel = billingPeriod === 1 ? 'Monthly' : billingPeriod === 3 ? 'Quarterly' : billingPeriod === 6 ? 'Semi-Annual' : billingPeriod === 12 ? 'Annual' : `${billingPeriod} months`;
 
     const sessionResult = await jazzcashService.createPaymentSession({
       amount,
@@ -964,7 +971,8 @@ router.post('/create-session-jazzcash', [
       userId: user._id.toString(),
       planId: plan._id.toString(),
       planName: plan.displayName,
-      description: `${plan.displayName} Plan - Monthly`,
+      billingPeriod,
+      description: `${plan.displayName} Plan - ${periodLabel}`,
       returnUrl: `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/webhooks/jazzcash`
     });
 
@@ -982,6 +990,7 @@ router.post('/create-session-jazzcash', [
         type: 'subscription',
         planId: plan._id,
         planName: plan.displayName,
+        billingPeriod,
         description: `${plan.displayName} Plan via JazzCash`,
         gateway: 'jazzcash'
       });
@@ -1006,10 +1015,11 @@ router.post('/create-session-jazzcash', [
 // Create EasyPaisa payment session
 router.post('/create-session-easypaisa', [
   body('planId').isMongoId().withMessage('Valid plan ID is required'),
-  body('mobileNumber').optional().isString()
+  body('mobileNumber').optional().isString(),
+  body('billingPeriod').optional().isInt({ min: 1, max: 60 }).withMessage('Invalid billing period')
 ], handleValidationErrors, async (req, res) => {
   try {
-    const { planId, mobileNumber } = req.body;
+    const { planId, mobileNumber, billingPeriod = 1 } = req.body;
     const user = req.user;
 
     const plan = await Plan.findById(planId);
@@ -1017,10 +1027,15 @@ router.post('/create-session-easypaisa', [
       return res.status(404).json({ success: false, error: 'Plan not found' });
     }
 
-    const amount = plan.getPricingForCurrency('pkr');
-    if (!amount || amount === 0) {
+    const baseAmount = plan.getPricingForCurrency('pkr');
+    if (!baseAmount || baseAmount === 0) {
       return res.status(400).json({ success: false, error: 'PKR pricing not available for this plan' });
     }
+
+    // Apply billing period discount
+    const periodConfig = (plan.billingPeriods || []).find(p => p.months === billingPeriod);
+    const discount = periodConfig?.discountPercent || 0;
+    const amount = Math.round(baseAmount * billingPeriod * (1 - discount / 100));
 
     const sessionResult = await easypaisaService.createPaymentSession({
       amount,
@@ -1029,6 +1044,7 @@ router.post('/create-session-easypaisa', [
       userId: user._id.toString(),
       planId: plan._id.toString(),
       planName: plan.displayName,
+      billingPeriod,
       returnUrl: `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/webhooks/easypaisa`
     });
 
@@ -1046,6 +1062,7 @@ router.post('/create-session-easypaisa', [
         type: 'subscription',
         planId: plan._id,
         planName: plan.displayName,
+        billingPeriod,
         description: `${plan.displayName} Plan via EasyPaisa`,
         gateway: 'easypaisa'
       });

@@ -321,6 +321,7 @@ const checkSubscriptions = async () => {
         logger.info(`[SUBSCRIPTION] Downgrading ${user.email} to ${newPlan.displayName}`);
 
         user.plan = newPlan._id;
+        user.planType = newPlan.isTrial || newPlan.pricing.usd === 0 ? 'free' : newPlan.name;
         user.resourceAllocation = {
           cpu: newPlan.resources.cpu,
           ram: newPlan.resources.ram,
@@ -335,9 +336,30 @@ const checkSubscriptions = async () => {
           bandwidth: newPlan.displayResources?.bandwidth || newPlan.resources.bandwidth || 1024,
           projects: newPlan.displayResources?.projects || newPlan.resources.projects || 10
         };
+        user.allocatedResources = {
+          cpu: newPlan.actualResources?.cpu || newPlan.resources.cpu,
+          ram: newPlan.actualResources?.ram || newPlan.resources.ram,
+          storage: newPlan.actualResources?.storage || newPlan.resources.storage,
+          bandwidth: newPlan.actualResources?.bandwidth || newPlan.resources.bandwidth || 1024,
+          projects: newPlan.actualResources?.projects || newPlan.resources.projects || 10
+        };
         user.scheduledDowngradeTo = null;
         user.scheduledDowngradeAt = null;
         await user.save();
+
+        // Update container resource limits to match new (lower) plan
+        if (user.containerName && user.assignedServer) {
+          try {
+            const docker = require('../services/docker');
+            const host = process.env[`${user.assignedServer}_HOST`] || process.env.EC3_SERVER_IP;
+            const ramGB = newPlan.actualResources?.ram || newPlan.resources?.ram || 0.5;
+            const cpu = newPlan.actualResources?.cpu || newPlan.resources?.cpu || 0.5;
+            await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);
+            logger.info(`[SUBSCRIPTION] Container ${user.containerName} resources downgraded`);
+          } catch (dockerErr) {
+            logger.warn(`[SUBSCRIPTION] Container resource downgrade failed: ${dockerErr.message}`);
+          }
+        }
 
         await sendEmail(
           user.email,
