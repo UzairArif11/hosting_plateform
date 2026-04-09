@@ -8,6 +8,7 @@
 # UPDATES: Run this script for all deployments
 ########################################
 
+
 set -e  # Exit on error
 
 # Colors
