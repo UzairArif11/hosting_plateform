@@ -353,7 +353,7 @@ const checkSubscriptions = async () => {
         if (user.containerName && user.assignedServer) {
           try {
             const docker = require('../services/docker');
-            const host = process.env[`${user.assignedServer}_HOST`] || process.env.EC3_SERVER_IP;
+            const host = process.env[`${user.assignedServer}_SERVER_IP`] || process.env.EC3_SERVER_IP;
             const ramGB = newPlan.actualResources?.ram || newPlan.resources?.ram || 0.5;
             const cpu = newPlan.actualResources?.cpu || newPlan.resources?.cpu || 0.5;
             await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);

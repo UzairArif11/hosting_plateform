@@ -483,7 +483,7 @@ router.post('/jazzcash', express.urlencoded({ extended: true }), async (req, res
             if (user.containerName && user.assignedServer) {
               try {
                 const docker = require('../services/docker');
-                const host = process.env[`${user.assignedServer}_HOST`] || process.env.EC3_SERVER_IP;
+                const host = process.env[`${user.assignedServer}_SERVER_IP`] || process.env.EC3_SERVER_IP;
                 const ramGB = plan.actualResources?.ram || plan.resources?.ram || 0.5;
                 const cpu = plan.actualResources?.cpu || plan.resources?.cpu || 0.5;
                 await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);
@@ -626,7 +626,7 @@ router.post('/easypaisa', express.urlencoded({ extended: true }), async (req, re
             if (user.containerName && user.assignedServer) {
               try {
                 const docker = require('../services/docker');
-                const host = process.env[`${user.assignedServer}_HOST`] || process.env.EC3_SERVER_IP;
+                const host = process.env[`${user.assignedServer}_SERVER_IP`] || process.env.EC3_SERVER_IP;
                 const ramGB = plan.actualResources?.ram || plan.resources?.ram || 0.5;
                 const cpu = plan.actualResources?.cpu || plan.resources?.cpu || 0.5;
                 await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);
@@ -810,7 +810,7 @@ router.post('/btcpay', express.json({ verify: (req, _res, buf) => { req.rawBody 
           if (user.containerName && user.assignedServer) {
             try {
               const docker = require('../services/docker');
-              const host = process.env[`${user.assignedServer}_HOST`] || process.env.EC3_SERVER_IP;
+              const host = process.env[`${user.assignedServer}_SERVER_IP`] || process.env.EC3_SERVER_IP;
               const ramGB = plan.actualResources?.ram || plan.resources?.ram || 0.5;
               const cpu = plan.actualResources?.cpu || plan.resources?.cpu || 0.5;
               await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);

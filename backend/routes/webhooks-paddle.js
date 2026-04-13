@@ -216,7 +216,7 @@ async function handleTransactionCompleted(data) {
     if (user.containerName && user.assignedServer) {
       try {
         const docker = require('../services/docker');
-        const host = process.env[`${user.assignedServer}_HOST`] || process.env.EC3_SERVER_IP;
+        const host = process.env[`${user.assignedServer}_SERVER_IP`] || process.env.EC3_SERVER_IP;
         const ramGB = plan.actualResources?.ram || plan.resources?.ram || 0.5;
         const cpu = plan.actualResources?.cpu || plan.resources?.cpu || 0.5;
         await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);
@@ -326,7 +326,7 @@ async function handleSubscriptionUpdated(data) {
           if (user.containerName && user.assignedServer) {
             try {
               const docker = require('../services/docker');
-              const host = process.env[`${user.assignedServer}_HOST`] || process.env.EC3_SERVER_IP;
+              const host = process.env[`${user.assignedServer}_SERVER_IP`] || process.env.EC3_SERVER_IP;
               const ramGB = plan.actualResources?.ram || plan.resources?.ram || 0.5;
               const cpu = plan.actualResources?.cpu || plan.resources?.cpu || 0.5;
               await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);

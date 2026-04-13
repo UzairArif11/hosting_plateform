@@ -97,8 +97,7 @@ router.post('/projects/:id/invitations', requireAuth, async (req, res) => {
 
         if (existingInvite) {
             return res.status(400).json({
-                error: 'An invitation is already pending for this email',
-                token: existingInvite.token // For dev/testing - remove in production
+                error: 'An invitation is already pending for this email'
             });
         }
 

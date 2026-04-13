@@ -556,7 +556,7 @@ async function deleteUserResources(userId) {
 async function stopContainer(containerName, serverKey) {
     try {
         const server = {
-            host: process.env[`${serverKey}_HOST`],
+            host: process.env[`${serverKey}_SERVER_IP`],
             key: serverKey
         };
 
@@ -582,7 +582,7 @@ async function stopContainer(containerName, serverKey) {
 async function restartContainer(containerName, serverKey) {
     try {
         const server = {
-            host: process.env[`${serverKey}_HOST`],
+            host: process.env[`${serverKey}_SERVER_IP`],
             key: serverKey
         };
 
@@ -604,7 +604,7 @@ async function restartContainer(containerName, serverKey) {
 async function stopAndRemoveContainer(containerName, serverKey) {
     try {
         const server = {
-            host: process.env[`${serverKey}_HOST`],
+            host: process.env[`${serverKey}_SERVER_IP`],
             key: serverKey
         };
 

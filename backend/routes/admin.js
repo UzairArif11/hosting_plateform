@@ -641,7 +641,7 @@ router.put('/users/:userId/plan', requireAuth, requireAdmin, async (req, res) =>
     if (user.containerName && user.assignedServer) {
       try {
         const docker = require('../services/docker');
-        const host = process.env[`${user.assignedServer}_HOST`] || process.env.EC3_SERVER_IP;
+        const host = process.env[`${user.assignedServer}_SERVER_IP`] || process.env.EC3_SERVER_IP;
         const ramGB = newPlan.actualResources?.ram || newPlan.resources?.ram || 0.5;
         const cpu = newPlan.actualResources?.cpu || newPlan.resources?.cpu || 0.5;
         const memoryMB = ramGB * 1024; // GB to MB
@@ -2145,7 +2145,7 @@ router.get('/servers/:serverKey/docker-stats', requireAuth, requireAdmin, async 
 // Force rebuild a project (admin only)
 router.post('/projects/:projectId/rebuild', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const project = await Project.findById(req.params.projectId).populate('userId', 'username email');
+    const project = await Project.findById(req.params.projectId).populate('owner', 'username email');
     if (!project) {
       return res.status(404).json({ success: false, error: 'Project not found' });
     }
@@ -2153,7 +2153,7 @@ router.post('/projects/:projectId/rebuild', requireAuth, requireAdmin, async (re
     // Create a new deployment record
     const deployment = await Deployment.create({
       projectId: project._id,
-      userId: project.userId._id || project.userId,
+      userId: project.owner._id || project.owner,
       branch: project.repository?.branch || 'main',
       commitSha: `admin_rebuild_${Date.now()}`,
       commitMessage: `Admin force rebuild by ${req.user.email}`,
@@ -2167,7 +2167,7 @@ router.post('/projects/:projectId/rebuild', requireAuth, requireAdmin, async (re
     await buildQueue.addDeployment(
       deployment._id.toString(),
       project._id.toString(),
-      (project.userId._id || project.userId).toString(),
+      (project.owner._id || project.owner).toString(),
       { priority: 1 }
     );
 
@@ -2359,7 +2359,7 @@ router.post('/manual-payments/:id/verify', requireAuth, requireAdmin, async (req
       if (user.containerName && user.assignedServer) {
         try {
           const docker = require('../services/docker');
-          const host = process.env[`${user.assignedServer}_HOST`] || process.env.EC3_SERVER_IP;
+          const host = process.env[`${user.assignedServer}_SERVER_IP`] || process.env.EC3_SERVER_IP;
           const ramGB = plan.actualResources?.ram || plan.resources?.ram || 0.5;
           const cpu = plan.actualResources?.cpu || plan.resources?.cpu || 0.5;
           await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);

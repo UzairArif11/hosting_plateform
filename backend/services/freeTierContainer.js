@@ -170,7 +170,7 @@ async function deployProjectToUserContainer(user, project, buildPath, containerI
         const { containerName, serverKey, host } = containerInfo;
 
         // Get available port for this project
-        const port = await getAvailablePort();
+        let port = await getAvailablePort();
 
         logger.info('🚀 [DEPLOY_PROJECT] Starting PM2 deployment', {
             user: user.email,

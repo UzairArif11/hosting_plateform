@@ -2,7 +2,7 @@ const Settings = require('../models/Settings');
 const Deployment = require('../models/Deployment');
 const User = require('../models/User');
 const logger = require('../utils/logger');
-const emailService = require('./emailService');
+const notify = require('./notificationService');
 
 /**
  * Domain Migration Service
@@ -265,12 +265,11 @@ Best regards,
 The Deployment Team
         `;
 
-        await emailService.sendEmail({
-            to: user.email,
-            subject: `🔄 Your Deployment URLs Have Been Updated`,
-            html: emailHtml,
-            text: emailText
-        });
+        await notify.sendEmail(
+            user.email,
+            `🔄 Your Deployment URLs Have Been Updated`,
+            emailHtml
+        );
 
         logger.info(`Domain change notification sent to ${user.email}`);
 

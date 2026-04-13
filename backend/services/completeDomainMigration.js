@@ -13,7 +13,7 @@ async function connectToServer(serverKey) {
             : process.env.SSH_EC3_KEY;
 
     const keyContent = fs.readFileSync(keyPath, 'utf8');
-    const host = process.env[`${serverKey}_HOST`] || process.env.EC3_SERVER_IP;
+    const host = process.env[`${serverKey}_SERVER_IP`] || process.env.EC3_SERVER_IP;
 
     await ssh.connect({
         host: host,

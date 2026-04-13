@@ -771,7 +771,7 @@ router.get('/project/:projectId', async (req, res) => {
       });
     }
 
-    if (project.userId.toString() !== req.user._id.toString()) {
+    if (!project.hasAccess(req.user._id, 'viewer')) {
       return res.status(403).json({
         success: false,
         error: 'Access denied'

@@ -178,20 +178,6 @@ const projectSchema = new mongoose.Schema({
     default: false
   },
 
-  // Deployment References
-  latestDeployment: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Deployment'
-  },
-  productionDeployment: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Deployment'
-  },
-  deploymentCount: {
-    type: Number,
-    default: 0
-  },
-
   // Resource usage tracking
   currentUsage: {
     storage: {

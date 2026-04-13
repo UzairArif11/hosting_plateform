@@ -167,7 +167,7 @@ const requireAuth = async (req, res, next) => {
       } else {
         // Allow suspended users to access billing routes (so they can upgrade),
         // their own profile (so dashboard layout loads), and auth routes (logout)
-        const allowedPaths = ['/api/billing/', '/api/users/me', '/api/auth/'];
+        const allowedPaths = ['/api/billing/', '/api/user/', '/api/auth/'];
         const isAllowedPath = allowedPaths.some(path => req.originalUrl.startsWith(path));
 
         if (isAllowedPath) {

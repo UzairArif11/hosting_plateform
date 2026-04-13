@@ -592,8 +592,8 @@ const getUserContainer = async (userId) => {
 const scaleContainerResources = async (userId, newResources) => {
   try {
     const containerInfo = await getUserContainer(userId);
-    if (!containerInfo.success) {
-      return containerInfo;
+    if (!containerInfo || !containerInfo.success) {
+      return containerInfo || { success: false, error: 'No container found for user' };
     }
 
     const { container, user } = containerInfo;
@@ -662,8 +662,8 @@ const scaleContainerResources = async (userId, newResources) => {
 const recreateContainerWithDataPreservation = async (userId, newResources) => {
   try {
     const containerInfo = await getUserContainer(userId);
-    if (!containerInfo.success) {
-      return containerInfo;
+    if (!containerInfo || !containerInfo.success) {
+      return containerInfo || { success: false, error: 'No container found for user' };
     }
 
     const { container, user } = containerInfo;
@@ -1436,7 +1436,5 @@ module.exports = {
   assignUserToServer,
   enforceUserResourceCaps,
   monitorUserResourceUsage,
-  startResourceMonitoring,
-  ORACLE_SERVERS,
-  SHARED_RESOURCE_CAPS
+  startResourceMonitoring
 };
