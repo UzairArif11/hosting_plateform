@@ -31,16 +31,11 @@ function startCronJobs() {
         }
     });
 
-    // Run every day at 3 AM: Check and suspend expired subscriptions
-    cron.schedule('0 3 * * *', async () => {
-        try {
-            logger.info('[CRON] Checking expired subscriptions...');
-            const result = await accountLifecycle.checkAndSuspendExpiredSubscriptions();
-            logger.info(`[CRON] Expired subscriptions check complete: ${result.suspended} users suspended`);
-        } catch (error) {
-            logger.error('[CRON] Error checking expired subscriptions:', error);
-        }
-    });
+    // NOTE: Paid subscription expiry is handled by subscriptionCron.js (runs daily at 9 AM)
+    // which implements the full grace-period lifecycle. The legacy
+    // accountLifecycle.checkAndSuspendExpiredSubscriptions path queried
+    // `subscriptionExpiry` + hard-coded planType values that are no longer set,
+    // and would also bypass the grace period if it ever matched — do not re-enable.
 
     // Run every day at 4 AM: Delete resources for users suspended > 7 days
     cron.schedule('0 4 * * *', async () => {

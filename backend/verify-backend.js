@@ -96,7 +96,6 @@ console.log('\n⚙️  Checking Services...\n');
 checkFileExists('services/containerOrchestrator.js', 'Container orchestrator exists');
 checkFileExists('services/docker.js', 'Docker service exists');
 checkFileExists('services/github.js', 'GitHub service exists');
-checkFileExists('services/payoneer.js', 'Payoneer service exists');
 checkFileExists('services/buildQueue.js', 'Build queue service exists (NEW)');
 checkFileExists('services/buildExecutor.js', 'Build executor service exists (NEW)');
 

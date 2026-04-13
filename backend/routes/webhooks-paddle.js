@@ -113,6 +113,13 @@ async function handleTransactionCompleted(data) {
   }
 
   try {
+    // Idempotency check — Paddle retries on failed acks; reject duplicate processing
+    const existingPayment = await Payment.findOne({ paddleTransactionId: transactionId, status: 'completed' });
+    if (existingPayment) {
+      logger.info('Paddle transaction.completed: Already processed (idempotency hit)', { transactionId });
+      return;
+    }
+
     const user = await User.findById(userId);
     if (!user) {
       logger.error('Paddle transaction.completed: User not found', { userId, transactionId });
@@ -168,9 +175,11 @@ async function handleTransactionCompleted(data) {
     user.isTrialActive = false;
     user.billingPeriod = billingPeriod;
 
-    // Set expiration
+    // Set expiration using calendar months (not 30-day approximation)
     const now = new Date();
-    user.planExpiresAt = new Date(now.getTime() + billingPeriod * 30 * 24 * 60 * 60 * 1000);
+    const expiryDate = new Date(now);
+    expiryDate.setMonth(expiryDate.getMonth() + billingPeriod);
+    user.planExpiresAt = expiryDate;
     user.suspendedAt = null;
     user.suspensionReason = null;
     user.autoSuspended = false;
@@ -318,6 +327,15 @@ async function handleSubscriptionUpdated(data) {
           user.plan = plan._id;
           user.planType = plan.isTrial || plan.pricing.usd === 0 ? 'free' : plan.name;
 
+          // Update billingPeriod and expiry if provided in custom_data
+          if (customData.billingPeriod) {
+            const newBillingPeriod = parseInt(customData.billingPeriod) || 1;
+            user.billingPeriod = newBillingPeriod;
+            const newExpiry = new Date();
+            newExpiry.setMonth(newExpiry.getMonth() + newBillingPeriod);
+            user.planExpiresAt = newExpiry;
+          }
+
           // Update resource allocation to match new plan
           user.resourceAllocation = {
             projects: plan.resources.projects,
@@ -409,10 +427,21 @@ async function handleSubscriptionPastDue(data) {
   const subscriptionId = data.id;
 
   try {
-    const user = await User.findOne({ paddleSubscriptionId: subscriptionId });
+    const user = await User.findOne({ paddleSubscriptionId: subscriptionId }).populate('plan');
     if (!user) return;
 
     user.subscriptionStatus = 'past_due';
+
+    // Initialize grace period if not already set — gives user time to update payment
+    if (!user.gracePeriodEndsAt) {
+      let graceDays = 10;
+      if (user.plan?.billingPeriods?.length > 0 && user.billingPeriod) {
+        const periodConfig = user.plan.billingPeriods.find(p => p.months === user.billingPeriod);
+        if (periodConfig?.gracePeriodDays) graceDays = periodConfig.gracePeriodDays;
+      }
+      user.gracePeriodEndsAt = new Date(Date.now() + graceDays * 24 * 60 * 60 * 1000);
+    }
+
     await user.save();
 
     logger.warn('Paddle subscription past due', { userId: user._id, subscriptionId });

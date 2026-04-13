@@ -118,15 +118,11 @@ const userSchema = new mongoose.Schema({
     default: null
   },
 
-  // Payoneer payment info
-  payoneerCustomerId: {
-    type: String,
-    default: null
-  },
+  // Saved payment methods
   paymentMethods: [{
     type: {
       type: String,
-      enum: ['card', 'payoneer_wallet', 'paddle', 'btcpay', 'jazzcash', 'easypaisa']
+      enum: ['card', 'paddle', 'btcpay', 'jazzcash', 'easypaisa']
     },
     last4: String,
     brand: String,
@@ -134,7 +130,6 @@ const userSchema = new mongoose.Schema({
       type: Boolean,
       default: false
     },
-    payoneerPaymentMethodId: String,
     createdAt: {
       type: Date,
       default: Date.now

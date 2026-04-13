@@ -306,7 +306,7 @@ const validationChains = {
   webhookSignature: [
     body()
       .custom((value, { req }) => {
-        const signature = req.headers['x-payoneer-signature'] || req.headers['x-hub-signature-256'];
+        const signature = req.headers['x-hub-signature-256'] || req.headers['webhook-signature'] || req.headers['btcpay-sig'];
         if (!signature) {
           throw new Error('Webhook signature is required');
         }

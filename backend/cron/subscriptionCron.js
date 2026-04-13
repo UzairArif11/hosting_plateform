@@ -327,7 +327,9 @@ const checkSubscriptions = async () => {
           ram: newPlan.resources.ram,
           storage: newPlan.resources.storage,
           bandwidth: newPlan.resources.bandwidth || 1024,
-          projects: newPlan.resources.projects || 10
+          projects: newPlan.resources.projects || 10,
+          deployments: newPlan.limits?.deploymentsPerDay || 100,
+          containers: newPlan.resources.containers || 1
         };
         user.displayedResources = {
           cpu: newPlan.displayResources?.cpu || newPlan.resources.cpu,

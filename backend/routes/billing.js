@@ -266,6 +266,7 @@ router.post('/create-paddle-checkout', [
         planId: plan._id,
         planName: plan.displayName,
         billingCycle: billingPeriod === 12 ? 'yearly' : 'monthly',
+        billingPeriod,
         description: `${plan.displayName} Plan - ${billingPeriod} month(s) via Paddle`
       });
     } catch (dbErr) {
@@ -445,6 +446,7 @@ router.post('/create-btcpay-invoice', [
         planId: plan._id,
         planName: plan.displayName,
         billingCycle: billingPeriod === 12 ? 'yearly' : 'monthly',
+        billingPeriod,
         description: `${plan.displayName} Plan - ${billingPeriod} month(s) (Crypto)`
       });
     } catch (dbErr) {
@@ -487,13 +489,41 @@ router.post('/cancel', async (req, res) => {
       });
     }
 
-    // Update user subscription status
+    // If user has an active Paddle subscription, cancel it upstream so they
+    // stop being billed next period. Otherwise Paddle will keep charging even
+    // though our local flag says "cancelled".
+    if (user.paddleSubscriptionId) {
+      try {
+        const paddleService = require('../services/paddle');
+        const result = await paddleService.cancelSubscription(user.paddleSubscriptionId);
+        if (!result?.success) {
+          logger.error('Paddle cancelSubscription failed during /cancel', {
+            userId: user._id,
+            subscriptionId: user.paddleSubscriptionId,
+            error: result?.error
+          });
+          return res.status(502).json({
+            success: false,
+            error: 'Failed to cancel upstream subscription. Please try again.'
+          });
+        }
+      } catch (paddleErr) {
+        logger.error('Paddle cancelSubscription threw during /cancel:', paddleErr.message);
+        return res.status(502).json({
+          success: false,
+          error: 'Failed to cancel upstream subscription. Please try again.'
+        });
+      }
+    }
+
+    // Update user subscription status — user keeps access until planExpiresAt
     user.subscriptionStatus = 'cancelled';
     await user.save();
 
     logger.billing('Subscription cancelled', {
       userId: user._id,
       planId: user.plan,
+      paddleSubscriptionId: user.paddleSubscriptionId || null,
       cancelledAt: new Date()
     });
 

@@ -604,11 +604,35 @@ router.put('/users/:userId/plan', requireAuth, requireAdmin, async (req, res) =>
 
     const oldPlanName = user.plan?.name || user.planType;
 
-    // Update DB record
+    // Update DB record — set all 3 resource fields consistently with payment flows
     user.plan = newPlan._id;
-    user.planType = newPlan.name;
-    user.resourceAllocation = newPlan.resources;
-    user.displayedResources = newPlan.displayResources;
+    user.planType = newPlan.isTrial || newPlan.pricing?.usd === 0 ? 'free' : newPlan.name;
+    user.resourceAllocation = {
+      cpu: newPlan.resources.cpu,
+      ram: newPlan.resources.ram,
+      storage: newPlan.resources.storage,
+      bandwidth: newPlan.resources.bandwidth || 1024,
+      projects: newPlan.resources.projects || 10,
+      deployments: newPlan.limits?.deploymentsPerDay || 100,
+      containers: newPlan.resources.containers || 1
+    };
+    user.displayedResources = {
+      cpu: newPlan.displayResources?.cpu || newPlan.resources.cpu,
+      ram: newPlan.displayResources?.ram || newPlan.resources.ram,
+      storage: newPlan.displayResources?.storage || newPlan.resources.storage,
+      bandwidth: newPlan.displayResources?.bandwidth || newPlan.resources.bandwidth || 1024,
+      projects: newPlan.displayResources?.projects || newPlan.resources.projects || 10
+    };
+    user.allocatedResources = {
+      cpu: newPlan.actualResources?.cpu || newPlan.resources.cpu,
+      ram: newPlan.actualResources?.ram || newPlan.resources.ram,
+      storage: newPlan.actualResources?.storage || newPlan.resources.storage,
+      bandwidth: newPlan.actualResources?.bandwidth || newPlan.resources.bandwidth || 1024,
+      projects: newPlan.actualResources?.projects || newPlan.resources.projects || 10
+    };
+    // Clear any pending downgrade — admin override takes precedence
+    user.scheduledDowngradeTo = null;
+    user.scheduledDowngradeAt = null;
     await user.save();
 
     // IMMEDIATE: Update existing container resource limits (memory/CPU) in-place
@@ -2288,7 +2312,9 @@ router.post('/manual-payments/:id/verify', requireAuth, requireAdmin, async (req
           ram: plan.resources.ram,
           storage: plan.resources.storage,
           bandwidth: plan.resources.bandwidth || 1024,
-          projects: plan.resources.projects || 10
+          projects: plan.resources.projects || 10,
+          deployments: plan.limits?.deploymentsPerDay || 100,
+          containers: plan.resources.containers || 1
         };
         user.displayedResources = {
           cpu: plan.displayResources?.cpu || plan.resources.cpu,

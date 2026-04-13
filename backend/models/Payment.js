@@ -39,7 +39,7 @@ const paymentSchema = new mongoose.Schema({
     // Payment gateway used
     gateway: {
         type: String,
-        enum: ['paddle', 'payoneer', 'btcpay', 'jazzcash', 'easypaisa', 'manual'],
+        enum: ['paddle', 'btcpay', 'jazzcash', 'easypaisa', 'manual'],
         default: 'manual'
     },
 
@@ -212,6 +212,7 @@ paymentSchema.statics.createFromSession = async function (sessionData) {
         plan: sessionData.planId,
         planName: sessionData.planName,
         billingCycle: sessionData.billingCycle || 'monthly',
+        billingPeriod: sessionData.billingPeriod || 1,
         description: sessionData.description,
         gateway: sessionData.gateway || 'manual',
         metadata: sessionData.metadata || {}
@@ -222,7 +223,8 @@ paymentSchema.statics.createFromSession = async function (sessionData) {
         paymentDoc.paddleTransactionId = sessionData.transactionId;
     } else if (sessionData.gateway === 'btcpay') {
         paymentDoc.btcpayInvoiceId = sessionData.invoiceId;
-    } else if (sessionData.gateway === 'payoneer') {
+    } else if (sessionData.gateway === 'payoneer' || sessionData.gateway === 'easypaisa' || sessionData.gateway === 'jazzcash') {
+        // Generic session ID storage — payoneerSessionId is reused for PK gateways
         paymentDoc.payoneerSessionId = sessionData.sessionId;
     }
 

@@ -5,29 +5,29 @@ const logger = require('../utils/logger');
 const Project = require('../models/Project');
 const Deployment = require('../models/Deployment');
 const Payment = require('../models/Payment');
-let payoneerService;
-try {
-  payoneerService = require('../services/payoneer');
-} catch (e) {
-  payoneerService = {
-    verifyWebhookSignature: () => false,
-    handleWebhook: async () => ({ success: false, error: 'Payoneer service removed' })
-  };
-}
 const { hasFeature } = require('../utils/featureCheck');
 const notify = require('../services/notificationService');
 
 /**
  * Verify GitHub webhook signature
+ * IMPORTANT: Must use the raw request body, not JSON.stringify(req.body),
+ * since re-serialization may not match GitHub's original bytes.
  */
 function verifyGitHubSignature(req, secret) {
   const signature = req.headers['x-hub-signature-256'];
   if (!signature) return false;
 
-  const hmac = crypto.createHmac('sha256', secret);
-  const digest = 'sha256=' + hmac.update(JSON.stringify(req.body)).digest('hex');
+  // req.rawBody is captured by the express.json verify callback in server.js
+  const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body);
 
-  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(digest));
+  const hmac = crypto.createHmac('sha256', secret);
+  const digest = 'sha256=' + hmac.update(rawBody).digest('hex');
+
+  try {
+    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(digest));
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -376,78 +376,6 @@ async function handlePush(payload) {
   }
 }
 
-/**
- * POST /api/webhooks/payoneer - Handle Payoneer payment webhooks
- */
-router.post('/payoneer', express.json(), async (req, res) => {
-  try {
-    const signature = req.headers['x-payoneer-signature'] || req.headers['x-webhook-signature'];
-    const payload = JSON.stringify(req.body);
-
-    // Verify webhook signature
-    if (signature) {
-      const isValid = payoneerService.verifyWebhookSignature(payload, signature);
-      if (!isValid) {
-        logger.error('Payoneer webhook: Invalid signature');
-        return res.status(401).json({ error: 'Invalid webhook signature' });
-      }
-    }
-
-    // Quick acknowledgment (Payoneer expects fast response)
-    res.status(200).json({ received: true });
-
-    const event = req.body;
-
-    logger.info('Payoneer webhook received', {
-      type: event.type,
-      id: event.id,
-      resourceId: event.data?.id
-    });
-
-    // Record payment in database based on event type
-    if (event.type === 'payment.completed' && event.data) {
-      try {
-        await Payment.markCompleted(event.data.id, {
-          sessionId: event.data.reference_id,
-          userId: event.data.metadata?.user_id,
-          planId: event.data.metadata?.plan_id,
-          planName: event.data.metadata?.plan_name,
-          amount: event.data.amount,
-          currency: event.data.currency,
-          description: event.data.description,
-          paymentMethod: event.data.payment_method || 'card',
-          metadata: event.data.metadata
-        });
-        logger.info('Payment recorded in database', { paymentId: event.data.id });
-      } catch (dbError) {
-        logger.error('Failed to record payment in database:', dbError.message);
-      }
-    } else if (event.type === 'payment.failed' && event.data) {
-      try {
-        await Payment.markFailed(event.data.id, event.data.failure_reason || 'Payment failed');
-        logger.info('Payment failure recorded', { paymentId: event.data.id });
-      } catch (dbError) {
-        logger.error('Failed to record payment failure:', dbError.message);
-      }
-    }
-
-    // Delegate to payoneer service for plan upgrades, status changes, etc.
-    const result = await payoneerService.handleWebhook(event);
-
-    if (!result.success) {
-      logger.error('Payoneer webhook handler returned error:', result.error);
-    } else {
-      logger.info('Payoneer webhook processed successfully', {
-        type: event.type,
-        handled: result.handled
-      });
-    }
-
-  } catch (error) {
-    logger.error('Payoneer webhook error:', error.message);
-    // Don't fail — Payoneer will retry on 5xx
-  }
-});
 
 /**
  * POST /api/webhooks/jazzcash - Handle JazzCash payment callbacks
@@ -607,6 +535,12 @@ router.post('/easypaisa', express.urlencoded({ extended: true }), async (req, re
     // Quick acknowledgment
     res.status(200).json({ received: true });
 
+    // Verify signature — REQUIRED to prevent forged callbacks unlocking paid plans
+    if (!easypaisaService.verifySignature(data)) {
+      logger.error('EasyPaisa webhook: Invalid signature', { orderRefNum: data.orderRefNum });
+      return;
+    }
+
     // Handle callback
     const result = await easypaisaService.handleCallback(data);
 
@@ -741,13 +675,15 @@ router.post('/btcpay', express.json({ verify: (req, _res, buf) => { req.rawBody 
     const signature = req.headers['btcpay-sig'];
     const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body);
 
-    // Verify webhook signature
-    if (signature) {
-      const isValid = await btcpayService.verifyWebhookSignature(rawBody, signature);
-      if (!isValid) {
-        logger.error('BTCPay webhook: Invalid signature');
-        return res.status(401).json({ error: 'Invalid webhook signature' });
-      }
+    // Verify webhook signature — REQUIRED to prevent forged webhooks
+    if (!signature) {
+      logger.error('BTCPay webhook: Missing signature header');
+      return res.status(401).json({ error: 'Missing signature header' });
+    }
+    const isValid = await btcpayService.verifyWebhookSignature(rawBody, signature);
+    if (!isValid) {
+      logger.error('BTCPay webhook: Invalid signature');
+      return res.status(401).json({ error: 'Invalid webhook signature' });
     }
 
     // Quick acknowledgment
