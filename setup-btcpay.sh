@@ -29,7 +29,8 @@
 #
 ###############################################################################
 
-set -e
+# NOTE: Not using 'set -e' because btcpay-setup.sh may partially fail
+# (e.g., old docker-compose ContainerConfig bug) and we fix it in step 5
 
 # Colors
 RED='\033[0;31m'
@@ -92,7 +93,7 @@ fi
 # Step 1: Install Docker
 # ─────────────────────────────────────────────────────────────
 echo ""
-echo -e "${CYAN}[Step 1/5] Checking Docker...${NC}"
+echo -e "${CYAN}[Step 1/7] Checking Docker...${NC}"
 
 if command -v docker &> /dev/null; then
     echo -e "${GREEN}Docker already installed: $(docker --version)${NC}"
@@ -104,22 +105,24 @@ else
     echo -e "${GREEN}Docker installed successfully${NC}"
 fi
 
-if command -v docker-compose &> /dev/null || docker compose version &> /dev/null; then
-    echo -e "${GREEN}Docker Compose available${NC}"
+# Install docker-compose v2 (required — old v1.29 has ContainerConfig bug)
+if docker compose version &>/dev/null; then
+    echo -e "${GREEN}Docker Compose v2 available${NC}"
 else
-    echo -e "${YELLOW}Installing Docker Compose...${NC}"
+    echo -e "${YELLOW}Installing Docker Compose v2...${NC}"
+    apt-get install -y docker-compose-v2 2>/dev/null || \
     apt-get install -y docker-compose-plugin 2>/dev/null || {
         curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
         chmod +x /usr/local/bin/docker-compose
     }
-    echo -e "${GREEN}Docker Compose installed${NC}"
+    echo -e "${GREEN}Docker Compose v2 installed${NC}"
 fi
 
 # ─────────────────────────────────────────────────────────────
 # Step 2: Clone BTCPay Docker Repository
 # ─────────────────────────────────────────────────────────────
 echo ""
-echo -e "${CYAN}[Step 2/5] Setting up BTCPay repository...${NC}"
+echo -e "${CYAN}[Step 2/7] Setting up BTCPay repository...${NC}"
 
 BTCPAY_DIR="/opt/btcpayserver-docker"
 
@@ -174,7 +177,9 @@ echo ""
 echo -e "${CYAN}[Step 4/7] Starting BTCPay Server...${NC}"
 echo -e "${YELLOW}This may take 5-15 minutes (downloading Docker images)...${NC}"
 
-. ./btcpay-setup.sh -i
+# btcpay-setup.sh may fail on container start (port conflict, old docker-compose)
+# That's OK — we fix it in step 5
+. ./btcpay-setup.sh -i || echo -e "${YELLOW}BTCPay initial setup had errors (expected on shared servers). Fixing...${NC}"
 
 # ─────────────────────────────────────────────────────────────
 # Step 5: Fix port mapping (avoid port 80 conflict)
@@ -193,15 +198,28 @@ fi
 # Remove any stale BTCPay container and recreate
 docker rm -f generated_btcpayserver_1 2>/dev/null || true
 
-# Install docker-compose v2 if needed (old v1.29 has ContainerConfig bug)
-if ! docker compose version &>/dev/null; then
-    echo -e "${YELLOW}Installing Docker Compose v2...${NC}"
-    apt-get install -y docker-compose-v2 2>/dev/null || true
-fi
+# Start all BTCPay services with correct port
+docker compose -f "$COMPOSE_FILE" up -d
+echo -e "${GREEN}BTCPay containers started${NC}"
 
-# Start BTCPay with correct port
-docker compose -f "$COMPOSE_FILE" up -d btcpayserver
-echo -e "${GREEN}BTCPay container started on port $BTCPAY_INTERNAL_PORT${NC}"
+# Wait for postgres + nbxplorer to be ready (creates databases)
+echo -e "${YELLOW}Waiting for database initialization (15s)...${NC}"
+sleep 15
+
+# Restart nbxplorer (creates nbxplorertestnet/nbxplorer DB if missing)
+docker restart generated_nbxplorer_1 2>/dev/null || true
+sleep 5
+
+# Restart BTCPay (now DB exists)
+docker restart generated_btcpayserver_1 2>/dev/null || true
+sleep 5
+
+# Verify BTCPay is running
+if docker ps | grep -q btcpayserver_1; then
+    echo -e "${GREEN}BTCPay container running on port $BTCPAY_INTERNAL_PORT${NC}"
+else
+    echo -e "${RED}BTCPay container failed to start. Check: docker logs generated_btcpayserver_1${NC}"
+fi
 
 # ─────────────────────────────────────────────────────────────
 # Step 6: Configure nginx reverse proxy
