@@ -122,7 +122,7 @@ const userSchema = new mongoose.Schema({
   paymentMethods: [{
     type: {
       type: String,
-      enum: ['card', 'paddle', 'btcpay', 'jazzcash', 'easypaisa']
+      enum: ['card', 'payoneer_wallet']
     },
     last4: String,
     brand: String,

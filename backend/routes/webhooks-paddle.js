@@ -177,12 +177,7 @@ async function handleTransactionCompleted(data) {
 
     // Set expiration using calendar months (not 30-day approximation)
     const now = new Date();
-    const expiryDate = new Date(now);
-    expiryDate.setMonth(expiryDate.getMonth() + billingPeriod);
-    user.planExpiresAt = expiryDate;
-    user.suspendedAt = null;
-    user.suspensionReason = null;
-    user.autoSuspended = false;
+    user.planExpiresAt = new Date(now.getTime() + billingPeriod * 30 * 24 * 60 * 60 * 1000);
     user.gracePeriodEndsAt = null;
     user.scheduledDeletionAt = null;
     user.scheduledDowngradeTo = null;
@@ -325,42 +320,6 @@ async function handleSubscriptionUpdated(data) {
         const user = await User.findById(userId);
         if (user) {
           user.plan = plan._id;
-          user.planType = plan.isTrial || plan.pricing.usd === 0 ? 'free' : plan.name;
-
-          // Update billingPeriod and expiry if provided in custom_data
-          if (customData.billingPeriod) {
-            const newBillingPeriod = parseInt(customData.billingPeriod) || 1;
-            user.billingPeriod = newBillingPeriod;
-            const newExpiry = new Date();
-            newExpiry.setMonth(newExpiry.getMonth() + newBillingPeriod);
-            user.planExpiresAt = newExpiry;
-          }
-
-          // Update resource allocation to match new plan
-          user.resourceAllocation = {
-            projects: plan.resources.projects,
-            deployments: plan.limits?.deploymentsPerDay || 100,
-            cpu: plan.resources.cpu,
-            ram: plan.resources.ram,
-            storage: plan.resources.storage,
-            bandwidth: plan.resources.bandwidth,
-            containers: plan.resources.containers
-          };
-          user.displayedResources = {
-            cpu: plan.displayResources?.cpu || plan.resources.cpu,
-            ram: plan.displayResources?.ram || plan.resources.ram,
-            storage: plan.displayResources?.storage || plan.resources.storage,
-            bandwidth: plan.displayResources?.bandwidth || plan.resources.bandwidth,
-            projects: plan.displayResources?.projects || plan.resources.projects
-          };
-          user.allocatedResources = {
-            cpu: plan.actualResources?.cpu || plan.resources.cpu,
-            ram: plan.actualResources?.ram || plan.resources.ram,
-            storage: plan.actualResources?.storage || plan.resources.storage,
-            bandwidth: plan.actualResources?.bandwidth || plan.resources.bandwidth,
-            projects: plan.actualResources?.projects || plan.resources.projects
-          };
-
           await user.save();
 
           // Update container resources if container exists
