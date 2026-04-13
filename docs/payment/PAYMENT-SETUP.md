@@ -1,285 +1,179 @@
-# Payment System — Setup & Configuration Guide
+# 💳 Payment Setup Guide
 
-## Quick Overview
-
-This platform supports multiple payment methods. **Paddle** is the primary gateway for card/PayPal payments, **BTCPay** for crypto payments, and several local/manual methods.
-
-| Method | Type | Gateway | Fee | Test Mode |
-|--------|------|---------|-----|-----------|
-| **Paddle** | Card / PayPal / Apple Pay | Automatic | 5% + $0.50 | Yes (sandbox) |
-| **BTCPay** | Bitcoin (Lightning + On-chain) + Litecoin | Automatic | 0% (self-hosted) | Yes (testnet) |
-| **JazzCash** | Mobile Wallet (PKR) | Automatic | ~2% | No |
-| **EasyPaisa** | Mobile Wallet (PKR) | Automatic | ~2% | No |
-| **Manual Bank** | Bank Transfer | Manual (admin verifies) | 0% | N/A |
-| **Manual Crypto** | USDT/USDC/BTC wallets | Manual (admin verifies) | 0% | N/A |
-
+> **Platform:** foodpanda.site  
+> **Last Updated:** 2026-04-13
 
 ---
 
-## Payment Flow
+## Payment Gateways Overview
 
+| Gateway | Type | Status | Domain |
+|---------|------|:------:|--------|
+| **Paddle** | Card payments (international) | ✅ Ready | Via Paddle hosted checkout |
+| **BTCPay** | Crypto (Bitcoin) | ✅ Configured | `pay.foodpanda.site` |
+| **JazzCash** | Mobile wallet (Pakistan) | ✅ Ready | Via API |
+| **EasyPaisa** | Mobile wallet (Pakistan) | ✅ Ready | Via API |
+
+---
+
+## BTCPay Server Setup
+
+### Architecture
 ```
-Customer selects plan → Choose payment method:
-
-  AUTOMATIC (no admin action needed):
-  ├── "Pay with Card/PayPal"  → Paddle checkout overlay → webhook → plan activated
-  ├── "Pay with Crypto"       → BTCPay invoice (QR code) → blockchain confirms → plan activated
-  ├── "JazzCash"              → JazzCash redirect → callback → plan activated
-  └── "EasyPaisa"             → EasyPaisa redirect → callback → plan activated
-
-  MANUAL (admin must verify):
-  ├── "Bank Transfer"         → Show bank details → user uploads screenshot → admin verifies
-  └── "Manual Crypto"         → Show wallet address → user uploads screenshot → admin verifies
+User Browser → https://pay.foodpanda.site (port 443)
+                    ↓
+              nginx (existing, port 80/443)
+                    ↓ proxy_pass
+              BTCPay Docker container (port 49392)
+                    ↓
+              PostgreSQL + Bitcoin Node (testnet) + NBXplorer
 ```
 
----
+### Server Details
+- **URL:** `https://pay.foodpanda.site`
+- **Network:** testnet (switch to mainnet for production)
+- **Port:** 49392 (internal, proxied via nginx)
+- **Docker containers:** btcpayserver, bitcoind, nbxplorer, postgres, tor
+- **SSL:** Let's Encrypt (auto-renewal via certbot)
+- **Install dir:** `/opt/btcpayserver-docker`
+- **Env file:** `/opt/.env`
+- **Systemd:** `btcpayserver.service`
 
-## Setup Guides
+### BTCPay Dashboard Setup
 
-### 1. Paddle (Card / PayPal) — Primary Gateway
+After opening `https://pay.foodpanda.site`:
 
-**Full setup guide:** See [PADDLE-SETUP.md](PADDLE-SETUP.md)
+1. **Create admin account** (first visitor = admin)
+2. **Create Store** → Name: "YourPlatform"
+3. **Connect Bitcoin Wallet** → Store → Wallets → Bitcoin → Setup → "Create new wallet" → **SAVE the 12 seed words!**
+4. **Create API Key** → Account → API Keys → Generate
+   - Permissions: `btcpay.store.cancreateinvoice`, `btcpay.store.canviewinvoices`
+5. **Create Webhook** → Store → Settings → Webhooks → Create
+   - URL: `https://foodpanda.site/api/webhooks/btcpay`
+   - Secret: Generate a random string (`openssl rand -hex 32`)
+   - Events: `InvoiceSettled`, `InvoiceExpired`, `InvoiceReceivedPayment`, `InvoicePaymentSettled`
+6. **Get Store ID** → Store → Settings → General → copy Store ID
 
-**Quick summary:**
-1. Create sandbox account at `sandbox-vendors.paddle.com`
-2. Create product + prices in Paddle dashboard
-3. Enter credentials in **Admin → Settings → Paddle**
-4. Enter Price IDs in **Admin → Plans → each plan → Paddle Price IDs**
-5. Test with card `4242 4242 4242 4242`
-6. When ready, create live account at `vendors.paddle.com` and repeat
+### Platform Configuration
 
-**Implementation details:** See [PADDLE-IMPLEMENTATION.md](PADDLE-IMPLEMENTATION.md)
+Add to **Admin UI → Settings → Payment Methods → BTCPay Server**:
 
-**Webhook URL:** `https://yourdomain.com/api/webhooks/paddle`
+| Field | Value |
+|-------|-------|
+| Server URL | `https://pay.foodpanda.site` |
+| API Key | From step 4 above |
+| Store ID | From step 6 above |
+| Webhook Secret | From step 5 above |
+| Test Mode | `true` (testnet) / `false` (mainnet) |
+| Enabled | `true` |
 
----
+Or via `.env` on the API server:
+```env
+BTCPAY_SERVER_URL=https://pay.foodpanda.site
+BTCPAY_API_KEY=your-api-key
+BTCPAY_STORE_ID=your-store-id
+BTCPAY_WEBHOOK_SECRET=your-webhook-secret
+BTCPAY_TEST_MODE=true
+```
 
-### 2. BTCPay Server (Crypto) — Self-Hosted
-
-BTCPay is self-hosted, meaning **0% fees** — you only pay blockchain network fees (paid by customer).
-
-#### Quick Setup (SSH Script)
+### Switching to Mainnet (Production)
 
 ```bash
-ssh root@your-vps-ip
-chmod +x setup-btcpay.sh
-
-# Development (fake BTC):
-./setup-btcpay.sh pay.yourdomain.com testnet
-
-# Production (real BTC):
-./setup-btcpay.sh pay.yourdomain.com mainnet
-
-# Local testing (instant blocks):
-./setup-btcpay.sh pay.yourdomain.com regtest
-```
-
-#### Manual Setup
-
-```bash
-# SSH into your VPS (minimum: 1 CPU, 2GB RAM, 80GB SSD for Bitcoin node)
-curl -fsSL https://get.docker.com | sh
-git clone https://github.com/btcpayserver/btcpayserver-docker
-cd btcpayserver-docker
-
-export BTCPAY_HOST="pay.yourdomain.com"
-export NBITCOIN_NETWORK="mainnet"        # or testnet/regtest
-export BTCPAYGEN_CRYPTO1="btc"
-export BTCPAYGEN_LIGHTNING="clightning"  # Optional: Lightning Network
-export BTCPAYGEN_REVERSEPROXY="nginx"
-export BTCPAY_ENABLE_SSH=true
-
+sudo su -
+source /etc/profile.d/btcpay-env.sh
+export NBITCOIN_NETWORK=mainnet
+export BTCPAYGEN_LIGHTNING=clightning  # optional
+cd /opt/btcpayserver-docker
 . ./btcpay-setup.sh -i
-
-# Point DNS: A record → pay.yourdomain.com → VPS IP
-# SSL auto-configured via Let's Encrypt
+# Then fix port:
+sed -i 's/${NOREVERSEPROXY_HTTP_PORT:-80}:49392/49392:49392/' Generated/docker-compose.generated.yml
+docker compose -f Generated/docker-compose.generated.yml up -d btcpayserver
 ```
 
-#### Configure BTCPay Dashboard
+> ⚠️ **Mainnet requires ~80GB SSD for full Bitcoin blockchain sync (takes 1-3 days)**
 
-```
-1. Open https://pay.yourdomain.com → create admin account
-2. Create Store → Name: "Your Platform Name"
-3. Connect Bitcoin wallet (create new or import xpub)
-4. Create API Key:
-   Account → API Keys → Generate
-   Permissions: btcpay.store.cancreateinvoice, btcpay.store.canviewinvoices
-5. Create Webhook:
-   Store → Settings → Webhooks → Create
-   URL: https://yourplatform.com/api/webhooks/btcpay
-   Secret: generate with `openssl rand -hex 32`
-   Events: InvoiceSettled, InvoiceExpired, InvoiceReceivedPayment, InvoicePaymentSettled
-6. Copy Store ID: Store → Settings → General → Store ID
-```
+### Useful Commands
 
-#### Admin UI Configuration
+```bash
+# BTCPay status
+cd /opt/btcpayserver-docker && docker compose ps
 
-```
-Admin → Settings → Payment Methods → BTCPay Server:
-  ✅ Enabled: ON
-  📝 Server URL: https://pay.yourdomain.com
-  📝 API Key: (from step 4)
-  📝 Store ID: (from step 6)
-  📝 Webhook Secret: (from step 5)
-  ✅ Test Mode: ON/OFF
+# BTCPay logs
+docker logs -f generated_btcpayserver_1
+
+# Bitcoin node status
+docker logs btcpayserver_bitcoind --tail 20
+
+# Restart BTCPay
+docker restart generated_btcpayserver_1
+
+# Update BTCPay
+cd /opt/btcpayserver-docker && btcpay-update.sh
+
+# Test connection from API server
+curl -s https://pay.foodpanda.site/api/v1/health
 ```
 
-#### BTCPay Network Fees (Paid by Customer)
-
-| Network | Fee | Speed |
-|---------|-----|-------|
-| Lightning | ~$0.01 | Instant |
-| On-chain BTC | ~$0.50-$2 | 10-60 min |
-| Litecoin | ~$0.01 | 2.5 min |
-
-> Network fee is passed to the customer via BTCPay's `spreadNetworkFee` setting.
+### Testnet Faucets (get free test BTC)
+- https://coinfaucet.eu/en/btc-testnet/
+- https://testnet-faucet.com/btc-testnet/
 
 ---
 
-### 3. Local/Manual Methods
+## Paddle Setup
 
-Configure in **Admin → Settings → Payment Methods**:
+### Environment Variables
+```env
+PADDLE_API_KEY=your-paddle-api-key
+PADDLE_WEBHOOK_SECRET=your-webhook-secret
+PADDLE_ENVIRONMENT=sandbox  # or production
+```
 
-- **JazzCash / EasyPaisa** — Toggle ON/OFF
-- **Manual Bank Transfer** — Add bank accounts (name, IBAN, etc.)
-- **Manual Crypto** — Add wallet addresses (USDT, USDC, BTC, etc.)
+### Webhook URL
+`https://foodpanda.site/api/webhooks/paddle`
 
 ---
 
-## Admin Settings (UI)
+## JazzCash & EasyPaisa Setup
 
-All payment configuration is done from **Admin → Settings → Payment Configuration**:
+### Environment Variables
+```env
+JAZZCASH_MERCHANT_ID=your-merchant-id
+JAZZCASH_PASSWORD=your-password
+JAZZCASH_INTEGRITY_SALT=your-salt
+JAZZCASH_ENVIRONMENT=sandbox  # or production
 
+EASYPAISA_STORE_ID=your-store-id
+EASYPAISA_TOKEN=your-token
+EASYPAISA_ENVIRONMENT=sandbox  # or production
 ```
-Payment Methods:
-  ├── Paddle (Card/PayPal) — PRIMARY
-  │   ├── Enabled: ON/OFF
-  │   ├── Test Mode: ON/OFF (sandbox vs live)
-  │   ├── Sandbox Credentials (Seller ID, API Key, Client Token, Webhook Secret)
-  │   ├── Live Credentials (same 4 fields)
-  │   ├── Processing Fee %: 5 (passed to customer)
-  │   └── Crypto Discount %: 3 (incentive for BTCPay payments)
-  │
-  ├── BTCPay Server (Crypto)
-  │   ├── Enabled: ON/OFF
-  │   ├── Server URL, API Key, Store ID, Webhook Secret
-  │   └── Test Mode: ON/OFF (testnet vs mainnet)
-  │
-  ├── JazzCash / EasyPaisa: ON/OFF
-  │
-  ├── Manual Bank Transfer
-  │   ├── Enabled: ON/OFF
-  │   └── Bank Accounts: [add/remove]
-  │
-  └── Manual Crypto
-      ├── Enabled: ON/OFF
-      └── Wallets: [add/remove]
-```
+
+### Webhook URLs
+- JazzCash: `https://foodpanda.site/api/webhooks/jazzcash`
+- EasyPaisa: `https://foodpanda.site/api/webhooks/easypaisa`
 
 ---
 
-## Webhook URLs
+## Troubleshooting
 
-Set these in the respective dashboards:
-
-| Gateway | Webhook URL | Where to Set |
-|---------|-------------|--------------|
-| **Paddle** | `https://yourdomain.com/api/webhooks/paddle` | Paddle Dashboard → Notifications → Webhooks |
-| **BTCPay** | `https://yourdomain.com/api/webhooks/btcpay` | BTCPay Dashboard → Store → Webhooks |
-
-> For local development, use [ngrok](https://ngrok.com) to expose your localhost:
-> ```bash
-> ngrok http 5000
-> # Use the https://xxx.ngrok.io URL as your webhook base
-> ```
-
----
-
-## Switching from Test to Production
-
-### Paddle
-```
-1. ☐ Complete identity verification (Onfido — CNIC + video selfie)
-2. ☐ Create live account at vendors.paddle.com
-3. ☐ Create same products/prices with live Price IDs
-4. ☐ Enter live credentials in Admin → Settings → Paddle
-5. ☐ Enter live Price IDs in Admin → Plans
-6. ☐ Set Paddle Webhook URL to production domain
-7. ☐ Admin → Settings → Paddle → Test Mode: OFF
-8. ☐ Test with a small real payment
+### BTCPay container won't start
+```bash
+# Check for port conflicts
+sudo lsof -i :49392
+# Remove stale container
+docker rm -f generated_btcpayserver_1
+# Recreate
+cd /opt/btcpayserver-docker
+docker compose -f Generated/docker-compose.generated.yml up -d btcpayserver
 ```
 
-### BTCPay
-```
-1. ☐ Reconfigure BTCPay with NBITCOIN_NETWORK="mainnet"
-2. ☐ Connect a real Bitcoin wallet (mainnet)
-3. ☐ Update webhook URL to production domain
-4. ☐ Admin → Settings → BTCPay → Test Mode: OFF
-5. ☐ Send a small real BTC payment to test
+### Bitcoin node not syncing
+```bash
+docker logs btcpayserver_bitcoind --tail 50
+# Testnet sync takes ~1-2 hours, mainnet takes 1-3 days
 ```
 
----
-
-## Fee Comparison
-
-| Method | Transaction Fee | Monthly Cost | Withdrawal |
-|--------|----------------|--------------|------------|
-| **Paddle** | 5% + $0.50 | $0 | Payoneer → Bank |
-| **BTCPay** | 0% | $0 (self-hosted) | Exchange → Bank |
-| JazzCash | ~2% | $0 | Direct PKR |
-| EasyPaisa | ~2% | $0 | Direct PKR |
-| Manual Bank | 0% | $0 | Already in bank |
-| Manual Crypto | 0% | $0 | Exchange fee only |
-
-> **Processing fee strategy:** 5% is added to the customer price (admin-configurable). Crypto payments get a discount (default 3%) to incentivize the cheaper gateway.
-
----
-
-## File Architecture
-
-### Backend Files
-
-```
-backend/
-├── services/
-│   ├── paddle.js              ← Paddle API client (sandbox/live aware)
-│   ├── btcpay.js              ← BTCPay Server API client
-│   ├── jazzcash.js            ← JazzCash integration
-│   └── easypaisa.js           ← EasyPaisa integration
-├── routes/
-│   ├── billing.js             ← POST /create-paddle-checkout, /paddle-subscription-cancel, etc.
-│   ├── webhooks-paddle.js     ← POST /api/webhooks/paddle (signature verified)
-│   └── webhooks.js            ← POST /api/webhooks/btcpay, /api/webhooks/jazzcash, etc.
-├── models/
-│   ├── Settings.js            ← paddle + btcpay config with testMode
-│   ├── Payment.js             ← paddleTransactionId, btcpayInvoiceId fields
-│   ├── Plan.js                ← paddlePriceIds (sandbox + live, per billing period)
-│   ├── User.js                ← paddleCustomerId, paddleSubscriptionId
-│   └── ManualPayment.js       ← Manual bank + crypto payments
-```
-
-### Frontend Files
-
-```
-frontend/app/
-├── admin/settings/page.tsx    ← Paddle config UI (credentials, test mode, fees)
-├── admin/plans/page.tsx       ← Paddle Price IDs per plan (sandbox + live)
-├── dashboard/billing/page.tsx ← Paddle checkout overlay, payment method selection
-├── layout.tsx                 ← Paddle.js CDN script
-├── terms/page.tsx             ← References Paddle as payment processor
-└── privacy/page.tsx           ← References Paddle as payment processor
-```
-
-### Setup Scripts (SSH)
-
-```
-project root/
-├── setup-btcpay.sh            ← BTCPay Server installer (Docker, testnet/mainnet/regtest)
-└── setup-payments.sh          ← Master script (Paddle + BTCPay guidance)
-```
-
----
-
-## Environment Variables
-
-**No env vars needed for Paddle/BTCPay** — all configuration is done via Admin UI and stored in MongoDB Settings collection.
+### Webhook not receiving events
+1. Check BTCPay dashboard → Store → Webhooks → check delivery log
+2. Verify webhook URL is accessible: `curl https://foodpanda.site/api/webhooks/btcpay`
+3. Check API server logs: `pm2 logs backend --lines 50`

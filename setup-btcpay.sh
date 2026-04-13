@@ -138,13 +138,16 @@ fi
 # Step 3: Configure BTCPay Environment
 # ─────────────────────────────────────────────────────────────
 echo ""
-echo -e "${CYAN}[Step 3/5] Configuring BTCPay Server...${NC}"
+echo -e "${CYAN}[Step 3/7] Configuring BTCPay Server...${NC}"
 
 export BTCPAY_HOST="$BTCPAY_DOMAIN"
 export NBITCOIN_NETWORK="$NETWORK_MODE"
 export BTCPAYGEN_CRYPTO1="btc"
-export BTCPAYGEN_REVERSEPROXY="nginx"
+# Use "none" to avoid port 80 conflict with existing nginx
+export BTCPAYGEN_REVERSEPROXY="none"
 export BTCPAY_ENABLE_SSH=true
+
+BTCPAY_INTERNAL_PORT=49392
 
 # Add Lightning for mainnet (optional but recommended)
 if [ "$NETWORK_MODE" == "mainnet" ]; then
@@ -158,25 +161,90 @@ if [ "$NETWORK_MODE" == "regtest" ]; then
     echo -e "${GREEN}Regtest configurator: enabled${NC}"
 fi
 
-echo -e "${GREEN}Host:    $BTCPAY_HOST${NC}"
-echo -e "${GREEN}Network: $NBITCOIN_NETWORK${NC}"
-echo -e "${GREEN}Crypto:  $BTCPAYGEN_CRYPTO1${NC}"
-echo -e "${GREEN}Proxy:   $BTCPAYGEN_REVERSEPROXY${NC}"
+echo -e "${GREEN}Host:        $BTCPAY_HOST${NC}"
+echo -e "${GREEN}Network:     $NBITCOIN_NETWORK${NC}"
+echo -e "${GREEN}Crypto:      $BTCPAYGEN_CRYPTO1${NC}"
+echo -e "${GREEN}Proxy:       none (uses existing nginx)${NC}"
+echo -e "${GREEN}Internal:    port $BTCPAY_INTERNAL_PORT${NC}"
 
 # ─────────────────────────────────────────────────────────────
 # Step 4: Run BTCPay Setup
 # ─────────────────────────────────────────────────────────────
 echo ""
-echo -e "${CYAN}[Step 4/5] Starting BTCPay Server...${NC}"
+echo -e "${CYAN}[Step 4/7] Starting BTCPay Server...${NC}"
 echo -e "${YELLOW}This may take 5-15 minutes (downloading Docker images)...${NC}"
 
 . ./btcpay-setup.sh -i
 
 # ─────────────────────────────────────────────────────────────
-# Step 5: Generate Webhook Secret
+# Step 5: Fix port mapping (avoid port 80 conflict)
 # ─────────────────────────────────────────────────────────────
 echo ""
-echo -e "${CYAN}[Step 5/5] Generating webhook secret...${NC}"
+echo -e "${CYAN}[Step 5/7] Fixing port mapping...${NC}"
+
+COMPOSE_FILE="$BTCPAY_DIR/Generated/docker-compose.generated.yml"
+
+# Change port 80 → 49392 to avoid conflict with existing nginx
+if grep -q 'NOREVERSEPROXY_HTTP_PORT:-80' "$COMPOSE_FILE"; then
+    sed -i "s/\${NOREVERSEPROXY_HTTP_PORT:-80}:${BTCPAY_INTERNAL_PORT}/${BTCPAY_INTERNAL_PORT}:${BTCPAY_INTERNAL_PORT}/" "$COMPOSE_FILE"
+    echo -e "${GREEN}Port mapping fixed: 80 → $BTCPAY_INTERNAL_PORT${NC}"
+fi
+
+# Remove any stale BTCPay container and recreate
+docker rm -f generated_btcpayserver_1 2>/dev/null || true
+
+# Install docker-compose v2 if needed (old v1.29 has ContainerConfig bug)
+if ! docker compose version &>/dev/null; then
+    echo -e "${YELLOW}Installing Docker Compose v2...${NC}"
+    apt-get install -y docker-compose-v2 2>/dev/null || true
+fi
+
+# Start BTCPay with correct port
+docker compose -f "$COMPOSE_FILE" up -d btcpayserver
+echo -e "${GREEN}BTCPay container started on port $BTCPAY_INTERNAL_PORT${NC}"
+
+# ─────────────────────────────────────────────────────────────
+# Step 6: Configure nginx reverse proxy
+# ─────────────────────────────────────────────────────────────
+echo ""
+echo -e "${CYAN}[Step 6/7] Configuring nginx reverse proxy...${NC}"
+
+cat > /etc/nginx/sites-available/btcpay << NGINXEOF
+server {
+    listen 80;
+    server_name $BTCPAY_DOMAIN;
+
+    location / {
+        proxy_pass http://127.0.0.1:$BTCPAY_INTERNAL_PORT;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+NGINXEOF
+
+ln -sf /etc/nginx/sites-available/btcpay /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
+echo -e "${GREEN}nginx configured for $BTCPAY_DOMAIN → port $BTCPAY_INTERNAL_PORT${NC}"
+
+# ─────────────────────────────────────────────────────────────
+# Step 7: SSL + webhook secret
+# ─────────────────────────────────────────────────────────────
+echo ""
+echo -e "${CYAN}[Step 7/7] Setting up SSL and generating secrets...${NC}"
+
+# SSL via certbot
+if command -v certbot &>/dev/null; then
+    certbot --nginx -d "$BTCPAY_DOMAIN" --non-interactive --agree-tos -m "admin@$(echo $BTCPAY_DOMAIN | cut -d. -f2-)" 2>/dev/null && \
+        echo -e "${GREEN}SSL certificate installed${NC}" || \
+        echo -e "${YELLOW}SSL setup failed — run manually: certbot --nginx -d $BTCPAY_DOMAIN${NC}"
+else
+    echo -e "${YELLOW}certbot not found. Install: apt install certbot python3-certbot-nginx${NC}"
+fi
 
 WEBHOOK_SECRET=$(openssl rand -hex 32)
 
@@ -187,6 +255,7 @@ echo -e "${BLUE}╚════════════════════�
 echo ""
 echo -e "${GREEN}BTCPay URL:${NC}       https://$BTCPAY_DOMAIN"
 echo -e "${GREEN}Network:${NC}          $NETWORK_MODE"
+echo -e "${GREEN}Internal Port:${NC}    $BTCPAY_INTERNAL_PORT"
 echo -e "${GREEN}Webhook Secret:${NC}   $WEBHOOK_SECRET"
 echo ""
 
@@ -237,9 +306,9 @@ fi
 echo ""
 echo -e "${CYAN}═══ USEFUL COMMANDS ═══${NC}"
 echo ""
-echo -e "  ${GREEN}Check status:${NC}     cd $BTCPAY_DIR && docker-compose ps"
-echo -e "  ${GREEN}View logs:${NC}        cd $BTCPAY_DIR && docker-compose logs -f"
-echo -e "  ${GREEN}Restart:${NC}          cd $BTCPAY_DIR && btcpay-restart.sh"
+echo -e "  ${GREEN}Check status:${NC}     cd $BTCPAY_DIR && docker compose ps"
+echo -e "  ${GREEN}View logs:${NC}        docker logs -f generated_btcpayserver_1"
+echo -e "  ${GREEN}Restart:${NC}          docker restart generated_btcpayserver_1"
 echo -e "  ${GREEN}Update:${NC}           cd $BTCPAY_DIR && btcpay-update.sh"
 echo -e "  ${GREEN}Switch network:${NC}   Re-run this script with different mode"
 echo ""
@@ -250,6 +319,7 @@ cat > /opt/btcpay-config.txt << EOF
 # Date: $(date)
 BTCPAY_DOMAIN=$BTCPAY_DOMAIN
 NETWORK_MODE=$NETWORK_MODE
+BTCPAY_INTERNAL_PORT=$BTCPAY_INTERNAL_PORT
 WEBHOOK_SECRET=$WEBHOOK_SECRET
 BTCPAY_DIR=$BTCPAY_DIR
 EOF
