@@ -292,7 +292,7 @@ async function initializeSSHTunnels() {
   const { resolveHost } = require('./utils/serverResolver');
   const { ORACLE_SERVERS } = containerOrchestrator;
 
-  console.log('\n🔒 Initializing SSH tunnels for secure Docker access...');
+  logger.info('🔒 Initializing SSH tunnels for secure Docker access...');
 
   const tunnels = [];
   let nextLocalPort = 2376; // auto-increment for each remote worker
@@ -309,24 +309,24 @@ async function initializeSSHTunnels() {
     const isSameServer = srv.host === ec1Host || (ec1IsLocal && srv.host === resolveHost('EC1'));
 
     if (isSameServer) {
-      console.log(`   Skipping ${key} tunnel (same server as EC1) — using local Docker`);
+      logger.info(`   Skipping ${key} tunnel (same server as EC1) — using local Docker`);
       sshTunnelManager.markAsLocal(key);
       tunnels.push({ server: key, success: true, local: true });
     } else {
       const localPort = nextLocalPort++;
-      console.log(`   Creating ${key} tunnel: localhost:${localPort} → ${srv.host}:2376`);
+      logger.info(`   Creating ${key} tunnel: localhost:${localPort} → ${srv.host}:2376`);
       const result = await sshTunnelManager.createTunnel(key, srv.host, localPort, 2376);
       tunnels.push({ server: key, success: result.success });
-      if (result.success) console.log(`   ✅ ${key} tunnel active`);
-      else console.error(`   ❌ ${key} failed: ${result.error}`);
+      if (result.success) logger.info(`   ✅ ${key} tunnel active`);
+      else logger.error(`   ❌ ${key} failed: ${result.error}`);
     }
   }
 
   const successCount = tunnels.filter(t => t.success).length;
-  console.log(`✅ SSH tunnels: ${successCount}/${tunnels.length} active\n`);
+  logger.info(`✅ SSH tunnels: ${successCount}/${tunnels.length} active`);
 
   if (successCount === 0 && tunnels.length > 0) {
-    console.warn('⚠️  WARNING: No tunnels established! Remote Docker management unavailable.\n');
+    logger.warn('⚠️  WARNING: No tunnels established! Remote Docker management unavailable.');
   }
 }
 
