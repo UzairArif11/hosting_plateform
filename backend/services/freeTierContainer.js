@@ -2,6 +2,7 @@ const docker = require('./docker');
 const logger = require('../utils/logger');
 const { NodeSSH } = require('node-ssh');
 const fs = require('fs');
+const { resolveSSHKey, resolveHost } = require('../utils/serverResolver');
 
 /**
  * Create user's main container with PM2 installed
@@ -30,10 +31,8 @@ async function createUserContainer(user, serverKey, server, resources) {
         // Create container with Node.js and PM2
         logger.info('🐳 [CREATE_CONTAINER] Calling docker.runContainer with node-pm2-alpine:latest');
 
-        // CRITICAL FIX: Build PM2 image on server if it doesn't exist
-        const { NodeSSH } = require('node-ssh');
-        const ssh = new NodeSSH();
         const remoteBuild = require('./remoteBuild');
+        const ssh = new NodeSSH();
 
         try {
             const sshConfig = remoteBuild.getSSHConfig(serverKey, server.host);
@@ -188,9 +187,7 @@ async function deployProjectToUserContainer(user, project, buildPath, containerI
         const ssh = new NodeSSH();
 
         // Get SSH key for server
-        const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
-            : serverKey === 'EC3' ? process.env.SSH_EC3_KEY
-                : process.env.SSH_EC3_KEY;
+        const keyPath = resolveSSHKey(serverKey);
 
         const keyContent = fs.readFileSync(keyPath, 'utf8');
 
@@ -543,9 +540,7 @@ async function stopProjectInUserContainer(project, containerName, host, serverKe
         logger.info(`Stopping PM2 process ${project._id}`, { containerName });
 
         const ssh = new NodeSSH();
-        const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
-            : serverKey === 'EC3' ? process.env.SSH_EC3_KEY
-                : process.env.SSH_EC3_KEY;
+        const keyPath = resolveSSHKey(serverKey);
 
         const keyContent = fs.readFileSync(keyPath, 'utf8');
 
@@ -583,9 +578,7 @@ async function removeProjectFromUserContainer(project, containerName, host, serv
         await stopProjectInUserContainer(project, containerName, host, serverKey);
 
         const ssh = new NodeSSH();
-        const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
-            : serverKey === 'EC3' ? process.env.SSH_EC3_KEY
-                : process.env.SSH_EC3_KEY;
+        const keyPath = resolveSSHKey(serverKey);
 
         const keyContent = fs.readFileSync(keyPath, 'utf8');
 
@@ -616,9 +609,7 @@ async function removeProjectFromUserContainer(project, containerName, host, serv
 async function listProjectsInUserContainer(containerName, host, serverKey) {
     try {
         const ssh = new NodeSSH();
-        const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
-            : serverKey === 'EC3' ? process.env.SSH_EC3_KEY
-                : process.env.SSH_EC3_KEY;
+        const keyPath = resolveSSHKey(serverKey);
 
         const keyContent = fs.readFileSync(keyPath, 'utf8');
 
@@ -662,16 +653,16 @@ async function removeUserContainer(user) {
         if (user.assignedServer) {
             serversToTry.push(user.assignedServer);
         } else {
-            // If server metadata is missing, try all known servers
-            serversToTry = ['EC2', 'EC3'];
+            // If server metadata is missing, try all known worker servers
+            const { ORACLE_SERVERS } = require('./containerOrchestrator');
+            serversToTry = Object.keys(ORACLE_SERVERS).filter(k => ORACLE_SERVERS[k].type !== 'api_main');
         }
 
         let removed = false;
 
         for (const serverKey of serversToTry) {
             const containerName = user.containerName || `${serverKey}-user-${userId}`;
-            // Correct ENV keys and fallbacks for this specific environment (EC3 is on 129.154.255.90)
-            const host = process.env[`${serverKey}_SERVER_IP`] || (serverKey === 'EC3' ? '129.154.255.90' : '129.154.255.90');
+            const host = resolveHost(serverKey);
 
             try {
                 logger.info(`[REMOVE_CONTAINER] Checking for ${containerName} on ${serverKey} (${host})...`);
@@ -715,14 +706,15 @@ async function suspendUserContainer(user) {
         if (user.assignedServer) {
             serversToTry.push(user.assignedServer);
         } else {
-            serversToTry = ['EC2', 'EC3'];
+            const { ORACLE_SERVERS } = require('./containerOrchestrator');
+            serversToTry = Object.keys(ORACLE_SERVERS).filter(k => ORACLE_SERVERS[k].type !== 'api_main');
         }
 
         let suspended = false;
 
         for (const serverKey of serversToTry) {
             const containerName = user.containerName || `${serverKey}-user-${userId}`;
-            const host = process.env[`${serverKey}_SERVER_IP`] || (serverKey === 'EC3' ? '129.154.255.90' : '129.154.255.90');
+            const host = resolveHost(serverKey);
 
             try {
                 logger.info(`[SUSPEND] Stopping container ${containerName} on ${serverKey} (${host})...`);
@@ -767,14 +759,15 @@ async function reactivateUserContainer(user) {
         if (user.assignedServer) {
             serversToTry.push(user.assignedServer);
         } else {
-            serversToTry = ['EC2', 'EC3'];
+            const { ORACLE_SERVERS } = require('./containerOrchestrator');
+            serversToTry = Object.keys(ORACLE_SERVERS).filter(k => ORACLE_SERVERS[k].type !== 'api_main');
         }
 
         let reactivated = false;
 
         for (const serverKey of serversToTry) {
             const containerName = user.containerName || `${serverKey}-user-${userId}`;
-            const host = process.env[`${serverKey}_SERVER_IP`] || (serverKey === 'EC3' ? '129.154.255.90' : '129.154.255.90');
+            const host = resolveHost(serverKey);
 
             try {
                 logger.info(`[REACTIVATE] Starting container ${containerName} on ${serverKey} (${host})...`);
@@ -787,9 +780,7 @@ async function reactivateUserContainer(user) {
 
                     // Restart all PM2 processes inside the container
                     const ssh = new NodeSSH();
-                    const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
-                        : serverKey === 'EC3' ? process.env.SSH_EC3_KEY
-                            : process.env.SSH_EC3_KEY;
+                    const keyPath = resolveSSHKey(serverKey);
                     const keyContent = fs.readFileSync(keyPath, 'utf8');
 
                     await ssh.connect({

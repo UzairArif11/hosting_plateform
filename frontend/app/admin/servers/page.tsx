@@ -20,11 +20,33 @@ interface ServerCapacity {
 }
 
 interface Server {
+    name?: string;
     domain: string;
     ip: string;
     sshKey: string;
+    type?: string;
+    description?: string;
     status: string;
+    acceptNewUsers: boolean;
+    notes: string;
+    userCount: number;
     capacity?: ServerCapacity;
+}
+
+interface AddServerForm {
+    key: string;
+    name: string;
+    host: string;
+    domain: string;
+    type: string;
+    description: string;
+    totalCPU: number;
+    totalRAM: number;
+    maxContainers: number;
+    sshKey: string;
+    sshKeyEnvVar: string;
+    acceptNewUsers: boolean;
+    notes: string;
 }
 
 interface DNSRecord {
@@ -40,6 +62,12 @@ interface DNSInstructions {
     records: DNSRecord[];
 }
 
+const defaultAddForm: AddServerForm = {
+    key: '', name: '', host: '', domain: '', type: 'mixed_users', description: '',
+    totalCPU: 4, totalRAM: 24, maxContainers: 200,
+    sshKey: '', sshKeyEnvVar: '', acceptNewUsers: true, notes: ''
+};
+
 export default function ServerManagement() {
     const [servers, setServers] = useState<Record<string, Server>>({});
     const [dnsInstructions, setDnsInstructions] = useState<Record<string, DNSInstructions>>({});
@@ -47,7 +75,7 @@ export default function ServerManagement() {
     const [verifying, setVerifying] = useState<string | null>(null);
     const [verificationResults, setVerificationResults] = useState<Record<string, any>>({});
     
-    // New Feature State
+    // Feature state
     const [healthStatus, setHealthStatus] = useState<Record<string, any>>({});
     const [testingServer, setTestingServer] = useState<string | null>(null);
     const [testLogs, setTestLogs] = useState<Record<string, string[]>>({});
@@ -56,6 +84,13 @@ export default function ServerManagement() {
     const [editingServer, setEditingServer] = useState<string | null>(null);
     const [editForm, setEditForm] = useState({ totalCPU: 4, totalRAM: 24, totalStorage: 200, isActive: true });
     const [saving, setSaving] = useState(false);
+    const [togglingServer, setTogglingServer] = useState<string | null>(null);
+
+    // Add / Delete server
+    const [showAddModal, setShowAddModal] = useState(false);
+    const [addForm, setAddForm] = useState<AddServerForm>(defaultAddForm);
+    const [addingSrv, setAddingSrv] = useState(false);
+    const [deletingServer, setDeletingServer] = useState<string | null>(null);
 
     useEffect(() => {
         fetchServers();
@@ -147,6 +182,64 @@ export default function ServerManagement() {
         }
     };
 
+    const toggleAcceptNewUsers = async (serverKey: string, currentValue: boolean) => {
+        setTogglingServer(serverKey);
+        try {
+            const res = await api.put(`/admin/servers/${serverKey}/toggle`, {
+                acceptNewUsers: !currentValue
+            });
+            if (res.data.success) {
+                toast.success(res.data.message);
+                // Update local state
+                setServers(prev => ({
+                    ...prev,
+                    [serverKey]: { ...prev[serverKey], acceptNewUsers: !currentValue }
+                }));
+            }
+        } catch (error) {
+            toast.error('Failed to toggle server registration');
+        } finally {
+            setTogglingServer(null);
+        }
+    };
+
+    const addServer = async () => {
+        if (!addForm.key || !addForm.host) {
+            toast.error('Server key and IP address are required');
+            return;
+        }
+        setAddingSrv(true);
+        try {
+            await api.post('/admin/servers', addForm);
+            toast.success(`Server ${addForm.key.toUpperCase()} added successfully`);
+            setShowAddModal(false);
+            setAddForm(defaultAddForm);
+            fetchServers();
+        } catch (err: any) {
+            toast.error(err.response?.data?.error || 'Failed to add server');
+        } finally {
+            setAddingSrv(false);
+        }
+    };
+
+    const deleteServer = async (serverKey: string, userCount: number) => {
+        if (userCount > 0) {
+            toast.error(`Cannot delete — ${userCount} user(s) still assigned. Migrate them first.`);
+            return;
+        }
+        if (!confirm(`Delete server ${serverKey}? This cannot be undone.`)) return;
+        setDeletingServer(serverKey);
+        try {
+            await api.delete(`/admin/servers/${serverKey}`);
+            toast.success(`Server ${serverKey} deleted`);
+            fetchServers();
+        } catch (err: any) {
+            toast.error(err.response?.data?.error || 'Failed to delete server');
+        } finally {
+            setDeletingServer(null);
+        }
+    };
+
     const verifyDNS = async (serverKey: string, domain: string) => {
         setVerifying(serverKey);
         try {
@@ -174,10 +267,36 @@ export default function ServerManagement() {
         <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 p-8">
             <div className="max-w-7xl mx-auto">
                 {/* Header */}
-                <div className="mb-8">
-                    <h1 className="text-4xl font-bold text-white mb-2">🖥️ Server Management</h1>
-                    <p className="text-gray-300">Manage deployment servers and DNS configuration</p>
+                <div className="mb-8 flex items-start justify-between">
+                    <div>
+                        <h1 className="text-4xl font-bold text-white mb-2">🖥️ Server Management</h1>
+                        <p className="text-gray-300">Manage deployment servers and DNS configuration</p>
+                    </div>
+                    <button
+                        onClick={() => setShowAddModal(true)}
+                        className="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-lg font-semibold transition flex items-center gap-2"
+                    >
+                        ➕ Add Server
+                    </button>
                 </div>
+
+                {/* Empty State */}
+                {Object.keys(servers).length === 0 && (
+                    <div className="bg-white/5 backdrop-blur-sm border border-dashed border-white/20 rounded-xl p-12 text-center mb-8">
+                        <div className="text-6xl mb-4">🖥️</div>
+                        <h2 className="text-2xl font-bold text-white mb-2">No servers configured yet</h2>
+                        <p className="text-gray-400 mb-6 max-w-lg mx-auto">
+                            Add your first worker server to start deploying containers.
+                            You{"'"}ll need the server{"'"}s IP address, SSH key file path, and resource specs (CPU, RAM).
+                        </p>
+                        <button
+                            onClick={() => setShowAddModal(true)}
+                            className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-semibold transition text-lg"
+                        >
+                            ➕ Add Your First Server
+                        </button>
+                    </div>
+                )}
 
                 {/* Servers List */}
                 <div className="space-y-6">
@@ -194,16 +313,48 @@ export default function ServerManagement() {
                                     <div className="flex items-center space-x-4 text-gray-300">
                                         <span>IP: <strong className="text-white">{server.ip}</strong></span>
                                         <span>SSH: <strong className="text-white">{server.sshKey}</strong></span>
+                                        <span className="bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded-full text-xs font-medium">
+                                            👥 {server.userCount || 0} users
+                                        </span>
                                     </div>
                                 </div>
-                                <span
-                                    className={`px-4 py-2 rounded-full text-sm font-semibold ${server.status === 'active'
-                                        ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-                                        : 'bg-gray-500/20 text-gray-400 border border-gray-500/30'
-                                        }`}
-                                >
-                                    {server.status === 'active' ? '✅ Active' : '⚠️ Inactive'}
-                                </span>
+                                <div className="flex items-center gap-3 flex-wrap">
+                                    {/* Accept New Users Toggle */}
+                                    <button
+                                        onClick={() => toggleAcceptNewUsers(serverKey, server.acceptNewUsers)}
+                                        disabled={togglingServer === serverKey}
+                                        className={`relative inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
+                                            server.acceptNewUsers
+                                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30'
+                                                : 'bg-red-500/20 text-red-400 border border-red-500/40 hover:bg-red-500/30'
+                                        } ${togglingServer === serverKey ? 'opacity-50 cursor-wait' : ''}`}
+                                    >
+                                        {togglingServer === serverKey ? (
+                                            <span className="animate-spin">⏳</span>
+                                        ) : server.acceptNewUsers ? (
+                                            <span>✅ Accepting Users</span>
+                                        ) : (
+                                            <span>🚫 Registration Closed</span>
+                                        )}
+                                    </button>
+                                    <span
+                                        className={`px-4 py-2 rounded-full text-sm font-semibold ${server.status === 'active'
+                                            ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                                            : 'bg-gray-500/20 text-gray-400 border border-gray-500/30'
+                                            }`}
+                                    >
+                                        {server.status === 'active' ? '✅ Active' : '⚠️ Inactive'}
+                                    </span>
+                                    {/* Delete server (only allowed when 0 users) */}
+                                    <button
+                                        onClick={() => deleteServer(serverKey, server.userCount || 0)}
+                                        disabled={deletingServer === serverKey}
+                                        className="px-3 py-2 rounded-lg text-sm font-medium bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition disabled:opacity-50"
+                                        title={server.userCount > 0 ? `Cannot delete — ${server.userCount} user(s) assigned` : 'Delete server'}
+                                    >
+                                        {deletingServer === serverKey ? '⏳' : '🗑️ Delete'}
+                                    </button>
+                                </div>
                             </div>
 
                             {/* DNS Instructions */}
@@ -294,11 +445,15 @@ export default function ServerManagement() {
                                         <h4 className="text-lg font-semibold text-white">📊 Server Capacity</h4>
                                         <div className="flex items-center gap-3">
                                             <span className={`px-2 py-1 rounded text-xs font-medium ${
-                                                server.capacity.serverType === 'shared_users'
+                                                server.capacity.serverType === 'mixed_users' || server.capacity.serverType === 'shared_users'
                                                     ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                                                    : 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                                                    : server.capacity.serverType === 'api_main'
+                                                        ? 'bg-gray-500/20 text-gray-400 border border-gray-500/30'
+                                                        : 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
                                             }`}>
-                                                {server.capacity.serverType === 'shared_users' ? '👥 Shared' : '🔒 Dedicated'}
+                                                {server.capacity.serverType === 'mixed_users' || server.capacity.serverType === 'shared_users'
+                                                    ? '👥 Mixed (Free + Paid)'
+                                                    : server.capacity.serverType === 'api_main' ? '🖥️ API Main' : '🔒 Dedicated Only'}
                                             </span>
                                             <button
                                                 onClick={() => startEdit(serverKey, server)}
@@ -309,54 +464,29 @@ export default function ServerManagement() {
                                         </div>
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                        {/* CPU */}
-                                        <div>
-                                            <div className="flex justify-between text-sm mb-1">
-                                                <span className="text-gray-400">CPU</span>
-                                                <span className="text-white">{server.capacity.allocatedCPU}/{server.capacity.totalCPU} OCPU</span>
-                                            </div>
-                                            <div className="w-full bg-gray-700 rounded-full h-2">
-                                                <div
-                                                    className={`h-2 rounded-full transition-all ${
-                                                        (server.capacity.allocatedCPU / server.capacity.totalCPU) > 0.8 ? 'bg-red-500' :
-                                                        (server.capacity.allocatedCPU / server.capacity.totalCPU) > 0.6 ? 'bg-yellow-500' : 'bg-green-500'
-                                                    }`}
-                                                    style={{ width: `${Math.min(100, (server.capacity.allocatedCPU / server.capacity.totalCPU) * 100)}%` }}
-                                                />
-                                            </div>
-                                        </div>
-                                        {/* RAM */}
-                                        <div>
-                                            <div className="flex justify-between text-sm mb-1">
-                                                <span className="text-gray-400">RAM</span>
-                                                <span className="text-white">{server.capacity.allocatedRAM}/{server.capacity.totalRAM} GB</span>
-                                            </div>
-                                            <div className="w-full bg-gray-700 rounded-full h-2">
-                                                <div
-                                                    className={`h-2 rounded-full transition-all ${
-                                                        (server.capacity.allocatedRAM / server.capacity.totalRAM) > 0.85 ? 'bg-red-500' :
-                                                        (server.capacity.allocatedRAM / server.capacity.totalRAM) > 0.6 ? 'bg-yellow-500' : 'bg-green-500'
-                                                    }`}
-                                                    style={{ width: `${Math.min(100, (server.capacity.allocatedRAM / server.capacity.totalRAM) * 100)}%` }}
-                                                />
-                                            </div>
-                                        </div>
-                                        {/* Storage */}
-                                        <div>
-                                            <div className="flex justify-between text-sm mb-1">
-                                                <span className="text-gray-400">Storage</span>
-                                                <span className="text-white">{server.capacity.allocatedStorage}/{server.capacity.totalStorage} GB</span>
-                                            </div>
-                                            <div className="w-full bg-gray-700 rounded-full h-2">
-                                                <div
-                                                    className={`h-2 rounded-full transition-all ${
-                                                        (server.capacity.allocatedStorage / server.capacity.totalStorage) > 0.9 ? 'bg-red-500' :
-                                                        (server.capacity.allocatedStorage / server.capacity.totalStorage) > 0.7 ? 'bg-yellow-500' : 'bg-green-500'
-                                                    }`}
-                                                    style={{ width: `${Math.min(100, (server.capacity.allocatedStorage / server.capacity.totalStorage) * 100)}%` }}
-                                                />
-                                            </div>
-                                        </div>
+                                        {[
+                                            { label: 'CPU', unit: 'OCPU', allocated: server.capacity.allocatedCPU, total: server.capacity.totalCPU, warnAt: 0.6, critAt: 0.8 },
+                                            { label: 'RAM', unit: 'GB',   allocated: server.capacity.allocatedRAM, total: server.capacity.totalRAM, warnAt: 0.6, critAt: 0.85 },
+                                            { label: 'Storage', unit: 'GB', allocated: server.capacity.allocatedStorage, total: server.capacity.totalStorage, warnAt: 0.7, critAt: 0.9 }
+                                        ].map(({ label, unit, allocated, total, warnAt, critAt }) => {
+                                            const pct = total > 0 ? allocated / total : 0;
+                                            return (
+                                                <div key={label}>
+                                                    <div className="flex justify-between text-sm mb-1">
+                                                        <span className="text-gray-400">{label}</span>
+                                                        <span className="text-white">{allocated}/{total} {unit}</span>
+                                                    </div>
+                                                    <div className="w-full bg-gray-700 rounded-full h-2">
+                                                        <div
+                                                            className={`h-2 rounded-full transition-all ${
+                                                                pct > critAt ? 'bg-red-500' : pct > warnAt ? 'bg-yellow-500' : 'bg-green-500'
+                                                            }`}
+                                                            style={{ width: `${Math.min(100, pct * 100)}%` }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                     <div className="flex items-center gap-6 mt-3 text-sm text-gray-400">
                                         <span>Max Containers: <strong className="text-white">{server.capacity.maxContainers}</strong></span>
@@ -533,6 +663,146 @@ export default function ServerManagement() {
                 <div className="mt-12">
                     <InfraScanner />
                 </div>
+
+                {/* Add Server Modal */}
+                {showAddModal && (
+                    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                        <div className="bg-gray-900 border border-white/20 rounded-xl p-6 w-full max-w-lg max-h-screen overflow-y-auto">
+                            <h3 className="text-2xl font-bold text-white mb-5">➕ Add New Server</h3>
+                            <div className="space-y-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-gray-300 text-sm block mb-1">Server Key *</label>
+                                        <input type="text" placeholder="EC4"
+                                            value={addForm.key}
+                                            onChange={e => setAddForm({...addForm, key: e.target.value.toUpperCase()})}
+                                            className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500 uppercase"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-gray-300 text-sm block mb-1">Name</label>
+                                        <input type="text" placeholder="EC4-Mixed-Server"
+                                            value={addForm.name}
+                                            onChange={e => setAddForm({...addForm, name: e.target.value})}
+                                            className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500"
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-gray-300 text-sm block mb-1">IP Address *</label>
+                                    <input type="text" placeholder="192.168.1.100"
+                                        value={addForm.host}
+                                        onChange={e => setAddForm({...addForm, host: e.target.value})}
+                                        className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-gray-300 text-sm block mb-1">Domain</label>
+                                    <input type="text" placeholder="ec4.foodpanda.site"
+                                        value={addForm.domain}
+                                        onChange={e => setAddForm({...addForm, domain: e.target.value})}
+                                        className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-3 gap-4">
+                                    <div>
+                                        <label className="text-gray-300 text-sm block mb-1">CPU (cores)</label>
+                                        <input type="number" step="0.5" min="1"
+                                            value={addForm.totalCPU}
+                                            onChange={e => setAddForm({...addForm, totalCPU: parseFloat(e.target.value)})}
+                                            className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-gray-300 text-sm block mb-1">RAM (GB)</label>
+                                        <input type="number" min="1"
+                                            value={addForm.totalRAM}
+                                            onChange={e => setAddForm({...addForm, totalRAM: parseInt(e.target.value)})}
+                                            className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-gray-300 text-sm block mb-1">Max Containers</label>
+                                        <input type="number" min="1"
+                                            value={addForm.maxContainers}
+                                            onChange={e => setAddForm({...addForm, maxContainers: parseInt(e.target.value)})}
+                                            className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white"
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-gray-300 text-sm block mb-1">Type</label>
+                                    <select
+                                        value={addForm.type}
+                                        onChange={e => setAddForm({...addForm, type: e.target.value})}
+                                        className="w-full bg-gray-800 border border-white/20 rounded-lg px-3 py-2 text-white"
+                                    >
+                                        <option value="mixed_users">Mixed Users (Free + Paid)</option>
+                                        <option value="dedicated_only">Dedicated Only (Paid)</option>
+                                        <option value="api_main">API Main (no containers)</option>
+                                    </select>
+                                </div>
+                                <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-3">
+                                    <h4 className="text-white font-medium text-sm flex items-center gap-2">🔑 SSH Access</h4>
+                                    <div>
+                                        <label className="text-gray-300 text-xs block mb-1">SSH Private Key File Path (on API server)</label>
+                                        <input type="text" placeholder="/home/ubuntu/.ssh/id_rsa_ec4"
+                                            value={addForm.sshKey}
+                                            onChange={e => setAddForm({...addForm, sshKey: e.target.value})}
+                                            className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500 text-sm"
+                                        />
+                                        <p className="text-gray-500 text-xs mt-1">Absolute path to the private key file on the machine running this API</p>
+                                    </div>
+                                    <div>
+                                        <label className="text-gray-300 text-xs block mb-1">OR Env Variable Name (optional)</label>
+                                        <input type="text" placeholder="SSH_EC4_KEY"
+                                            value={addForm.sshKeyEnvVar}
+                                            onChange={e => setAddForm({...addForm, sshKeyEnvVar: e.target.value})}
+                                            className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500 text-sm"
+                                        />
+                                        <p className="text-gray-500 text-xs mt-1">If set, the system reads the key path from this env var instead</p>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-gray-300 text-sm block mb-1">Description</label>
+                                    <input type="text"
+                                        value={addForm.description}
+                                        onChange={e => setAddForm({...addForm, description: e.target.value})}
+                                        className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white"
+                                    />
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <label className="text-gray-300 text-sm">Accept New Users</label>
+                                    <button
+                                        onClick={() => setAddForm({...addForm, acceptNewUsers: !addForm.acceptNewUsers})}
+                                        className={`px-4 py-1 rounded-full text-sm font-medium transition ${
+                                            addForm.acceptNewUsers
+                                                ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                                                : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                                        }`}
+                                    >
+                                        {addForm.acceptNewUsers ? '✅ Yes' : '🚫 No'}
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="flex gap-3 mt-6">
+                                <button
+                                    onClick={() => { setShowAddModal(false); setAddForm(defaultAddForm); }}
+                                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={addServer}
+                                    disabled={addingSrv}
+                                    className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg transition"
+                                >
+                                    {addingSrv ? '⏳ Adding...' : '➕ Add Server'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Help Section */}
                 <div className="mt-8 bg-blue-500/10 border border-blue-500/30 rounded-lg p-6">

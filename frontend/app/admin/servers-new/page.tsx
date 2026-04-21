@@ -101,7 +101,7 @@ export default function ServersPage() {
     const [dockerStats, setDockerStats] = useState<Record<string, DockerStats>>({});
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState<string | null>(null);
-    const [selectedServer, setSelectedServer] = useState<string>('EC3');
+    const [selectedServer, setSelectedServer] = useState<string>('');
     const [showDockerStats, setShowDockerStats] = useState(false);
 
     // Initial load

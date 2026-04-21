@@ -327,6 +327,8 @@ const sanitizeInput = (req, res, next) => {
         .replace(/javascript:/gi, '') // Remove javascript: protocol
         .replace(/on\w+\s*=/gi, '') // Remove event handlers
         .trim();
+    } else if (Array.isArray(value)) {
+      return value.map(item => sanitizeValue(item));
     } else if (typeof value === 'object' && value !== null) {
       const sanitized = {};
       for (const key in value) {

@@ -4,6 +4,7 @@ const Project = require('../models/Project');
 const docker = require('./docker');
 const logger = require('../utils/logger');
 const notify = require('./notificationService');
+const { resolveHost } = require('../utils/serverResolver');
 
 /**
  * Account Lifecycle Management Service
@@ -555,12 +556,9 @@ async function deleteUserResources(userId) {
  */
 async function stopContainer(containerName, serverKey) {
     try {
-        const server = {
-            host: process.env[`${serverKey}_SERVER_IP`],
-            key: serverKey
-        };
+        const host = resolveHost(serverKey);
 
-        const dockerClient = await docker.getDockerClient(server);
+        const dockerClient = docker.getDockerClient(host);
         const container = dockerClient.getContainer(containerName);
 
         await container.stop();
@@ -581,12 +579,9 @@ async function stopContainer(containerName, serverKey) {
  */
 async function restartContainer(containerName, serverKey) {
     try {
-        const server = {
-            host: process.env[`${serverKey}_SERVER_IP`],
-            key: serverKey
-        };
+        const host = resolveHost(serverKey);
 
-        const dockerClient = await docker.getDockerClient(server);
+        const dockerClient = docker.getDockerClient(host);
         const container = dockerClient.getContainer(containerName);
 
         await container.restart();
@@ -603,12 +598,9 @@ async function restartContainer(containerName, serverKey) {
  */
 async function stopAndRemoveContainer(containerName, serverKey) {
     try {
-        const server = {
-            host: process.env[`${serverKey}_SERVER_IP`],
-            key: serverKey
-        };
+        const host = resolveHost(serverKey);
 
-        const dockerClient = await docker.getDockerClient(server);
+        const dockerClient = docker.getDockerClient(host);
         const container = dockerClient.getContainer(containerName);
 
         // Stop container

@@ -10,15 +10,11 @@ const nodemailer = require('nodemailer');
 const logger = require('../utils/logger');
 const Server = require('../models/Server');
 const { ORACLE_SERVERS } = require('./containerOrchestrator');
+const { resolveSSHKey, resolveHost } = require('../utils/serverResolver');
 
 let enforcementInterval = null;
 const lastEmailSent = new Map(); // Key: userId-type, Value: timestamp
 
-// Helper: Get key path dynamically from env
-const getKeyPath = (serverKey) => {
-    // Expects naming convention: SSH_EC2_KEY, SSH_EC4_KEY
-    return process.env[`SSH_${serverKey}_KEY`];
-};
 
 // Start Enforcement Loop
 const startEnforcement = () => {
@@ -62,24 +58,13 @@ const checkUserResources = async (user) => {
 
         const { assignedServer: serverKey, containerName } = user;
 
-        // Resolve Server Host (DB First -> Static Fallback)
-        let host;
-        const serverDoc = await Server.findOne({ key: serverKey });
-        if (serverDoc) {
-            host = serverDoc.host;
-        } else if (ORACLE_SERVERS[serverKey]) {
-            host = ORACLE_SERVERS[serverKey].host;
-        }
-
-        if (!host) {
-            logger.warn(`Server ${serverKey} not found for user enforcement.`);
-            return;
-        }
+        // Resolve Server Host (dynamic — DB-backed cache → env fallback)
+        const host = resolveHost(serverKey);
 
         // Connect
-        const keyPath = getKeyPath(serverKey);
+        const keyPath = resolveSSHKey(serverKey);
         if (!keyPath) {
-            logger.warn(`SSH Key not defined for ${serverKey} (Expected env: SSH_${serverKey}_KEY)`);
+            logger.warn(`SSH Key not found for ${serverKey}`);
             return;
         }
 
@@ -245,10 +230,11 @@ const killProcess = async (ssh, containerName, proc, user, type, used, limit) =>
         const project = await Project.findById(projectId);
         if (project) {
             projectDetails = `Project: ${project.name}`;
-            // Find active deployment and mark failed
-            await Deployment.updateMany(
+            // Mark only the latest active deployment as stopped (not all of them)
+            await Deployment.findOneAndUpdate(
                 { projectId: project._id, status: 'success' },
-                { status: 'failed' } // Logic simplified
+                { status: 'failed', failureReason: `${type} resource limit exceeded` },
+                { sort: { createdAt: -1 } } // Only the most recent
             );
         }
     } catch (e) { }

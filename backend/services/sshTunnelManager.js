@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const net = require('net');
 const logger = require('../utils/logger');
+const { resolveSSHKey } = require('../utils/serverResolver');
 
 /**
  * SSH Tunnel Manager for Secure Docker API Access
@@ -82,13 +83,9 @@ class SSHTunnelManager {
             // Close any of our own stale servers on this port (safe — no fuser/kill!)
             await this.freePort(localPort);
 
-            // Get SSH key path from environment
-            const keyPath = serverKey === 'EC2'
-                ? process.env.SSH_EC2_KEY
-                : process.env.SSH_EC3_KEY;
-
+            const keyPath = resolveSSHKey(serverKey);
             if (!keyPath) {
-                throw new Error(`SSH key path not configured for ${serverKey}. Set SSH_${serverKey}_KEY in .env`);
+                throw new Error(`SSH key not configured for ${serverKey}. Set it via Admin Panel → Servers.`);
             }
 
             if (!fs.existsSync(keyPath)) {
@@ -315,8 +312,11 @@ class SSHTunnelManager {
 
             logger.info(`[SSH Tunnel] Attempting to reconnect ${serverKey} (attempt ${attempts + 1}/${this.maxReconnectAttempts})...`);
 
-            // Use the ORIGINAL configured port (not dynamic), let createTunnel handle fallback
-            const reconnectPort = serverKey === 'EC2' ? 2376 : 2377;
+            // Use the port this tunnel was originally on (passed as parameter), fall back to index-based
+            const { ORACLE_SERVERS } = require('./containerOrchestrator');
+            const workerKeys = Object.keys(ORACLE_SERVERS).filter(k => ORACLE_SERVERS[k].type !== 'api_main');
+            const serverIndex = workerKeys.indexOf(serverKey);
+            const reconnectPort = localPort || (2376 + Math.max(0, serverIndex));
 
             setTimeout(async () => {
                 const result = await this.createTunnel(serverKey, remoteHost, reconnectPort, remotePort);

@@ -6,6 +6,7 @@ const execAsync = promisify(exec);
 const logger = require('../utils/logger');
 const fsPromises = require('fs').promises;
 const fs = require('fs');
+const { resolveSSHKey } = require('../utils/serverResolver');
 
 /**
  * Copy build files to remote server and build Docker image there
@@ -122,9 +123,7 @@ function getSSHConfig(serverKey, serverHost) {
         logger.info(`Using password authentication for ${serverKey}`);
     } else {
         // Key-based authentication
-        const keyPath = serverKey === 'EC2'
-            ? process.env.SSH_EC2_KEY
-            : process.env.SSH_EC3_KEY;
+        const keyPath = resolveSSHKey(serverKey);
 
         if (!keyPath) {
             throw new Error(`SSH key not configured for ${serverKey}`);

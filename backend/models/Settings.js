@@ -28,6 +28,18 @@ const settingsSchema = new mongoose.Schema({
         }
     },
 
+    // Server Registration Control (Admin toggle per server)
+    serverConfig: {
+        EC2: {
+            acceptNewUsers: { type: Boolean, default: true },
+            notes: { type: String, default: '' }
+        },
+        EC3: {
+            acceptNewUsers: { type: Boolean, default: true },
+            notes: { type: String, default: '' }
+        }
+    },
+
     // SSL Configuration
     sslEmail: {
         type: String,

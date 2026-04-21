@@ -6,6 +6,7 @@ const githubService = require('../services/github');
 const logger = require('../utils/logger');
 const { requireProjectAccess, requireResourceCapacity } = require('../middleware/auth');
 const notify = require('../services/notificationService');
+const { resolveHost } = require('../utils/serverResolver');
 
 const router = express.Router();
 
@@ -529,8 +530,7 @@ router.delete('/:id', requireProjectAccess('admin'), async (req, res) => {
       if (deployment.deploymentUrl && deployment.serverKey) {
         try {
           const serverKey = deployment.serverKey; // 'EC2', 'EC3', etc.
-          const serverHost = process.env[`${serverKey}_SERVER_IP`] ||
-            (serverKey === 'EC2' ? process.env.EC2_SERVER_IP : process.env.EC3_SERVER_IP);
+          const serverHost = resolveHost(serverKey);
 
           if (serverHost) {
             await nginxRouter.removeNginxRouting(
@@ -650,7 +650,7 @@ router.post('/:id/domains', requireProjectAccess('admin'), async (req, res) => {
     );
 
     // Check domain limit if configured
-    const maxDomains = domainsFeature.config?.maxCustomDomains || 10;
+    const maxDomains = domainsFeature?.config?.maxCustomDomains || 10;
     const customDomainCount = project.domains.filter(d => d.isCustom).length;
 
     if (customDomainCount >= maxDomains) {
@@ -675,6 +675,7 @@ router.post('/:id/domains', requireProjectAccess('admin'), async (req, res) => {
       project.domains.forEach(d => d.isPrimary = false);
     }
 
+    const domainVerification = require('../services/domainVerification');
     project.domains.push({
       domain,
       isCustom: true,
@@ -714,6 +715,7 @@ router.post('/:id/domains/:domainId/verify', requireProjectAccess('admin'), asyn
     }
 
     // Perform DNS Verification
+    const domainVerification = require('../services/domainVerification');
     const isVerified = await domainVerification.verifyDnsRecord(
       domainEntry.domain,
       domainEntry.verificationToken
@@ -739,23 +741,15 @@ router.post('/:id/domains/:domainId/verify', requireProjectAccess('admin'), asyn
       // If we are dealing with external IP pointing, we might also check A record
       // But for now, if TXT matches, we enable routing.
 
-      const serverKey = project.activeContainer?.serverKey || 'EC2';
-      const serverHost = process.env[`${serverKey}_SERVER_IP`] || process.env.EC2_SERVER_IP;
+      const serverKey = project.activeContainer?.serverKey || req.user?.assignedServer;
+      const serverHost = resolveHost(serverKey);
 
       if (serverHost) {
         try {
+          const Deployment = require('../models/Deployment');
+          const nginxRouter = require('../services/nginxRouter');
           const deployment = await Deployment.findOne({ projectId: project._id, status: 'active' });
           if (deployment) {
-            // Optimization: Only update if there is an active deployment to route to
-            // But strictly speaking, the nginxRouter handles the "current active" logic usually,
-            // or we might need to manually trigger a re-route.
-            // Ideally nginxRouter.addNginxRouting handles adding ALL domains for a deployment.
-            // We'll call a re-apply or just add this specific domain.
-
-            // Since nginxRouter typically takes a deploymentId, we might need to update the existing routing
-            // For now, let's assume we trigger an update or just mark verified. 
-            // The Nginx router usually iterates over all domains in the project.
-
             await nginxRouter.addNginxRouting(
               deployment._id,
               project.activeContainer.name,

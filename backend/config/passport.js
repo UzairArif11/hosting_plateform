@@ -203,7 +203,8 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
 
                     done(null, user);
                 } catch (error) {
-                    console.error('❌ Google OAuth Error:', error.message);
+                    const logger = require('../utils/logger');
+                    logger.error('❌ Google OAuth Error:', error.message);
                     done(error, null);
                 }
             }

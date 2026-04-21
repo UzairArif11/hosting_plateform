@@ -7,6 +7,7 @@ const Payment = require('../models/Payment');
 const Settings = require('../models/Settings');
 const paddleService = require('../services/paddle');
 const notify = require('../services/notificationService');
+const { resolveHost } = require('../utils/serverResolver');
 
 /**
  * POST /api/webhooks/paddle
@@ -175,9 +176,11 @@ async function handleTransactionCompleted(data) {
     user.isTrialActive = false;
     user.billingPeriod = billingPeriod;
 
-    // Set expiration using calendar months (not 30-day approximation)
+    // Set expiration using calendar months (consistent with other gateways)
     const now = new Date();
-    user.planExpiresAt = new Date(now.getTime() + billingPeriod * 30 * 24 * 60 * 60 * 1000);
+    const expiryDate = new Date(now);
+    expiryDate.setMonth(expiryDate.getMonth() + billingPeriod);
+    user.planExpiresAt = expiryDate;
     user.gracePeriodEndsAt = null;
     user.scheduledDeletionAt = null;
     user.scheduledDowngradeTo = null;
@@ -216,7 +219,7 @@ async function handleTransactionCompleted(data) {
     if (user.containerName && user.assignedServer) {
       try {
         const docker = require('../services/docker');
-        const host = process.env[`${user.assignedServer}_SERVER_IP`] || process.env.EC3_SERVER_IP;
+        const host = resolveHost(user.assignedServer);
         const ramGB = plan.actualResources?.ram || plan.resources?.ram || 0.5;
         const cpu = plan.actualResources?.cpu || plan.resources?.cpu || 0.5;
         await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);
@@ -326,7 +329,7 @@ async function handleSubscriptionUpdated(data) {
           if (user.containerName && user.assignedServer) {
             try {
               const docker = require('../services/docker');
-              const host = process.env[`${user.assignedServer}_SERVER_IP`] || process.env.EC3_SERVER_IP;
+              const host = resolveHost(user.assignedServer);
               const ramGB = plan.actualResources?.ram || plan.resources?.ram || 0.5;
               const cpu = plan.actualResources?.cpu || plan.resources?.cpu || 0.5;
               await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);
@@ -425,11 +428,13 @@ async function handleSubscriptionPaused(data) {
     const user = await User.findOne({ paddleSubscriptionId: subscriptionId });
     if (!user) return;
 
-    user.subscriptionStatus = 'cancelled'; // treat paused as cancelled
-    user.status = 'suspended';
+    // Mark subscription as cancelled but DON'T immediately suspend.
+    // The user may still have prepaid time remaining (planExpiresAt).
+    // The subscriptionCron will handle actual suspension after expiry.
+    user.subscriptionStatus = 'cancelled';
     await user.save();
 
-    logger.info('Paddle subscription paused', { userId: user._id, subscriptionId });
+    logger.info('Paddle subscription paused (will suspend at period end)', { userId: user._id, subscriptionId, accessUntil: user.planExpiresAt });
   } catch (error) {
     logger.error('Paddle handleSubscriptionPaused error:', error.message);
   }

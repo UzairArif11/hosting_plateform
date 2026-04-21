@@ -7,90 +7,131 @@ const Settings = require('../models/Settings');
 // NEW SYSTEM: Free users get SHARED containers, Paid users get DEDICATED containers
 // Both shared and dedicated containers can be allocated on EC2 or EC3 (load balanced)
 
-// Shared Resource Caps - 10% per user to prevent resource monopolization
-const SHARED_RESOURCE_CAPS = {
-  EC2: {
-    totalCPU: 2.0,        // 2 CPU cores total
-    totalRAM: 12288,      // 12GB in MB
-    maxUsers: 150,
-    perUserCap: {
-      cpu: 0.2,           // 10% of total CPU
-      ram: 1228,          // 10% of total RAM (MB)
-      storage: 2,
-      bandwidth: 100
-    },
-    perUserMin: {
-      cpu: 0.013,         // Guaranteed minimum
-      ram: 81,            // Guaranteed minimum (MB)
-      storage: 1,
-      bandwidth: 10
-    }
-  },
-  EC3: {
-    totalCPU: 3.0,        // 3 CPU cores total
-    totalRAM: 18432,      // 18GB in MB
-    maxUsers: 200,
-    perUserCap: {
-      cpu: 0.3,           // 10% of total CPU
-      ram: 1843,          // 10% of total RAM (MB)
-      storage: 2,
-      bandwidth: 100
-    },
-    perUserMin: {
-      cpu: 0.015,         // Guaranteed minimum
-      ram: 92,            // Guaranteed minimum (MB)
-      storage: 1,
-      bandwidth: 10
-    }
-  }
-};
+// Shared Resource Caps — dynamically computed from ORACLE_SERVERS (DB-backed).
+// 10% per user to prevent resource monopolization.
+// Falls back to sensible defaults if server config is incomplete.
+const SHARED_RESOURCE_CAPS = {};
 
-const ORACLE_SERVERS = {
-  EC1: {
-    name: 'EC1-API-Main',
-    host: process.env.EC1_SERVER_IP,
-    type: 'api_main',
-    description: 'Main API server - handles all backend requests, admin panel, frontend hosting'
-  },
-  EC2: {
-    name: 'EC2-Mixed-Server',
-    host: process.env.EC2_SERVER_IP,
-    totalCPU: parseFloat(process.env.EC2_TOTAL_CPU) || 4,
-    totalRAM: parseInt(process.env.EC2_TOTAL_RAM) || 24,
-    maxContainers: parseInt(process.env.EC2_MAX_CONTAINERS) || 200,
-    type: 'mixed_users',
-    description: 'Handles both FREE users (shared containers) and PAID users (dedicated containers)',
-    sharedPool: {
-      maxUsers: 150,        // Max users in shared container
-      cpuLimit: 2,          // CPU reserved for shared users
-      ramLimit: 12          // RAM reserved for shared users (GB)
-    },
-    dedicatedPool: {
-      maxUsers: 50,         // Max dedicated containers
-      cpuLimit: 2,          // CPU for dedicated users
-      ramLimit: 12          // RAM for dedicated users (GB)
-    }
-  },
-  EC3: {
-    name: 'EC3-Mixed-Server',
-    host: process.env.EC3_SERVER_IP,
-    totalCPU: parseFloat(process.env.EC3_TOTAL_CPU) || 8,
-    totalRAM: parseInt(process.env.EC3_TOTAL_RAM) || 48,
-    maxContainers: parseInt(process.env.EC3_MAX_CONTAINERS) || 300,
-    type: 'mixed_users',
-    description: 'Handles both FREE users (shared containers) and PAID users (dedicated containers)',
-    sharedPool: {
-      maxUsers: 200,        // Max users in shared container
-      cpuLimit: 3,          // CPU reserved for shared users
-      ramLimit: 18          // RAM reserved for shared users (GB)
-    },
-    dedicatedPool: {
-      maxUsers: 100,        // Max dedicated containers
-      cpuLimit: 5,          // CPU for dedicated users
-      ramLimit: 30          // RAM for dedicated users (GB)
-    }
+/**
+ * Rebuild SHARED_RESOURCE_CAPS from the current ORACLE_SERVERS cache.
+ * Called after every refreshServerCache() so caps stay in sync with DB.
+ */
+function rebuildSharedResourceCaps() {
+  // Clear existing keys in-place so existing references stay valid
+  Object.keys(SHARED_RESOURCE_CAPS).forEach(k => delete SHARED_RESOURCE_CAPS[k]);
+
+  for (const [key, srv] of Object.entries(ORACLE_SERVERS)) {
+    // Only worker nodes have shared pools (skip api_main)
+    if (srv.type === 'api_main') continue;
+
+    const pool = srv.sharedPool || {};
+    const totalCPU  = pool.cpuLimit  || 2;
+    const totalRAM  = (pool.ramLimit || 12) * 1024; // GB → MB
+    const maxUsers  = pool.maxUsers  || 150;
+
+    SHARED_RESOURCE_CAPS[key] = {
+      totalCPU,
+      totalRAM,
+      maxUsers,
+      perUserCap: {
+        cpu:       +(totalCPU / 10).toFixed(3),       // 10% of total CPU
+        ram:       Math.round(totalRAM / 10),          // 10% of total RAM (MB)
+        storage:   2,
+        bandwidth: 100
+      },
+      perUserMin: {
+        cpu:       +(totalCPU / maxUsers).toFixed(4),  // Guaranteed minimum
+        ram:       Math.round(totalRAM / maxUsers),    // Guaranteed minimum (MB)
+        storage:   1,
+        bandwidth: 10
+      }
+    };
   }
-};
+}
+
+/**
+ * ORACLE_SERVERS — mutable in-memory cache populated from the Server DB model.
+ *
+ * All existing consumers use this object synchronously (e.g. ORACLE_SERVERS['EC2']).
+ * We mutate the object **in-place** on every cache refresh so that all existing
+ * module-level imports (`const { ORACLE_SERVERS } = require(...)`) see live data
+ * without needing to be converted to async calls.
+ *
+ * The cache is seeded from .env on startup (before the DB is ready) and then
+ * overwritten from MongoDB once the DB is connected.  Admin writes call
+ * refreshServerCache() immediately so changes take effect within the same request.
+ */
+// Starts empty — populated from MongoDB by refreshServerCache() during startup.
+// If the DB has no servers yet (fresh install), the admin adds them from the UI.
+const ORACLE_SERVERS = {};
+
+// Timestamp of last successful DB load
+let _serverCacheTime = 0;
+const SERVER_CACHE_TTL = 60 * 1000; // refresh from DB at most once per minute
+
+/**
+ * Refresh ORACLE_SERVERS in-place from the Server collection.
+ * Safe to call at any time; failures are logged but do not crash the process.
+ */
+async function refreshServerCache() {
+  try {
+    const Server = require('../models/Server');
+    const dbServers = await Server.find({}).lean();
+    // If DB returns nothing (first boot before seeding), keep the .env fallback intact
+    if (!dbServers || dbServers.length === 0) return;
+
+    // Snapshot current keys so we can restore if something goes wrong
+    const snapshot = { ...ORACLE_SERVERS };
+    try {
+      // Clear all current keys then repopulate in-place so existing references stay valid
+      Object.keys(ORACLE_SERVERS).forEach(k => delete ORACLE_SERVERS[k]);
+
+    for (const s of dbServers) {
+      ORACLE_SERVERS[s.key] = {
+        name:          s.name,
+        host:          s.host,
+        domain:        s.domain || '',
+        type:          s.type,
+        description:   s.description || '',
+        isActive:      s.isActive !== false,
+        enabled:       s.enabled !== false,
+        acceptNewUsers: s.acceptNewUsers !== false,
+        notes:         s.notes || '',
+        sshKey:        s.sshKey || '',
+        sshKeyEnvVar:  s.sshKeyEnvVar || '',
+        totalCPU:      s.totalCPU,
+        totalRAM:      s.totalRAM,
+        maxContainers: s.maxContainers,
+        sharedPool:    s.sharedPool,
+        dedicatedPool: s.dedicatedPool
+      };
+    }
+
+      _serverCacheTime = Date.now();
+      logger.info(`[ServerCache] Loaded ${dbServers.length} servers from DB: ${Object.keys(ORACLE_SERVERS).join(', ')}`);
+      rebuildSharedResourceCaps();
+    } catch (populateErr) {
+      // Restore snapshot so ORACLE_SERVERS is never empty
+      Object.keys(ORACLE_SERVERS).forEach(k => delete ORACLE_SERVERS[k]);
+      Object.assign(ORACLE_SERVERS, snapshot);
+      throw populateErr;
+    }
+  } catch (err) {
+    logger.warn('[ServerCache] Refresh failed (DB not ready?): ' + (err.message || err));
+  }
+}
+
+// No auto-seeding — admin adds all servers from Admin Panel → Servers page.
+
+/**
+ * Returns the live ORACLE_SERVERS map, refreshing from DB if the TTL has expired.
+ */
+async function getOracleServers() {
+  if (Date.now() - _serverCacheTime > SERVER_CACHE_TTL) {
+    await refreshServerCache();
+  }
+  return ORACLE_SERVERS;
+}
 
 // Get current server utilization
 const getServerUtilization = async (serverKey) => {
@@ -111,7 +152,7 @@ const getServerUtilization = async (serverKey) => {
     let totalRamUsed = 0;
 
     containers.containers.forEach(container => {
-      const name = container.names[0];
+      const name = (container.names[0] || '').replace(/^\//, '');
       if (name.includes('-shared-')) {
         sharedUsers++;
       } else if (name.includes('-dedicated-')) {
@@ -135,8 +176,8 @@ const getServerUtilization = async (serverKey) => {
         ramUsed: totalRamUsed,
         cpuAvailable: server.totalCPU - totalCpuUsed,
         ramAvailable: server.totalRAM - totalRamUsed,
-        sharedCapacity: server.sharedPool.maxUsers - sharedUsers,
-        dedicatedCapacity: server.dedicatedPool.maxUsers - dedicatedUsers
+        sharedCapacity: (server.sharedPool?.maxUsers || 150) - sharedUsers,
+        dedicatedCapacity: (server.dedicatedPool?.maxUsers || 50) - dedicatedUsers
       }
     };
   } catch (error) {
@@ -144,50 +185,73 @@ const getServerUtilization = async (serverKey) => {
   }
 };
 
-// Choose best server for new user (load balancing between EC2/EC3)
-const chooseBestServerForUser = async (containerType = 'shared') => {
+// Choose best server for new user (dynamic — works with any number of worker nodes)
+const chooseBestServerForUser = async (containerType = 'dedicated') => {
   try {
-    const [ec2Status, ec3Status] = await Promise.all([
-      getServerUtilization('EC2'),
-      getServerUtilization('EC3')
-    ]);
-
-    // If one server is down, use the other
-    if (!ec2Status.success) {
-      logger.warn('EC2 unavailable, routing to EC3');
-      return 'EC3';
-    }
-    if (!ec3Status.success) {
-      logger.warn('EC3 unavailable, routing to EC2');
-      return 'EC2';
-    }
-
-    // Count actual users (not capacity) for better load balancing
+    await getOracleServers(); // ensure cache is fresh
     const User = require('../models/User');
-    const [ec2UserCount, ec3UserCount] = await Promise.all([
-      User.countDocuments({ assignedServer: 'EC2' }),
-      User.countDocuments({ assignedServer: 'EC3' })
-    ]);
 
-    logger.info(`Server load: EC2=${ec2UserCount} users, EC3=${ec3UserCount} users`);
+    // Collect all worker servers that accept new users
+    const candidates = [];
+    for (const [key, srv] of Object.entries(ORACLE_SERVERS)) {
+      if (srv.type === 'api_main') continue;
+      if (srv.isActive === false || srv.enabled === false) continue;
+      if (srv.acceptNewUsers === false) continue;
+      if (!srv.host) continue;
+      candidates.push(key);
+    }
 
-    // Choose server with FEWER users
-    if (ec2UserCount < ec3UserCount) {
-      logger.info('Assigning to EC2 (lower load)');
-      return 'EC2';
-    } else if (ec3UserCount < ec2UserCount) {
-      logger.info('Assigning to EC3 (lower load)');
-      return 'EC3';
-    } else {
-      // Tie: Round robin based on total
-      const totalUsers = ec2UserCount + ec3UserCount;
-      const choice = (totalUsers % 2 === 0) ? 'EC2' : 'EC3';
+    if (candidates.length === 0) {
+      throw new Error('No servers available for new registrations. All servers are disabled by admin.');
+    }
+
+    if (candidates.length === 1) {
+      logger.info(`Only one eligible server: ${candidates[0]}`);
+      return candidates[0];
+    }
+
+    // Check which servers are actually reachable
+    const reachable = [];
+    for (const key of candidates) {
+      const util = await getServerUtilization(key);
+      if (util.success) reachable.push(key);
+    }
+
+    if (reachable.length === 0) {
+      logger.warn('All servers unreachable, falling back to first candidate');
+      return candidates[0];
+    }
+
+    if (reachable.length === 1) {
+      logger.info(`Only ${reachable[0]} reachable, using it`);
+      return reachable[0];
+    }
+
+    // Count users per server and pick the one with fewest
+    const counts = await Promise.all(
+      reachable.map(async (key) => ({
+        key,
+        userCount: await User.countDocuments({ assignedServer: key })
+      }))
+    );
+
+    counts.sort((a, b) => a.userCount - b.userCount);
+    const logStr = counts.map(c => `${c.key}=${c.userCount}`).join(', ');
+    logger.info(`Server load: ${logStr}`);
+
+    // If tied, round-robin by total
+    if (counts.length >= 2 && counts[0].userCount === counts[1].userCount) {
+      const totalUsers = counts.reduce((s, c) => s + c.userCount, 0);
+      const choice = counts[totalUsers % counts.length].key;
       logger.info(`Equal load, round-robin to ${choice}`);
       return choice;
     }
+
+    logger.info(`Assigning to ${counts[0].key} (lowest load: ${counts[0].userCount} users)`);
+    return counts[0].key;
   } catch (error) {
     logger.error('Error choosing best server:', error);
-    return 'EC2'; // Safe fallback
+    throw error;
   }
 };
 
@@ -234,8 +298,11 @@ const allocateContainer = async (user, plan) => {
     const targetServer = await chooseBestServerForUser(containerType);
     const server = ORACLE_SERVERS[targetServer];
 
-    // Always create dedicated container (can be on EC2 or EC3)
-    logger.info('Creating dedicated container for user');
+    if (!server || !server.host) {
+      throw new Error(`Server ${targetServer} not found in cache or has no host configured`);
+    }
+
+    logger.info(`Creating dedicated container on ${targetServer} for user ${user.username}`);
     return await allocateDedicatedContainer(user, planObj, targetServer, server);
   } catch (error) {
     logger.error('Container allocation failed:', error);
@@ -418,7 +485,8 @@ const upgradeUserToDedicated = async (userId, newPlan) => {
       return await scaleContainerResources(userId, newPlan.resources);
     }
 
-    const currentServer = user.oracleAccountId || 'EC2';
+    const currentServer = user.assignedServer || user.oracleAccountId;
+    if (!currentServer) throw new Error(`User ${userId} has no assignedServer — cannot upgrade`);
     const server = ORACLE_SERVERS[currentServer];
 
     logger.info('Upgrading user from shared to dedicated on same server', {
@@ -480,51 +548,56 @@ const moveAndUpgradeUser = async (userId, targetServer, newPlan) => {
   try {
     const User = require('../models/User');
     const user = await User.findById(userId);
+    if (!user) return { success: false, error: 'User not found' };
 
-    const sourceServer = user.oracleAccountId || 'EC2';
-    const sourceHost = ORACLE_SERVERS[sourceServer].host;
-    const targetHost = ORACLE_SERVERS[targetServer].host;
-
-    const oldContainerName = `${sourceServer}-shared-user-${user.username}`;
+    const sourceServer = user.assignedServer || user.oracleAccountId;
+    if (!sourceServer) throw new Error(`User ${userId} has no assignedServer — cannot migrate`);
+    const sourceHost = ORACLE_SERVERS[sourceServer]?.host;
+    const oldContainerName = user.containerName;
 
     // Create dedicated container on target server
+    // allocateDedicatedContainer returns { containerName, containerId, port, serverKey, host } or throws
     const dedicatedResult = await allocateDedicatedContainer(user, newPlan, targetServer, ORACLE_SERVERS[targetServer]);
 
-    if (dedicatedResult.success) {
-      // Remove old container from source server
-      await docker.stopContainer(oldContainerName, sourceHost);
-
-      logger.info('User moved and upgraded', {
-        userId,
-        username: user.username,
-        from: sourceServer,
-        to: targetServer,
-        upgrade: 'shared_to_dedicated',
-        plan: newPlan.name
-      });
-
-      return {
-        success: true,
-        upgrade: {
-          server: targetServer,
-          from: 'shared',
-          to: 'dedicated',
-          container: dedicatedResult.container,
-          migration: true
-        }
-      };
+    // If we get here without throwing, container was created successfully
+    // Remove old container from source server
+    if (oldContainerName && sourceHost) {
+      try {
+        await docker.stopContainer(oldContainerName, sourceHost);
+      } catch (stopErr) {
+        logger.warn(`Failed to stop old container ${oldContainerName}: ${stopErr.message}`);
+      }
     }
 
-    return dedicatedResult;
+    logger.info('User moved and upgraded', {
+      userId,
+      username: user.username,
+      from: sourceServer,
+      to: targetServer,
+      upgrade: 'shared_to_dedicated',
+      plan: newPlan.name
+    });
+
+    return {
+      success: true,
+      upgrade: {
+        server: targetServer,
+        from: 'shared',
+        to: 'dedicated',
+        container: dedicatedResult.containerName,
+        migration: true
+      }
+    };
   } catch (error) {
     logger.error('Move and upgrade failed:', error);
     return { success: false, error: error.message };
   }
 };
 
-// Get available port for server
-const getAvailablePort = async (serverKey, maxOffset = 1000) => {
-  const basePort = serverKey === 'EC2' ? 3000 : 4000;
+// Get available port for any server — dynamic range, no hardcoded server key
+const getAvailablePort = async (serverKey, maxOffset = 2000) => {
+  // Single unified range 3000–4999; remote containers have independent port spaces per host
+  const basePort = 3000;
 
   for (let i = 0; i < maxOffset; i++) {
     const port = basePort + Math.floor(Math.random() * maxOffset);
@@ -592,23 +665,27 @@ const getUserContainer = async (userId) => {
 const scaleContainerResources = async (userId, newResources) => {
   try {
     const containerInfo = await getUserContainer(userId);
-    if (!containerInfo || !containerInfo.success) {
-      return containerInfo || { success: false, error: 'No container found for user' };
+    if (!containerInfo) {
+      return { success: false, error: 'No container found for user' };
     }
 
-    const { container, user } = containerInfo;
-    const server = ORACLE_SERVERS[user.oracleAccountId];
+    const User = require('../models/User');
+    const user = await User.findById(userId);
+    if (!user) return { success: false, error: 'User not found' };
+
+    const server = ORACLE_SERVERS[user.assignedServer || user.oracleAccountId];
+    if (!server) return { success: false, error: 'Invalid server assignment' };
 
     logger.info('Starting container resource scaling', {
       userId,
       username: user.username,
-      containerName: container.name,
+      containerName: containerInfo.containerName,
       currentResources: user.resourceAllocation,
       newResources
     });
 
     // Step 1: Update container resources in-place (Docker update command)
-    const updateResult = await docker.updateContainerResources(container.name, {
+    const updateResult = await docker.updateContainerResources(containerInfo.containerName, {
       memory: newResources.ram * 1024, // GB to MB
       cpu: newResources.cpu
     }, server.host);
@@ -624,13 +701,12 @@ const scaleContainerResources = async (userId, newResources) => {
     }
 
     // Step 3: Update user's resource allocation in database
-    const User = require('../models/User');
     await User.findByIdAndUpdate(userId, {
       resourceAllocation: {
         cpu: newResources.cpu,
         ram: newResources.ram,
         storage: newResources.storage,
-        bandwidth: newResources.bandwidth || user.resourceAllocation.bandwidth
+        bandwidth: newResources.bandwidth || user.resourceAllocation?.bandwidth || 100
       }
     });
 
@@ -645,8 +721,8 @@ const scaleContainerResources = async (userId, newResources) => {
       success: true,
       method: 'in-place-update',
       container: {
-        name: container.name,
-        server: user.oracleAccountId,
+        name: containerInfo.containerName,
+        server: user.assignedServer || user.oracleAccountId,
         resources: newResources
       },
       message: 'Container resources updated without data loss'
@@ -662,12 +738,20 @@ const scaleContainerResources = async (userId, newResources) => {
 const recreateContainerWithDataPreservation = async (userId, newResources) => {
   try {
     const containerInfo = await getUserContainer(userId);
-    if (!containerInfo || !containerInfo.success) {
-      return containerInfo || { success: false, error: 'No container found for user' };
+    if (!containerInfo) {
+      return { success: false, error: 'No container found for user' };
     }
 
-    const { container, user } = containerInfo;
-    const server = ORACLE_SERVERS[user.oracleAccountId];
+    const User = require('../models/User');
+    const user = await User.findById(userId);
+    if (!user) return { success: false, error: 'User not found' };
+
+    const serverKey = user.assignedServer || user.oracleAccountId;
+    const server = ORACLE_SERVERS[serverKey];
+    if (!server) return { success: false, error: 'Invalid server assignment' };
+
+    // Create a container-like object for backward compatibility with rest of function
+    const container = { name: containerInfo.containerName };
 
     logger.info('Starting container recreation with data preservation', {
       userId,
@@ -685,7 +769,8 @@ const recreateContainerWithDataPreservation = async (userId, newResources) => {
     // Actually, containerOrchestrator imports docker, which imports ... 
     // Let's just use the known SSH keys env vars directly to be safe.
 
-    const keyPath = user.oracleAccountId === 'EC2' ? process.env.SSH_EC2_KEY : process.env.SSH_EC3_KEY;
+    const keyPath = resolveSSHKeyPath(serverKey);
+    if (!keyPath) throw new Error(`No SSH key configured for ${serverKey}`);
     const fs = require('fs');
     const keyContent = fs.readFileSync(keyPath, 'utf8');
 
@@ -720,7 +805,7 @@ const recreateContainerWithDataPreservation = async (userId, newResources) => {
       const freeTierContainer = require('./freeTierContainer');
       const containerResult = await freeTierContainer.createUserContainer(
         user,
-        user.oracleAccountId, // Keep same server?
+        serverKey, // Keep same server
         server,
         newResources
       );
@@ -759,7 +844,7 @@ const recreateContainerWithDataPreservation = async (userId, newResources) => {
         success: true,
         container: {
           name: newContainerName,
-          server: user.oracleAccountId,
+          server: serverKey,
           resources: newResources,
           url: `http://${server.host}:${containerResult.port}`
         },
@@ -868,13 +953,16 @@ const assignUserToServer = async (userId, planName) => {
     // Allocate container for user (throws error on failure)
     const allocation = await allocateContainer(user, plan);
 
-    // If we get here, allocation succeeded
+    // Reload the user from DB — allocateContainer updates it there
+    const updatedUser = await User.findById(userId).lean();
+    const serverId = updatedUser?.assignedServer || updatedUser?.oracleAccountId;
+
     return {
       success: true,
-      serverId: user.assignedServer || user.oracleAccountId,
-      serverName: ORACLE_SERVERS[user.assignedServer || user.oracleAccountId]?.name,
-      containerType: user.containerType,
-      resources: user.resourceAllocation,
+      serverId,
+      serverName: ORACLE_SERVERS[serverId]?.name || serverId,
+      containerType: updatedUser?.containerType,
+      resources: updatedUser?.resourceAllocation,
       containerName: allocation.containerName,
       containerId: allocation.containerId
     };
@@ -1035,10 +1123,10 @@ const startResourceMonitoring = (intervalMs = 60000) => {
 
         // Get user container
         const containerInfo = await getUserContainer(user._id);
-        if (!containerInfo || !containerInfo.success) continue;
+        if (!containerInfo) continue;
 
         // Monitor usage
-        const monitoring = await monitorUserResourceUsage(containerInfo.container.name, user._id);
+        const monitoring = await monitorUserResourceUsage(containerInfo.containerName, user._id);
         if (!monitoring.success) continue;
 
         const { usage } = monitoring;
@@ -1055,7 +1143,7 @@ const startResourceMonitoring = (intervalMs = 60000) => {
         }
 
         // Check storage violation (Software Limit)
-        const storageUsedMB = await checkStorageUsage(containerInfo.container.name);
+        const storageUsedMB = await checkStorageUsage(containerInfo.containerName);
         const storageLimitMB = resourceCaps.perUserCap.storage * 1024; // GB to MB
         if (storageUsedMB > storageLimitMB) {
           violations.push({ type: 'storage', current: storageUsedMB, limit: storageLimitMB });
@@ -1067,16 +1155,16 @@ const startResourceMonitoring = (intervalMs = 60000) => {
 
           for (const violation of violations) {
             if (violation.type === 'cpu') {
-              await throttleUserCPU(containerInfo.container.name, user._id, resourceCaps.perUserCap.cpu);
+              await throttleUserCPU(containerInfo.containerName, user._id, resourceCaps.perUserCap.cpu);
             } else if (violation.type === 'memory') {
-              await reclaimUserMemory(containerInfo.container.name, user._id);
+              await reclaimUserMemory(containerInfo.containerName, user._id);
             } else if (violation.type === 'storage') {
               // Track storage violation
               await trackStorageViolation(user._id, violation.current, violation.limit);
 
               // Enforce storage limit by stopping container (Soft Limit Action)
-              logger.warn(`🛑 Stopping container ${containerInfo.container.name} due to storage violation (${violation.current.toFixed(2)}MB > ${violation.limit}MB)`);
-              await docker.execCommand(containerInfo.container.name, ['pm2', 'stop', 'all']);
+              logger.warn(`🛑 Stopping container ${containerInfo.containerName} due to storage violation (${violation.current.toFixed(2)}MB > ${violation.limit}MB)`);
+              await docker.execCommand(containerInfo.containerName, ['pm2', 'stop', 'all']);
             }
           }
         }
@@ -1145,6 +1233,9 @@ const trackStorageViolation = async (userId, storageUsed, limit) => {
   }
 };
 
+// Shared SSH/host resolution — used throughout this file and exported for others
+const { resolveSSHKey: resolveSSHKeyPath, resolveHost: resolveHostForKey, getSSHConfig: buildSSHConfig } = require('../utils/serverResolver');
+
 // Get remote system stats (Host CPU, RAM, Storage)
 const getRemoteSystemStats = async (serverKey) => {
   try {
@@ -1155,15 +1246,15 @@ const getRemoteSystemStats = async (serverKey) => {
     const fs = require('fs');
     const ssh = new NodeSSH();
 
-    // Get SSH key
-    const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
-      : serverKey === 'EC3' ? process.env.SSH_EC3_KEY
-        : process.env.SSH_EC3_KEY;
+    const keyPath = resolveSSHKeyPath(serverKey);
+    if (!keyPath) {
+      logger.warn(`[getRemoteSystemStats] No SSH key configured for ${serverKey}`);
+      return null;
+    }
 
-    // Connect
     await ssh.connect({
       host: server.host,
-      username: 'ubuntu',
+      username: process.env.SSH_USERNAME || 'ubuntu',
       privateKey: fs.readFileSync(keyPath, 'utf8')
     });
 
@@ -1241,15 +1332,16 @@ const getRemoteDockerStats = async (serverKey) => {
     const fs = require('fs');
     const ssh = new NodeSSH();
 
-    // Get SSH key
-    const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
-      : serverKey === 'EC3' ? process.env.SSH_EC3_KEY
-        : process.env.SSH_EC3_KEY;
+    const keyPath = resolveSSHKeyPath(serverKey);
+    if (!keyPath) {
+      logger.warn(`[getRemoteDockerStats] No SSH key configured for ${serverKey}`);
+      return [];
+    }
 
     // Connect
     await ssh.connect({
       host: server.host,
-      username: 'ubuntu',
+      username: process.env.SSH_USERNAME || 'ubuntu',
       privateKey: fs.readFileSync(keyPath, 'utf8')
     });
 
@@ -1295,15 +1387,15 @@ const getRemoteContainerLogs = async (serverKey, containerId) => {
     const fs = require('fs');
     const ssh = new NodeSSH();
 
-    // Get SSH key
-    const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
-      : serverKey === 'EC3' ? process.env.SSH_EC3_KEY
-        : process.env.SSH_EC3_KEY;
+    const keyPath = resolveSSHKeyPath(serverKey);
+    if (!keyPath) {
+      return { success: false, error: `No SSH key configured for ${serverKey}` };
+    }
 
     // Connect
     await ssh.connect({
       host: server.host,
-      username: 'ubuntu',
+      username: process.env.SSH_USERNAME || 'ubuntu',
       privateKey: fs.readFileSync(keyPath, 'utf8')
     });
 
@@ -1373,7 +1465,10 @@ const startAlertMonitoring = () => {
   // Check every 5 minutes (300,000 ms) to reduce SSH load
   monitoringInterval = setInterval(async () => {
     try {
-      const servers = Object.keys(ORACLE_SERVERS);
+      // Only monitor worker nodes; skip API main server (EC1-type)
+      const servers = Object.keys(ORACLE_SERVERS).filter(
+        k => ORACLE_SERVERS[k].type !== 'api_main' && ORACLE_SERVERS[k].host
+      );
 
       for (const serverKey of servers) {
         try {
@@ -1417,12 +1512,186 @@ const startAlertMonitoring = () => {
   }, 5 * 60 * 1000); // 5 minute interval
 };
 
+// Migrate user container from one server to another with data preservation
+const migrateUserToServer = async (userId, targetServer) => {
+  try {
+    const User = require('../models/User');
+    const user = await User.findById(userId).populate('plan');
+    if (!user) throw new Error('User not found');
+
+    const sourceServer = user.assignedServer || user.oracleAccountId;
+    if (!sourceServer) throw new Error('User has no server assignment');
+    if (sourceServer === targetServer) throw new Error('User is already on the target server');
+    if (!ORACLE_SERVERS[targetServer]) throw new Error(`Invalid target server: ${targetServer}`);
+
+    const sourceHost = ORACLE_SERVERS[sourceServer].host;
+    const targetHost = ORACLE_SERVERS[targetServer].host;
+    const oldContainerName = user.containerName;
+
+    if (!oldContainerName) throw new Error('User has no container to migrate');
+
+    logger.info('Starting cross-server migration', {
+      userId, username: user.username,
+      from: sourceServer, to: targetServer,
+      container: oldContainerName
+    });
+
+    const { NodeSSH } = require('node-ssh');
+    const fs = require('fs');
+    const path = require('path');
+    const os = require('os');
+
+    const sourceKeyPath = resolveSSHKeyPath(sourceServer);
+    const targetKeyPath = resolveSSHKeyPath(targetServer);
+
+    if (!sourceKeyPath) throw new Error(`No SSH key configured for source server ${sourceServer}`);
+    if (!targetKeyPath) throw new Error(`No SSH key configured for target server ${targetServer}`);
+
+    // --- Step 1: Backup data on source server ---
+    const sourceSSH = new NodeSSH();
+    await sourceSSH.connect({
+      host: sourceHost,
+      username: process.env.SSH_USERNAME || 'ubuntu',
+      privateKey: fs.readFileSync(sourceKeyPath, 'utf8')
+    });
+
+    const backupDir = `/tmp/migrate_${userId}_${Date.now()}`;
+    const remoteTarFile = `${backupDir}.tar.gz`;
+
+    await sourceSSH.execCommand(`mkdir -p ${backupDir}`);
+    await sourceSSH.execCommand(`docker exec ${oldContainerName} pm2 save 2>/dev/null || true`);
+    await sourceSSH.execCommand(`docker cp ${oldContainerName}:/app/projects ${backupDir}/projects 2>/dev/null || true`);
+    await sourceSSH.execCommand(`docker cp ${oldContainerName}:/root/.pm2 ${backupDir}/pm2_state 2>/dev/null || true`);
+    await sourceSSH.execCommand(`cd /tmp && tar czf ${remoteTarFile} -C ${backupDir} . 2>/dev/null || true`);
+
+    // --- Step 2: Transfer data THROUGH the API server (not direct SCP) ---
+    // Download tar from source → API server temp dir → upload to target
+    const localTempFile = path.join(os.tmpdir(), `migrate_${userId}_${Date.now()}.tar.gz`);
+
+    try {
+      await sourceSSH.getFile(localTempFile, remoteTarFile);
+      logger.info('Downloaded backup from source server to API server');
+    } catch (dlErr) {
+      logger.warn(`Download failed (user may have no data): ${dlErr.message}`);
+      // Create empty tar so migration continues (new container, no data to restore)
+      fs.writeFileSync(localTempFile, '');
+    }
+
+    // Clean up remote backup files on source (but keep the container running!)
+    await sourceSSH.execCommand(`rm -rf ${backupDir} ${remoteTarFile}`);
+    sourceSSH.dispose();
+
+    // --- Step 3: Create new container on target server FIRST ---
+    // (Old container stays alive until new container is confirmed working)
+    const freeTierContainer = require('./freeTierContainer');
+    const planResources = user.plan?.resources || { cpu: 0.5, ram: 0.5, storage: 2, bandwidth: 100 };
+
+    const containerResult = await freeTierContainer.createUserContainer(
+      user,
+      targetServer,
+      ORACLE_SERVERS[targetServer],
+      planResources
+    );
+
+    if (!containerResult.success) {
+      // Clean up temp file — old container is still alive so user is safe
+      try { fs.unlinkSync(localTempFile); } catch (e) {}
+      throw new Error(`Failed to create container on ${targetServer}: ${containerResult.error}`);
+    }
+
+    // --- Step 4: Upload and restore data on target ---
+    const fileStats = fs.statSync(localTempFile);
+    if (fileStats.size > 0) {
+      const targetSSH = new NodeSSH();
+      await targetSSH.connect({
+        host: targetHost,
+        username: process.env.SSH_USERNAME || 'ubuntu',
+        privateKey: fs.readFileSync(targetKeyPath, 'utf8')
+      });
+
+      const targetTarFile = `/tmp/migrate_${userId}_restore.tar.gz`;
+      const targetRestoreDir = `/tmp/migrate_${userId}_restore`;
+
+      await targetSSH.putFile(localTempFile, targetTarFile);
+      await targetSSH.execCommand(`mkdir -p ${targetRestoreDir}`);
+      await targetSSH.execCommand(`cd ${targetRestoreDir} && tar xzf ${targetTarFile} 2>/dev/null || true`);
+      await targetSSH.execCommand(`docker cp ${targetRestoreDir}/projects/. ${containerResult.containerName}:/app/projects/ 2>/dev/null || true`);
+      await targetSSH.execCommand(`docker cp ${targetRestoreDir}/pm2_state/. ${containerResult.containerName}:/root/.pm2/ 2>/dev/null || true`);
+      await targetSSH.execCommand(`docker exec ${containerResult.containerName} pm2 resurrect 2>/dev/null || true`);
+
+      // Clean up target temp files
+      await targetSSH.execCommand(`rm -rf ${targetRestoreDir} ${targetTarFile}`);
+      targetSSH.dispose();
+      logger.info('Data restored on target server');
+    } else {
+      logger.info('No data to restore (empty backup), container created fresh');
+    }
+
+    // Clean up local temp file
+    try { fs.unlinkSync(localTempFile); } catch (e) {}
+
+    // --- Step 5: NOW destroy old container (new one is confirmed working) ---
+    // Reconnect to source since we disposed earlier only if creation failed
+    const sourceSSH2 = new NodeSSH();
+    await sourceSSH2.connect({
+      host: sourceHost,
+      username: process.env.SSH_USERNAME || 'ubuntu',
+      privateKey: fs.readFileSync(sourceKeyPath, 'utf8')
+    });
+    await sourceSSH2.execCommand(`docker stop ${oldContainerName} 2>/dev/null || true`);
+    await sourceSSH2.execCommand(`docker rm ${oldContainerName} 2>/dev/null || true`);
+    sourceSSH2.dispose();
+
+    // --- Step 6: Update user database record ---
+    await User.findByIdAndUpdate(userId, {
+      $set: {
+        assignedServer: targetServer,
+        oracleAccountId: targetServer,
+        containerName: containerResult.containerName,
+        containerId: containerResult.containerId,
+        assignedPort: containerResult.port
+      },
+      $push: {
+        serverAssignmentHistory: {
+          server: targetServer,
+          assignedAt: new Date(),
+          reason: 'admin_migration',
+          planAtTime: user.planType || 'free'
+        }
+      }
+    });
+
+    logger.info('Cross-server migration completed successfully', {
+      userId, username: user.username,
+      from: sourceServer, to: targetServer,
+      oldContainer: oldContainerName,
+      newContainer: containerResult.containerName
+    });
+
+    return {
+      success: true,
+      migration: {
+        from: sourceServer,
+        to: targetServer,
+        oldContainer: oldContainerName,
+        newContainer: containerResult.containerName,
+        port: containerResult.port,
+        dataPreserved: true
+      }
+    };
+
+  } catch (error) {
+    logger.error('Cross-server migration failed:', error);
+    return { success: false, error: error.message };
+  }
+};
+
 module.exports = {
-  getRemoteSystemStats,
-  getRemoteDockerStats,
-  getRemoteContainerLogs,
-  startAlertMonitoring,
-  ORACLE_SERVERS,
+  // Server cache — DB-backed, refreshed every 60 s and after admin writes
+  ORACLE_SERVERS,           // mutable in-memory map (synchronous access)
+  refreshServerCache,       // async — force-reload from DB
+  getOracleServers,         // async — returns ORACLE_SERVERS (refreshing if stale)
+
   SHARED_RESOURCE_CAPS,
   getServerUtilization,
   chooseBestServerForUser,
@@ -1436,5 +1705,10 @@ module.exports = {
   assignUserToServer,
   enforceUserResourceCaps,
   monitorUserResourceUsage,
-  startResourceMonitoring
+  startResourceMonitoring,
+  migrateUserToServer,
+  getRemoteSystemStats,
+  getRemoteDockerStats,
+  getRemoteContainerLogs,
+  startAlertMonitoring
 };

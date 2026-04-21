@@ -7,6 +7,7 @@ const Deployment = require('../models/Deployment');
 const Payment = require('../models/Payment');
 const { hasFeature } = require('../utils/featureCheck');
 const notify = require('../services/notificationService');
+const { resolveHost } = require('../utils/serverResolver');
 
 /**
  * Verify GitHub webhook signature
@@ -362,7 +363,7 @@ async function handlePush(payload) {
   for (const project of projects) {
     logger.info(`Auto-deploying ${project.name} on push to ${branch}`);
 
-    await Deployment.create({
+    const deployment = await Deployment.create({
       projectId: project._id,
       userId: project.owner._id,
       commitSHA: payload.head_commit.id,
@@ -372,7 +373,19 @@ async function handlePush(payload) {
       status: 'pending'
     });
 
-    // Trigger build...
+    // Trigger build asynchronously (don't await - let webhook return quickly)
+    const buildExecutor = require('../services/buildExecutor');
+    buildExecutor.executeBuild(deployment._id, {
+      onProgress: (progress) => {
+        deployment.progress = progress;
+        deployment.save().catch(() => { });
+      },
+      onLog: (level, message) => {
+        logger.info(`[Auto-deploy ${project.name}] ${message}`);
+      }
+    }).catch(err => {
+      logger.error(`Auto-deploy build failed for ${project.name}:`, err.message);
+    });
   }
 }
 
@@ -483,7 +496,7 @@ router.post('/jazzcash', express.urlencoded({ extended: true }), async (req, res
             if (user.containerName && user.assignedServer) {
               try {
                 const docker = require('../services/docker');
-                const host = process.env[`${user.assignedServer}_SERVER_IP`] || process.env.EC3_SERVER_IP;
+                const host = resolveHost(user.assignedServer);
                 const ramGB = plan.actualResources?.ram || plan.resources?.ram || 0.5;
                 const cpu = plan.actualResources?.cpu || plan.resources?.cpu || 0.5;
                 await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);
@@ -559,7 +572,14 @@ router.post('/easypaisa', express.urlencoded({ extended: true }), async (req, re
       }
 
       // Look up pending payment to get userId and planId
-      const pendingPayment = await Payment.findOne({ payoneerSessionId: result.orderId });
+      const pendingPayment = await Payment.findOne({
+        $or: [
+          { btcpayInvoiceId: result.orderId },
+          { paddleTransactionId: result.orderId },
+          { payoneerSessionId: result.orderId },
+          { _id: result.orderId }
+        ]
+      });
       if (pendingPayment) {
         try {
           const User = require('../models/User');
@@ -626,7 +646,7 @@ router.post('/easypaisa', express.urlencoded({ extended: true }), async (req, re
             if (user.containerName && user.assignedServer) {
               try {
                 const docker = require('../services/docker');
-                const host = process.env[`${user.assignedServer}_SERVER_IP`] || process.env.EC3_SERVER_IP;
+                const host = resolveHost(user.assignedServer);
                 const ramGB = plan.actualResources?.ram || plan.resources?.ram || 0.5;
                 const cpu = plan.actualResources?.cpu || plan.resources?.cpu || 0.5;
                 await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);
@@ -810,7 +830,7 @@ router.post('/btcpay', express.json({ verify: (req, _res, buf) => { req.rawBody 
           if (user.containerName && user.assignedServer) {
             try {
               const docker = require('../services/docker');
-              const host = process.env[`${user.assignedServer}_SERVER_IP`] || process.env.EC3_SERVER_IP;
+              const host = resolveHost(user.assignedServer);
               const ramGB = plan.actualResources?.ram || plan.resources?.ram || 0.5;
               const cpu = plan.actualResources?.cpu || plan.resources?.cpu || 0.5;
               await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);

@@ -3,6 +3,7 @@ const User = require('../models/User');
 const Settings = require('../models/Settings');
 const logger = require('../utils/logger');
 const { loadTemplate } = require('../utils/emailTemplates');
+const { resolveHost } = require('../utils/serverResolver');
 
 // Email sender helper — uses Settings.alertConfig (same as resourceEnforcer.js)
 const sendEmail = async (to, subject, html) => {
@@ -353,7 +354,7 @@ const checkSubscriptions = async () => {
         if (user.containerName && user.assignedServer) {
           try {
             const docker = require('../services/docker');
-            const host = process.env[`${user.assignedServer}_SERVER_IP`] || process.env.EC3_SERVER_IP;
+            const host = resolveHost(user.assignedServer);
             const ramGB = newPlan.actualResources?.ram || newPlan.resources?.ram || 0.5;
             const cpu = newPlan.actualResources?.cpu || newPlan.resources?.cpu || 0.5;
             await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);

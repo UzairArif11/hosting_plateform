@@ -61,7 +61,8 @@ interface ServerCapacity {
 }
 
 export default function CapacityManagementPage() {
-    const [selectedServer, setSelectedServer] = useState<'EC2' | 'EC3'>('EC3');
+    const [availableServers, setAvailableServers] = useState<string[]>([]);
+    const [selectedServer, setSelectedServer] = useState<string>('');
     const [capacity, setCapacity] = useState<ServerCapacity | null>(null);
     const [loading, setLoading] = useState(true);
     const [editingResources, setEditingResources] = useState(false);
@@ -69,8 +70,27 @@ export default function CapacityManagementPage() {
     const [resourceForm, setResourceForm] = useState<Partial<ServerCapacity>>({});
     const [planLimitForm, setPlanLimitForm] = useState({ planName: '', maxUsers: 0, priority: 5 });
 
+    // Fetch available servers on mount
     useEffect(() => {
-        fetchCapacity();
+        const fetchServers = async () => {
+            try {
+                const res = await api.get('/admin/servers');
+                const serverKeys = (res.data.servers || [])
+                    .filter((s: any) => s.serverKey !== 'EC1') // Skip API-only servers
+                    .map((s: any) => s.serverKey);
+                setAvailableServers(serverKeys);
+                if (serverKeys.length > 0 && !selectedServer) {
+                    setSelectedServer(serverKeys[0]);
+                }
+            } catch (error) {
+                console.error('Failed to fetch servers', error);
+            }
+        };
+        fetchServers();
+    }, []);
+
+    useEffect(() => {
+        if (selectedServer) fetchCapacity();
     }, [selectedServer]);
 
     const fetchCapacity = async () => {
@@ -143,20 +163,16 @@ export default function CapacityManagementPage() {
                     <p className="text-gray-400 mt-2">Manage server resources and plan limits</p>
                 </div>
                 <div className="flex bg-gray-900 rounded-lg p-1 border border-gray-800">
-                    <button
-                        onClick={() => setSelectedServer('EC2')}
-                        className={`px-6 py-2 rounded-md text-sm font-bold transition ${selectedServer === 'EC2' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white'
-                            }`}
-                    >
-                        EC2
-                    </button>
-                    <button
-                        onClick={() => setSelectedServer('EC3')}
-                        className={`px-6 py-2 rounded-md text-sm font-bold transition ${selectedServer === 'EC3' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white'
-                            }`}
-                    >
-                        EC3
-                    </button>
+                    {availableServers.map((key: string) => (
+                        <button
+                            key={key}
+                            onClick={() => setSelectedServer(key)}
+                            className={`px-6 py-2 rounded-md text-sm font-bold transition ${selectedServer === key ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white'
+                                }`}
+                        >
+                            {key}
+                        </button>
+                    ))}
                 </div>
             </div>
 

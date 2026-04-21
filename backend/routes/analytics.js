@@ -6,12 +6,8 @@ const Project = require('../models/Project');
 const User = require('../models/User'); // Ensure User model is loaded
 const { requireAuth, requireProjectAccess } = require('../middleware/auth');
 const logger = require('../utils/logger');
-// Simple IP-to-Country lookup (mock/placeholder if geoip-lite not available, but usually we'd add it)
-// For now, we'll try to use headers from Nginx or a simple lookup if possible.
-// Note: In a real deploy, 'x-forwarded-for' or specific geo headers from load balancer (Cloudflare/AWS) are best.
-const MockGeo = {
-    lookup: (ip) => ({ country: 'US' })
-};
+// GeoIP: Uses geoip-lite for country detection from IP addresses.
+// In production, x-forwarded-for or Cloudflare geo headers are preferred.
 
 // POST /api/analytics/collect
 // Public endpoint - called by the tracking script

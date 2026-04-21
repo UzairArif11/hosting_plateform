@@ -6,6 +6,7 @@ const Project = require('../models/Project');
 const User = require('../models/User');
 const Deployment = require('../models/Deployment');
 const buildQueue = require('../services/buildQueue');
+const { resolveHost } = require('../utils/serverResolver');
 
 // Helper functions
 const handleValidationErrors = (req, res, next) => {
@@ -827,8 +828,7 @@ router.delete('/:id', async (req, res) => {
       try {
         const nginxRouter = require('../services/nginxRouter');
         const serverKey = deployment.serverKey; // 'EC2', 'EC3', etc.
-        const serverHost = process.env[`${serverKey}_SERVER_IP`] ||
-          (serverKey === 'EC2' ? process.env.EC2_SERVER_IP : process.env.EC3_SERVER_IP);
+        const serverHost = resolveHost(serverKey);
 
         if (serverHost) {
           await nginxRouter.removeNginxRouting(
@@ -977,7 +977,7 @@ router.post('/:id/rollback', async (req, res) => {
     );
 
     // Check rollback retention (how far back can we go?)
-    const retentionDays = rollbackFeature.config?.retentionDays || 30;
+    const retentionDays = (rollbackFeature && typeof rollbackFeature === 'object' ? rollbackFeature.config?.retentionDays : null) || 30;
     const cutoffDate = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
 
     if (targetDeployment.createdAt < cutoffDate) {

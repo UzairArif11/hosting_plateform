@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
+const logger = require('../utils/logger');
 
 const CACHE_DIR = process.env.BUILD_CACHE_DIR || '/tmp/build-cache';
 const MAX_CACHE_SIZE_GB = 10; // Maximum cache size in GB
@@ -17,7 +18,7 @@ class BuildCache {
         try {
             await fs.mkdir(CACHE_DIR, { recursive: true });
         } catch (error) {
-            console.error('Failed to create cache directory:', error);
+            logger.error('Failed to create cache directory:', error);
         }
     }
 
@@ -51,7 +52,7 @@ class BuildCache {
 
             return hash;
         } catch (error) {
-            console.error('Failed to generate cache key:', error);
+            logger.error('Failed to generate cache key:', error);
             return null;
         }
     }
@@ -85,17 +86,17 @@ class BuildCache {
             const cachePath = path.join(CACHE_DIR, cacheKey, 'node_modules');
             const targetPath = path.join(buildPath, 'node_modules');
 
-            console.log(`📦 Restoring cache from ${cachePath}`);
+            logger.info(`📦 Restoring cache from ${cachePath}`);
 
             // Use cp -r for faster copy (rsync if available for even faster)
             try {
                 // Try rsync first (faster)
                 await execAsync(`rsync -a "${cachePath}/" "${targetPath}/"`);
-                console.log('✓ Cache restored using rsync');
+                logger.info('✓ Cache restored using rsync');
             } catch {
                 // Fallback to cp
                 await execAsync(`cp -r "${cachePath}" "${targetPath}"`);
-                console.log('✓ Cache restored using cp');
+                logger.info('✓ Cache restored using cp');
             }
 
             // Update access time for LRU cleanup
@@ -103,7 +104,7 @@ class BuildCache {
 
             return true;
         } catch (error) {
-            console.error('Failed to restore cache:', error);
+            logger.error('Failed to restore cache:', error);
             return false;
         }
     }
@@ -122,24 +123,24 @@ class BuildCache {
             try {
                 await fs.access(sourcePath);
             } catch {
-                console.log('⚠ No node_modules to cache');
+                logger.info('⚠ No node_modules to cache');
                 return false;
             }
 
             // Create cache directory
             await fs.mkdir(cachePath, { recursive: true });
 
-            console.log(`💾 Saving cache to ${cachePath}`);
+            logger.info(`💾 Saving cache to ${cachePath}`);
 
             // Copy node_modules to cache
             try {
                 // Try rsync first
                 await execAsync(`rsync -a "${sourcePath}/" "${cachePath}/node_modules/"`);
-                console.log('✓ Cache saved using rsync');
+                logger.info('✓ Cache saved using rsync');
             } catch {
                 // Fallback to cp
                 await execAsync(`cp -r "${sourcePath}" "${cachePath}/node_modules"`);
-                console.log('✓ Cache saved using cp');
+                logger.info('✓ Cache saved using cp');
             }
 
             // Cleanup old caches if needed
@@ -147,7 +148,7 @@ class BuildCache {
 
             return true;
         } catch (error) {
-            console.error('Failed to save cache:', error);
+            logger.error('Failed to save cache:', error);
             return false;
         }
     }
@@ -181,7 +182,7 @@ class BuildCache {
             const maxSizeBytes = MAX_CACHE_SIZE_GB * 1024 * 1024 * 1024;
 
             if (totalSize > maxSizeBytes) {
-                console.log(`🧹 Cache size (${(totalSize / 1024 / 1024 / 1024).toFixed(2)}GB) exceeds limit (${MAX_CACHE_SIZE_GB}GB), cleaning up...`);
+                logger.info(`🧹 Cache size (${(totalSize / 1024 / 1024 / 1024).toFixed(2)}GB) exceeds limit (${MAX_CACHE_SIZE_GB}GB), cleaning up...`);
 
                 // Sort by access time (oldest first)
                 cacheStats.sort((a, b) => a.accessTime - b.accessTime);
@@ -191,15 +192,15 @@ class BuildCache {
                 for (const cache of cacheStats) {
                     if (currentSize <= maxSizeBytes) break;
 
-                    console.log(`Removing old cache: ${path.basename(cache.path)}`);
+                    logger.info(`Removing old cache: ${path.basename(cache.path)}`);
                     await execAsync(`rm -rf "${cache.path}"`);
                     currentSize -= cache.size;
                 }
 
-                console.log(`✓ Cache cleanup complete. New size: ${(currentSize / 1024 / 1024 / 1024).toFixed(2)}GB`);
+                logger.info(`✓ Cache cleanup complete. New size: ${(currentSize / 1024 / 1024 / 1024).toFixed(2)}GB`);
             }
         } catch (error) {
-            console.error('Failed to cleanup old caches:', error);
+            logger.error('Failed to cleanup old caches:', error);
         }
     }
 

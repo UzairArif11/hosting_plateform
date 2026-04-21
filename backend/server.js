@@ -66,9 +66,8 @@ const server = http.createServer(app);
 // Trust proxy (required for rate limiting behind Nginx/reverse proxy)
 app.set('trust proxy', 1);
 
-// Initialize WebSocket for real-time deployment updates
+// WebSocket service — initialized after session middleware (see below)
 const websocketService = require('./services/websocket');
-websocketService.initializeWebSocket(server);
 
 // Global middleware
 app.use(helmet());
@@ -83,7 +82,7 @@ app.use(cors({
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 2000, // limit each IP to 1000 requests per windowMs
+  max: 2000, // limit each IP to 2000 requests per windowMs
   message: 'Too many requests from this IP, please try again later.'
 });
 app.use('/api/', limiter);
@@ -91,7 +90,7 @@ app.use('/api/', limiter);
 
 // Session configuration
 // Using connect-mongo for production-ready persistent sessions
-app.use(session({
+const sessionMiddleware = session({
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
@@ -105,7 +104,11 @@ app.use(session({
     httpOnly: true,
     maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
   }
-}));
+});
+app.use(sessionMiddleware);
+
+// Initialize WebSocket with session sharing for authenticated room joins
+websocketService.initializeWebSocket(server, sessionMiddleware);
 
 
 
@@ -284,39 +287,38 @@ app.use((err, req, res, next) => {
 const containerOrchestrator = require('./services/containerOrchestrator');
 let monitoringInterval = null;
 
-// SSH Tunnel Initialization for Secure Docker API Access
+// SSH Tunnel Initialization — reads server IPs dynamically from the DB-backed cache
 async function initializeSSHTunnels() {
+  const { resolveHost } = require('./utils/serverResolver');
+  const { ORACLE_SERVERS } = containerOrchestrator;
+
   console.log('\n🔒 Initializing SSH tunnels for secure Docker access...');
 
   const tunnels = [];
+  let nextLocalPort = 2376; // auto-increment for each remote worker
 
-  if (process.env.EC2_SERVER_IP) {
-    console.log(`   Creating EC2 tunnel: localhost:2376 → ${process.env.EC2_SERVER_IP}:2376`);
-    const result = await sshTunnelManager.createTunnel('EC2', process.env.EC2_SERVER_IP, 2376, 2376);
-    tunnels.push({ server: 'EC2', success: result.success });
-    if (result.success) console.log('   ✅ EC2 tunnel active');
-    else console.error(`   ❌ EC2 failed: ${result.error}`);
-  }
+  // Get EC1 (API main) host to detect "same-server" workers
+  const ec1Host = resolveHost('EC1') || 'localhost';
+  const ec1IsLocal = !ec1Host || ec1Host === 'localhost' || ec1Host === '127.0.0.1';
 
-  if (process.env.EC3_SERVER_IP) {
-    // Check if EC3 is the same as EC1 (same server)
-    // Detect by: explicit match, or EC1 is localhost/127.0.0.1 and EC3 has a real IP
-    // (when EC1=localhost, the backend runs on the same machine as EC3)
-    const localIP = process.env.EC1_SERVER_IP || '';
-    const ec1IsLocalhost = !localIP || localIP === 'localhost' || localIP === '127.0.0.1';
-    const isSameServer = process.env.EC3_SERVER_IP === localIP ||
-      (ec1IsLocalhost && process.env.EC3_SERVER_IP !== process.env.EC2_SERVER_IP);
+  // Iterate all worker nodes from the DB-backed server list
+  for (const [key, srv] of Object.entries(ORACLE_SERVERS)) {
+    if (srv.type === 'api_main') continue;   // skip EC1
+    if (!srv.host) continue;                 // admin hasn't set IP yet
+
+    const isSameServer = srv.host === ec1Host || (ec1IsLocal && srv.host === resolveHost('EC1'));
 
     if (isSameServer) {
-      console.log(`   Skipping EC3 tunnel (same server as EC1) - using local Docker directly`);
-      sshTunnelManager.markAsLocal('EC3');
-      tunnels.push({ server: 'EC3', success: true, local: true });
+      console.log(`   Skipping ${key} tunnel (same server as EC1) — using local Docker`);
+      sshTunnelManager.markAsLocal(key);
+      tunnels.push({ server: key, success: true, local: true });
     } else {
-      console.log(`   Creating EC3 tunnel: localhost:2377 → ${process.env.EC3_SERVER_IP}:2376`);
-      const result = await sshTunnelManager.createTunnel('EC3', process.env.EC3_SERVER_IP, 2377, 2376);
-      tunnels.push({ server: 'EC3', success: result.success });
-      if (result.success) console.log('   ✅ EC3 tunnel active');
-      else console.error(`   ❌ EC3 failed: ${result.error}`);
+      const localPort = nextLocalPort++;
+      console.log(`   Creating ${key} tunnel: localhost:${localPort} → ${srv.host}:2376`);
+      const result = await sshTunnelManager.createTunnel(key, srv.host, localPort, 2376);
+      tunnels.push({ server: key, success: result.success });
+      if (result.success) console.log(`   ✅ ${key} tunnel active`);
+      else console.error(`   ❌ ${key} failed: ${result.error}`);
     }
   }
 
@@ -343,7 +345,15 @@ const PORT = process.env.PORT || 5000;
       logger.info('✅ Migrations completed');
     } catch (migrationError) {
       logger.error('⚠️  Migration failed (non-fatal):', migrationError?.message || String(migrationError));
-      // Continue server startup even if migration fails
+    }
+
+    // Load server configuration from database into in-memory cache
+    try {
+      const { refreshServerCache } = require('./services/containerOrchestrator');
+      await refreshServerCache();
+      logger.info('✅ Server configuration loaded from database');
+    } catch (cacheError) {
+      logger.warn('⚠️  Server cache load failed (admin must add servers via Admin Panel):', cacheError?.message || String(cacheError));
     }
 
     // Initialize SSH tunnels with error handling (non-fatal)
@@ -352,7 +362,6 @@ const PORT = process.env.PORT || 5000;
     } catch (tunnelError) {
       logger.error('⚠️  SSH tunnel initialization failed (non-fatal):', tunnelError?.message || String(tunnelError));
       logger.warn('Server will start without SSH tunnels. Remote Docker operations may fail.');
-      // Continue server startup - tunnels are optional for local Docker
     }
 
     server.listen(PORT, () => {

@@ -63,8 +63,17 @@ const verifyDnsRecord = async (domain, token) => {
  * @param {string} expectedIp 
  * @returns {Promise<boolean>}
  */
-const checkARecord = async (domain, expectedIp = process.env.EC2_SERVER_IP) => {
+const checkARecord = async (domain, expectedIp = null) => {
     try {
+        // If no IP provided, try to resolve from the first active worker server
+        if (!expectedIp) {
+            try {
+                const { resolveHost } = require('../utils/serverResolver');
+                const { ORACLE_SERVERS } = require('./containerOrchestrator');
+                const firstWorker = Object.keys(ORACLE_SERVERS).find(k => ORACLE_SERVERS[k].type !== 'api_main');
+                expectedIp = firstWorker ? resolveHost(firstWorker) : null;
+            } catch (e) { /* cache not ready */ }
+        }
         if (!expectedIp) return true; // Skip check if we don't know our IP
 
         const addresses = await dns.resolve4(domain);

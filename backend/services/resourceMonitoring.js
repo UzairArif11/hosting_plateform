@@ -8,28 +8,91 @@ const execAsync = promisify(exec);
 
 /**
  * Resource Capacity Planning & Monitoring Service
- * Ensures platform stays within Oracle Free Tier limits
+ * Aggregates resources from all servers in the ORACLE_SERVERS cache
  */
 
-// Oracle Free Tier Limits
-const TOTAL_RESOURCES = {
+// Fallback defaults (single Oracle Free Tier instance)
+const DEFAULT_TOTAL_RESOURCES = {
     cpu: 4,      // 4 cores
     ram: 28,     // 28 GB (including swap)
     storage: 240 // 240 GB
 };
 
-// Reserve 25% for system
-const SYSTEM_RESERVED = {
+// Reserve per server for system overhead
+const PER_SERVER_RESERVED = {
     cpu: 0.5,    // 0.5 core
     ram: 4,      // 4 GB
     storage: 40  // 40 GB
 };
 
-// Available for users
+/**
+ * Dynamically aggregate total resources from all worker servers in ORACLE_SERVERS cache.
+ * Falls back to single-server defaults if cache is empty.
+ */
+function getAggregatedResources() {
+    try {
+        const { ORACLE_SERVERS } = require('./containerOrchestrator');
+        const workerServers = Object.values(ORACLE_SERVERS).filter(s => s.type !== 'api_main' && s.host);
+
+        if (workerServers.length === 0) {
+            // No workers configured — use single-server fallback
+            return {
+                total: { ...DEFAULT_TOTAL_RESOURCES },
+                reserved: { ...PER_SERVER_RESERVED },
+                available: {
+                    cpu: DEFAULT_TOTAL_RESOURCES.cpu - PER_SERVER_RESERVED.cpu,
+                    ram: DEFAULT_TOTAL_RESOURCES.ram - PER_SERVER_RESERVED.ram,
+                    storage: DEFAULT_TOTAL_RESOURCES.storage - PER_SERVER_RESERVED.storage
+                },
+                serverCount: 1
+            };
+        }
+
+        // Aggregate across all worker servers
+        const total = { cpu: 0, ram: 0, storage: 0 };
+        const reserved = { cpu: 0, ram: 0, storage: 0 };
+
+        for (const srv of workerServers) {
+            total.cpu += srv.resources?.cpu || 4;
+            total.ram += srv.resources?.ram || 24;
+            total.storage += srv.resources?.storage || 200;
+            reserved.cpu += PER_SERVER_RESERVED.cpu;
+            reserved.ram += PER_SERVER_RESERVED.ram;
+            reserved.storage += PER_SERVER_RESERVED.storage;
+        }
+
+        return {
+            total,
+            reserved,
+            available: {
+                cpu: total.cpu - reserved.cpu,
+                ram: total.ram - reserved.ram,
+                storage: total.storage - reserved.storage
+            },
+            serverCount: workerServers.length
+        };
+    } catch (err) {
+        logger.warn('Failed to aggregate server resources, using defaults:', err.message);
+        return {
+            total: { ...DEFAULT_TOTAL_RESOURCES },
+            reserved: { ...PER_SERVER_RESERVED },
+            available: {
+                cpu: DEFAULT_TOTAL_RESOURCES.cpu - PER_SERVER_RESERVED.cpu,
+                ram: DEFAULT_TOTAL_RESOURCES.ram - PER_SERVER_RESERVED.ram,
+                storage: DEFAULT_TOTAL_RESOURCES.storage - PER_SERVER_RESERVED.storage
+            },
+            serverCount: 1
+        };
+    }
+}
+
+// Legacy exports for backward compatibility (computed dynamically)
+const TOTAL_RESOURCES = DEFAULT_TOTAL_RESOURCES;
+const SYSTEM_RESERVED = PER_SERVER_RESERVED;
 const AVAILABLE_FOR_USERS = {
-    cpu: 3.5,    // 3.5 cores
-    ram: 24,     // 24 GB
-    storage: 200 // 200 GB
+    cpu: DEFAULT_TOTAL_RESOURCES.cpu - PER_SERVER_RESERVED.cpu,
+    ram: DEFAULT_TOTAL_RESOURCES.ram - PER_SERVER_RESERVED.ram,
+    storage: DEFAULT_TOTAL_RESOURCES.storage - PER_SERVER_RESERVED.storage
 };
 
 // Alert threshold (70% of available)
@@ -37,7 +100,7 @@ const ALERT_THRESHOLD = 0.70;
 
 // Signup capacity limit is now admin-configurable via Settings.resourceLimits.signupCapacityLimit (default 200%)
 
-// Plan resource allocation
+// Fallback plan resource allocation (used when user has no resourceAllocation)
 const PLAN_RESOURCES = {
     free: {
         cpu: 0.5,    // 0.5 cores
@@ -61,23 +124,24 @@ const PLAN_RESOURCES = {
  */
 async function getCurrentResourceUsage() {
     try {
+        const { total: aggTotal, available: aggAvailable } = getAggregatedResources();
         const usage = {
             cpu: {
-                total: TOTAL_RESOURCES.cpu,
+                total: aggTotal.cpu,
                 used: 0,
-                available: AVAILABLE_FOR_USERS.cpu,
+                available: aggAvailable.cpu,
                 percentage: 0
             },
             ram: {
-                total: TOTAL_RESOURCES.ram,
+                total: aggTotal.ram,
                 used: 0,
-                available: AVAILABLE_FOR_USERS.ram,
+                available: aggAvailable.ram,
                 percentage: 0
             },
             storage: {
-                total: TOTAL_RESOURCES.storage,
+                total: aggTotal.storage,
                 used: 0,
-                available: AVAILABLE_FOR_USERS.storage,
+                available: aggAvailable.storage,
                 percentage: 0
             }
         };
@@ -154,34 +218,48 @@ async function getCurrentResourceUsage() {
  */
 async function getAllocatedResources() {
     try {
-        const users = await User.find({ status: 'active' });
+        const users = await User.find({ status: 'active' }).select('planType resourceAllocation');
 
         const allocated = {
-            free: { count: 0, cpu: 0, ram: 0, storage: 0 },
-            pro: { count: 0, cpu: 0, ram: 0, storage: 0 },
-            enterprise: { count: 0, cpu: 0, ram: 0, storage: 0 },
             total: { cpu: 0, ram: 0, storage: 0 }
         };
 
         for (const user of users) {
             const plan = user.planType || 'free';
-            const resources = PLAN_RESOURCES[plan] || PLAN_RESOURCES.free;
 
-            // Ensure plan exists in allocated object
+            // Prefer user's actual resourceAllocation (set at signup/upgrade)
+            // Fall back to PLAN_RESOURCES lookup for legacy users
+            let userCpu, userRamGB, userStorage;
+            if (user.resourceAllocation && user.resourceAllocation.cpu) {
+                userCpu = user.resourceAllocation.cpu;
+                userRamGB = (user.resourceAllocation.ram || 512) / 1024;
+                userStorage = user.resourceAllocation.storage || 1;
+            } else {
+                const fallback = PLAN_RESOURCES[plan] || PLAN_RESOURCES.free;
+                userCpu = fallback.cpu;
+                userRamGB = fallback.ram / 1024;
+                userStorage = fallback.storage;
+            }
+
+            // Ensure plan category exists in allocated object
             if (!allocated[plan]) {
                 allocated[plan] = { count: 0, cpu: 0, ram: 0, storage: 0 };
             }
 
             allocated[plan].count++;
-            allocated[plan].cpu += resources.cpu;
-            allocated[plan].ram += resources.ram / 1024; // Convert MB to GB
-            allocated[plan].storage += resources.storage;
+            allocated[plan].cpu += userCpu;
+            allocated[plan].ram += userRamGB;
+            allocated[plan].storage += userStorage;
         }
 
-        // Calculate totals
-        allocated.total.cpu = allocated.free.cpu + allocated.pro.cpu + allocated.enterprise.cpu;
-        allocated.total.ram = allocated.free.ram + allocated.pro.ram + allocated.enterprise.ram;
-        allocated.total.storage = allocated.free.storage + allocated.pro.storage + allocated.enterprise.storage;
+        // Calculate totals by summing ALL plan categories dynamically
+        allocated.total = { cpu: 0, ram: 0, storage: 0 };
+        for (const [key, val] of Object.entries(allocated)) {
+            if (key === 'total') continue;
+            allocated.total.cpu += val.cpu;
+            allocated.total.ram += val.ram;
+            allocated.total.storage += val.storage;
+        }
 
         return allocated;
     } catch (error) {
@@ -196,6 +274,7 @@ async function getAllocatedResources() {
 async function calculateCapacity() {
     try {
         const allocated = await getAllocatedResources();
+        const { available: aggAvailable } = getAggregatedResources();
 
         const capacity = {
             free: 0,
@@ -205,11 +284,11 @@ async function calculateCapacity() {
             limitReached: false
         };
 
-        // Calculate how many users of each plan can be added
+        // Calculate how many users of each plan can be added (using dynamic totals)
         const remaining = {
-            cpu: AVAILABLE_FOR_USERS.cpu - allocated.total.cpu,
-            ram: AVAILABLE_FOR_USERS.ram - allocated.total.ram,
-            storage: AVAILABLE_FOR_USERS.storage - allocated.total.storage
+            cpu: aggAvailable.cpu - allocated.total.cpu,
+            ram: aggAvailable.ram - allocated.total.ram,
+            storage: aggAvailable.storage - allocated.total.storage
         };
 
         // Free plan capacity
@@ -265,10 +344,11 @@ async function canSignupForPlan(plan) {
         }
         const criticalThreshold = criticalThresholdPercent / 100; // Convert 200% → 2.0
 
-        // Calculate how much of total capacity is used
-        const cpuUsageRatio = 1 - (remaining.cpu / AVAILABLE_FOR_USERS.cpu);
-        const ramUsageRatio = 1 - (remaining.ram / AVAILABLE_FOR_USERS.ram);
-        const storageUsageRatio = 1 - (remaining.storage / AVAILABLE_FOR_USERS.storage);
+        // Calculate how much of total capacity is used (dynamic multi-server)
+        const { available: aggAvailable } = getAggregatedResources();
+        const cpuUsageRatio = 1 - (remaining.cpu / aggAvailable.cpu);
+        const ramUsageRatio = 1 - (remaining.ram / aggAvailable.ram);
+        const storageUsageRatio = 1 - (remaining.storage / aggAvailable.storage);
         const maxUsageRatio = Math.max(cpuUsageRatio, ramUsageRatio, storageUsageRatio);
 
         // CRITICAL overload (exceeds admin-set limit) — block signups

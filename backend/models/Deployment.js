@@ -95,8 +95,7 @@ const deploymentSchema = new mongoose.Schema({
   containerName: String,
   port: Number,
   serverKey: {
-    type: String,
-    enum: ['EC2', 'EC3']
+    type: String
   },
 
   // Preview/Production

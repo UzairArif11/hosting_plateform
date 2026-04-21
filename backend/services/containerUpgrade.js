@@ -7,21 +7,19 @@ const Project = require('../models/Project');
 const logger = require('../utils/logger');
 const docker = require('./docker');
 const nginxRouter = require('./nginxRouter');
+const { resolveSSHKey, resolveHost } = require('../utils/serverResolver');
 
-// Helper function to connect to server via SSH
 async function connectToServer(serverKey) {
     const ssh = new NodeSSH();
-    const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
-        : serverKey === 'EC3' ? process.env.SSH_EC3_KEY
-            : process.env.SSH_EC3_KEY;
-
-    const keyContent = fs.readFileSync(keyPath, 'utf8');
-    const host = process.env[`${serverKey}_SERVER_IP`] || process.env.EC3_SERVER_IP;
+    const keyPath = resolveSSHKey(serverKey);
+    if (!keyPath) throw new Error(`No SSH key for ${serverKey}`);
+    const host = resolveHost(serverKey);
+    if (!host) throw new Error(`No host for ${serverKey}`);
 
     await ssh.connect({
-        host: host,
+        host,
         username: process.env.SSH_USERNAME || 'ubuntu',
-        privateKey: keyContent
+        privateKey: fs.readFileSync(keyPath, 'utf8')
     });
 
     return ssh;
@@ -136,7 +134,7 @@ async function upgradeUserContainer(userId, oldPlan, newPlan) {
                     const planDetails = await Plan.findOne({ name: newPlan });
                     if (planDetails) {
                         const resources = await getResourcesForPlan(planDetails);
-                        const host = process.env[`${user.assignedServer}_SERVER_IP`] || process.env.EC3_SERVER_IP;
+                        const host = resolveHost(user.assignedServer);
 
                         // Update container memory/CPU limits live (no restart)
                         await docker.updateContainerResources(user.containerName, {
@@ -175,7 +173,7 @@ async function upgradeUserContainer(userId, oldPlan, newPlan) {
         // Group deployments by server
         const deploymentsByServer = {};
         for (const deployment of deployments) {
-            const serverKey = deployment.serverKey || 'EC3';
+            const serverKey = deployment.serverKey || user.assignedServer || Object.keys(require('./containerOrchestrator').ORACLE_SERVERS).find(k => require('./containerOrchestrator').ORACLE_SERVERS[k].type !== 'api_main');
             if (!deploymentsByServer[serverKey]) {
                 deploymentsByServer[serverKey] = [];
             }
@@ -325,7 +323,7 @@ async function upgradeUserContainer(userId, oldPlan, newPlan) {
                 result.steps.updateNginx = true;
 
                 try {
-                    const host = process.env[`${serverKey}_SERVER_IP`] || process.env.EC3_SERVER_IP;
+                    const host = resolveHost(serverKey);
                     logger.info(`[${userId}] [SYNC_LOG] 🗑️ REMOVING OLD CONTAINER: ${oldContainerName}`);
                     await removeOldContainer(oldContainerName, serverKey);
 
@@ -433,7 +431,7 @@ async function createUpgradedContainer(user, serverKey, deployments, newPlan) {
     try {
         const ssh = await connectToServer(serverKey);
         const server = {
-            host: process.env[`${serverKey}_SERVER_IP`],
+            host: resolveHost(serverKey),
             key: serverKey
         };
 
@@ -462,10 +460,10 @@ async function createUpgradedContainer(user, serverKey, deployments, newPlan) {
 
         // Get first deployment's image
         const isShared = user.planType === 'free';
-        const imageName = isShared ? 'node-pm2-alpine:latest' : (deployments[0].metadata?.imageName || `${deployments[0].projectId.slug}-${deployments[0]._id}`);
+        let imageName = isShared ? 'node-pm2-alpine:latest' : (deployments[0].metadata?.imageName || `${deployments[0].projectId.slug}-${deployments[0]._id}`);
 
         // Create container with upgraded resources
-        const host = process.env[`${serverKey}_SERVER_IP`] || process.env.EC3_SERVER_IP;
+        const host = resolveHost(serverKey);
         const dockerClient = docker.getDockerClient(host);
 
         // Fetch Env Vars from Project (Critical for app startup)
@@ -632,7 +630,7 @@ async function updateNginxForNewContainer(deployment, oldPort, newPort, serverKe
  */
 async function removeOldContainer(containerName, serverKey) {
     try {
-        const host = process.env[`${serverKey}_SERVER_IP`] || process.env.EC3_SERVER_IP;
+        const host = resolveHost(serverKey);
         const dockerClient = docker.getDockerClient(host);
         const container = dockerClient.getContainer(containerName);
 

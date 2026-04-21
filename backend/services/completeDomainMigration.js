@@ -4,21 +4,19 @@ const Settings = require('../models/Settings');
 const Deployment = require('../models/Deployment');
 const logger = require('../utils/logger');
 const domainMigration = require('./domainMigration');
+const { resolveSSHKey, resolveHost } = require('../utils/serverResolver');
 
-// Helper function to connect to server via SSH
 async function connectToServer(serverKey) {
     const ssh = new NodeSSH();
-    const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
-        : serverKey === 'EC3' ? process.env.SSH_EC3_KEY
-            : process.env.SSH_EC3_KEY;
-
-    const keyContent = fs.readFileSync(keyPath, 'utf8');
-    const host = process.env[`${serverKey}_SERVER_IP`] || process.env.EC3_SERVER_IP;
+    const keyPath = resolveSSHKey(serverKey);
+    if (!keyPath) throw new Error(`No SSH key for ${serverKey}`);
+    const host = resolveHost(serverKey);
+    if (!host) throw new Error(`No host for ${serverKey}`);
 
     await ssh.connect({
-        host: host,
+        host,
         username: process.env.SSH_USERNAME || 'ubuntu',
-        privateKey: keyContent
+        privateKey: fs.readFileSync(keyPath, 'utf8')
     });
 
     return ssh;

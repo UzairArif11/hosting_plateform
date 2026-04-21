@@ -13,6 +13,8 @@ interface User {
     plan: string;
     status: string;
     containerType: string;
+    assignedServer?: string;
+    containerName?: string;
     createdAt: string;
     suspendedAt?: string;
     suspensionReason?: string;
@@ -31,10 +33,27 @@ export default function UserManagement() {
         search: ''
     });
     const [showConfirmDialog, setShowConfirmDialog] = useState<any>(null);
+    const [migratingUser, setMigratingUser] = useState<string | null>(null);
+    // Dynamic server list — loaded from DB-backed API (no hardcoded EC2/EC3)
+    const [availableServers, setAvailableServers] = useState<string[]>([]);
 
     useEffect(() => {
         fetchUsers();
+        fetchAvailableServers();
     }, [filter]);
+
+    const fetchAvailableServers = async () => {
+        try {
+            const res = await api.get('/settings/servers');
+            const serverKeys = Object.keys(res.data?.servers || {}).filter(
+                (key) => res.data.servers[key].status === 'active'
+            );
+            setAvailableServers(serverKeys);
+        } catch {
+            // Fallback — show no migrate options rather than crash
+            setAvailableServers([]);
+        }
+    };
 
     const fetchUsers = async () => {
         try {
@@ -193,6 +212,25 @@ export default function UserManagement() {
         fetchUsers();
     };
 
+    const handleMigrateUser = async (userId: string, targetServer: string) => {
+        if (!confirm(`Migrate user to ${targetServer}? This will move their container and data.`)) return;
+        setMigratingUser(userId);
+        try {
+            const res = await api.post(`/admin/users/${userId}/migrate`, { targetServer });
+            if (res.data.success) {
+                toast.success(res.data.message);
+                fetchUsers();
+            } else {
+                toast.error(res.data.error || 'Migration failed');
+            }
+        } catch (error: any) {
+            const msg = error.response?.data?.error || 'Migration failed';
+            toast.error(msg);
+        } finally {
+            setMigratingUser(null);
+        }
+    };
+
     if (loading) {
         return (
             <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex items-center justify-center">
@@ -310,6 +348,9 @@ export default function UserManagement() {
                                 onRecover={() => handleRecoverUser(user._id)}
                                 onPermanentDelete={() => handlePermanentDelete(user._id, user.email)}
                                 onChangePlan={(plan: string) => handleChangePlan(user._id, plan)}
+                                onMigrate={(targetServer: string) => handleMigrateUser(user._id, targetServer)}
+                                isMigrating={migratingUser === user._id}
+                                availableServers={availableServers}
                                 onToggleProtection={async (isProtected: boolean) => {
                                     try {
                                         await api.put(`/admin/users/${user._id}/protection`, { isProtected });
@@ -348,7 +389,7 @@ export default function UserManagement() {
     );
 }
 
-function UserRow({ user, selected, onSelect, onSuspend, onUnsuspend, onDelete, onRecover, onPermanentDelete, onChangePlan, onToggleProtection }: any) {
+function UserRow({ user, selected, onSelect, onSuspend, onUnsuspend, onDelete, onRecover, onPermanentDelete, onChangePlan, onMigrate, isMigrating, availableServers, onToggleProtection }: any) {
     const [showActions, setShowActions] = useState(false);
     const [isProtecting, setIsProtecting] = useState(false);
 
@@ -368,6 +409,18 @@ function UserRow({ user, selected, onSelect, onSuspend, onUnsuspend, onDelete, o
             deleted: 'bg-red-500/20 text-red-400 border-red-500/30'
         };
         return badges[user.status as keyof typeof badges] || badges.active;
+    };
+
+    const getServerBadge = () => {
+        if (!user.assignedServer) return null;
+        // Cosmetic colors for known servers; any new server key gets the generic grey fallback
+        const colors: Record<string, string> = {
+            EC2: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
+            EC3: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+            EC4: 'bg-green-500/20 text-green-400 border-green-500/30',
+            EC5: 'bg-pink-500/20 text-pink-400 border-pink-500/30',
+        };
+        return colors[user.assignedServer] || 'bg-gray-500/20 text-gray-400 border-gray-500/30';
     };
 
     return (
@@ -393,6 +446,11 @@ function UserRow({ user, selected, onSelect, onSuspend, onUnsuspend, onDelete, o
                             <span className="px-3 py-1 rounded-full text-xs font-semibold bg-purple-500/20 text-purple-400 border border-purple-500/30">
                                 {user.plan || 'free'}
                             </span>
+                            {user.assignedServer && (
+                                <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getServerBadge()}`}>
+                                    🖥️ {user.assignedServer}
+                                </span>
+                            )}
                             {user.isProtected && (
                                 <span className="px-3 py-1 rounded-full text-[10px] font-black bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center gap-1 shadow-lg shadow-blue-500/10">
                                     🛡️ PROTECTED
@@ -456,6 +514,25 @@ function UserRow({ user, selected, onSelect, onSuspend, onUnsuspend, onDelete, o
                                 >
                                     {isProtecting ? '...' : user.isProtected ? 'UNPROTECT' : 'PROTECT'}
                                 </button>
+                                {/* Migrate Button — options loaded dynamically from DB */}
+                                {user.assignedServer && availableServers.length > 1 && (
+                                    <select
+                                        onChange={(e) => {
+                                            if (e.target.value) onMigrate(e.target.value);
+                                            e.target.value = '';
+                                        }}
+                                        disabled={isMigrating}
+                                        className={`text-xs bg-cyan-500/20 text-cyan-400 px-3 py-1 rounded border border-cyan-500/30 ${isMigrating ? 'opacity-50 cursor-wait' : ''}`}
+                                    >
+                                        <option value="">{isMigrating ? '⏳ Migrating...' : '🚀 Migrate to...'}</option>
+                                        {availableServers
+                                            .filter((key: string) => key !== user.assignedServer)
+                                            .map((key: string) => (
+                                                <option key={key} value={key}>{key}</option>
+                                            ))
+                                        }
+                                    </select>
+                                )}
                                 <button
                                     onClick={() => {
                                         if (confirm('Delete this user? (15-day recovery period)')) {

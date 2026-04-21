@@ -3,6 +3,7 @@ const router = express.Router({ mergeParams: true });
 const { requireAuth, requireProjectAccess } = require('../../middleware/auth');
 const crypto = require('crypto');
 const logger = require('../../utils/logger');
+const { resolveHost } = require('../../utils/serverResolver');
 
 // POST /api/projects/:id/domains - Add custom domain
 router.post('/', requireAuth, requireProjectAccess('admin'), async (req, res) => {
@@ -38,10 +39,8 @@ router.post('/', requireAuth, requireProjectAccess('admin'), async (req, res) =>
 
         // Get server IP based on which server this project is deployed to
         // Use existing server assignment logic
-        const serverKey = project.serverKey || 'EC2'; // Default to EC2 if not assigned
-        const serverIp = serverKey === 'EC2'
-            ? process.env.EC2_IP || '129.154.255.90'
-            : process.env.EC3_IP || '152.67.11.146';
+        const serverKey = project.serverKey || req.user?.assignedServer;
+        const serverIp = resolveHost(serverKey);
 
         // Add domain to project
         if (!project.domains) {
@@ -187,10 +186,8 @@ router.post('/:domainId/verify', requireAuth, requireProjectAccess('admin'), asy
             }
 
             // Check A record points to our server
-            const serverKey = project.serverKey || 'EC2';
-            const serverIp = serverKey === 'EC2'
-                ? process.env.EC2_IP || '129.154.255.90'
-                : process.env.EC3_IP || '152.67.11.146';
+            const serverKey = project.serverKey || req.user?.assignedServer;
+            const serverIp = resolveHost(serverKey);
 
             const aRecords = await dns.resolve4(domain.domain);
 

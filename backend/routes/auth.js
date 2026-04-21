@@ -521,15 +521,21 @@ const handleDirectRegistration = async (req, res) => {
     }
 
     // Create new user
-    const bcrypt = require('bcrypt');
+    const bcrypt = require('bcryptjs');
     const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Generate username from email (before the @)
+    const baseUsername = email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '') || 'user';
+    // Ensure unique username by appending random suffix
+    const username = `${baseUsername}_${Date.now().toString(36)}`;
 
     const user = new User({
       email,
+      username,
+      displayName: baseUsername,
       password: hashedPassword,
-      plan,
+      provider: 'local',
       planType: plan || 'free',
-      createdAt: new Date()
     });
 
     await user.save();
@@ -604,7 +610,7 @@ const handleLogin = async (req, res) => {
     }
 
     // Find user by email
-    const user = await User.findOne({ email }).populate('plan');
+    const user = await User.findOne({ email }).select('+password').populate('plan');
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });

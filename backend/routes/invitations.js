@@ -55,8 +55,8 @@ router.post('/projects/:id/invitations', requireAuth, async (req, res) => {
             (f.name === 'teamCollaboration')
         );
 
-        // Check collaborator limit
-        const maxCollaborators = collaborationFeature.config?.maxCollaborators || 5;
+        // Check collaborator limit (handle string features and null safely)
+        const maxCollaborators = (typeof collaborationFeature === 'object' && collaborationFeature?.config?.maxCollaborators) || 5;
         const currentCollaborators = project.collaborators.length;
 
         if (currentCollaborators >= maxCollaborators) {

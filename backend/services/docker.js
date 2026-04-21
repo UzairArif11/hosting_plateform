@@ -4,25 +4,25 @@ const logger = require('../utils/logger');
 // Create Docker client
 const createDockerClient = (host = null) => {
   if (host) {
-    // Determine if this host is the local machine (EC1 / API server)
-    const localIP = process.env.EC1_SERVER_IP || 'localhost';
-    const isLocalServer = host === localIP || 
-                         host === 'localhost' || 
-                         host === '127.0.0.1';
+    const isLocalServer = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0';
 
     if (isLocalServer) {
       return new Docker();
     }
 
-    // Determine which server key this host maps to
-    let serverKey;
-    if (host === process.env.EC2_SERVER_IP) {
-      serverKey = 'EC2';
-    } else if (host === process.env.EC3_SERVER_IP) {
-      serverKey = 'EC3';
-    } else {
-      logger.warn(`[DOCKER] Unknown remote host ${host}, defaulting to EC2`);
-      serverKey = 'EC2';
+    // Dynamically resolve which server key owns this host IP
+    let serverKey = null;
+    try {
+      const { ORACLE_SERVERS } = require('./containerOrchestrator');
+      for (const [key, srv] of Object.entries(ORACLE_SERVERS)) {
+        if (srv.host === host) { serverKey = key; break; }
+      }
+    } catch (e) { /* cache may not be loaded yet */ }
+
+    if (!serverKey) {
+      const msg = `[DOCKER] Cannot map host ${host} to any known server key. Ensure this IP is registered in Admin Panel → Servers.`;
+      logger.error(msg);
+      throw new Error(msg);
     }
 
     // Check if this server is actually on the same machine (marked local at startup)

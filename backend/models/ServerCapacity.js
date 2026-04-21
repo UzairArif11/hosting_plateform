@@ -8,8 +8,8 @@ const serverCapacitySchema = new mongoose.Schema({
     serverName: {
         type: String,
         required: true,
-        unique: true,
-        enum: ['EC2', 'EC3']
+        unique: true
+        // No enum – supports any dynamically-added server key (EC2, EC3, EC4 …)
     },
 
     // Total physical resources

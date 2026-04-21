@@ -63,6 +63,13 @@ const userSchema = new mongoose.Schema({
     default: 'local'
   },
 
+  // Password for local authentication
+  password: {
+    type: String,
+    select: false,
+    default: null
+  },
+
   // User role and status
   role: {
     type: String,
@@ -276,8 +283,7 @@ const userSchema = new mongoose.Schema({
   // Oracle Cloud server allocation (Load Balanced EC2/EC3 architecture)
   oracleAccountId: {
     type: String,
-    enum: ['EC1', 'EC2', 'EC3', null],
-    default: null, // EC1: API only, EC2/EC3: Mixed servers with load balancing
+    default: null, // EC1: API only, EC2/EC3/EC4…: Worker servers with load balancing
     description: 'Server assignment in load-balanced architecture'
   },
   containerType: {
@@ -298,7 +304,6 @@ const userSchema = new mongoose.Schema({
   },
   assignedServer: {
     type: String,
-    enum: ['EC2', 'EC3', null],
     default: null
   },
   assignedPort: {
@@ -307,8 +312,7 @@ const userSchema = new mongoose.Schema({
   },
   serverAssignmentHistory: [{
     server: {
-      type: String,
-      enum: ['EC2', 'EC3']
+      type: String
     },
     assignedAt: {
       type: Date,
@@ -497,6 +501,8 @@ const userSchema = new mongoose.Schema({
     virtuals: true,
     transform: function (doc, ret) {
       delete ret.apiKeys; // Never send API keys in JSON
+      delete ret.password; // Never send password hash in JSON
+      delete ret.githubAccessToken; // Never send OAuth token in JSON
       return ret;
     }
   },
@@ -549,6 +555,8 @@ userSchema.pre('save', function (next) {
 userSchema.methods.toJSON = function () {
   const user = this.toObject();
   delete user.apiKeys; // Never expose API keys
+  delete user.password; // Never expose password hash
+  delete user.githubAccessToken; // Never expose OAuth token
   return user;
 };
 
@@ -556,6 +564,11 @@ userSchema.methods.generateApiKey = function () {
   const crypto = require('crypto');
   const key = crypto.randomBytes(32).toString('hex');
   return `vcp_${key}`; // Vercel Clone Platform prefix
+};
+
+userSchema.methods.comparePassword = async function (candidatePassword) {
+  if (!this.password) return false;
+  return bcrypt.compare(candidatePassword, this.password);
 };
 
 userSchema.methods.hasResourceCapacity = function (resourceType, amount) {

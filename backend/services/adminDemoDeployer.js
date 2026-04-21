@@ -11,9 +11,34 @@ const path = require('path');
 const logger = require('../utils/logger');
 const websocketService = require('./websocket');
 
+const { resolveSSHKey, resolveHost } = require('../utils/serverResolver');
+
 const BUILD_DIR = '/tmp/admin-demos';
-const ADMIN_SERVER_IP = process.env.EC2_SERVER_IP || '140.238.229.147';
-const ADMIN_SSH_KEY = process.env.SSH_EC2_KEY || '/home/ubuntu/.ssh/ec2_key';
+
+// Which server key to use for admin demo deployments.
+// Configurable via ADMIN_DEMO_SERVER env var (e.g. 'EC2', 'EC3').
+// Falls back to the first active worker node in ORACLE_SERVERS.
+const getAdminDemoServerKey = () => {
+    const envKey = process.env.ADMIN_DEMO_SERVER;
+    if (envKey) return envKey.toUpperCase();
+    try {
+        const { ORACLE_SERVERS } = require('./containerOrchestrator');
+        const workerKey = Object.keys(ORACLE_SERVERS).find(
+            k => ORACLE_SERVERS[k].type !== 'api_main' && ORACLE_SERVERS[k].host
+        );
+        if (workerKey) return workerKey;
+    } catch (e) { /* cache not ready yet */ }
+    return null;
+};
+// Resolved dynamically at call time so DB-backed cache is always used
+const getAdminServerIP = () => {
+    const key = getAdminDemoServerKey();
+    return (key ? resolveHost(key) : null) || '127.0.0.1';
+};
+const getAdminSSHKey = () => {
+    const key = getAdminDemoServerKey();
+    return (key ? resolveSSHKey(key) : null) || '';
+};
 
 /**
  * Deploy a template as an admin demo
@@ -180,7 +205,7 @@ async function deployAdminDemo({ template, deploymentId }) {
 
         // Stop and remove old container if exists
         try {
-            execSync(`ssh -i ${ADMIN_SSH_KEY} -o StrictHostKeyChecking=no ubuntu@${ADMIN_SERVER_IP} "docker stop ${containerName} 2>/dev/null || true; docker rm ${containerName} 2>/dev/null || true"`, {
+            execSync(`ssh -i ${getAdminSSHKey()} -o StrictHostKeyChecking=no ubuntu@${getAdminServerIP()} "docker stop ${containerName} 2>/dev/null || true; docker rm ${containerName} 2>/dev/null || true"`, {
                 stdio: 'pipe'
             });
         } catch (e) {
@@ -197,7 +222,7 @@ async function deployAdminDemo({ template, deploymentId }) {
 
         // Upload to server
         emitLog('info', '📤 Uploading to server...');
-        execSync(`scp -i ${ADMIN_SSH_KEY} -o StrictHostKeyChecking=no ${tarFile} ubuntu@${ADMIN_SERVER_IP}:/tmp/`, {
+        execSync(`scp -i ${getAdminSSHKey()} -o StrictHostKeyChecking=no ${tarFile} ubuntu@${getAdminServerIP()}:/tmp/`, {
             stdio: 'pipe'
         });
 
@@ -205,7 +230,7 @@ async function deployAdminDemo({ template, deploymentId }) {
         emitLog('info', '🚀 Starting container...');
         const port = 3000 + Math.floor(Math.random() * 1000); // Random port for now
 
-        execSync(`ssh -i ${ADMIN_SSH_KEY} -o StrictHostKeyChecking=no ubuntu@${ADMIN_SERVER_IP} "
+        execSync(`ssh -i ${getAdminSSHKey()} -o StrictHostKeyChecking=no ubuntu@${getAdminServerIP()} "
             mkdir -p /tmp/admin-demos/${containerName} && \
             tar -xzf /tmp/admin-demo-${deploymentId}.tar.gz -C /tmp/admin-demos/${containerName} && \
             docker run -d \
@@ -225,7 +250,7 @@ async function deployAdminDemo({ template, deploymentId }) {
         emitProgress(90);
 
         // Generate demo URL
-        const demoUrl = `http://${ADMIN_SERVER_IP}:${port}`;
+        const demoUrl = `http://${getAdminServerIP()}:${port}`;
 
         emitLog('info', `✅ Admin demo deployed: ${demoUrl}`);
         emitProgress(100, 'success');
@@ -266,7 +291,7 @@ async function removeAdminDemo({ template }) {
     const containerName = `admin-${template.slug}`;
 
     try {
-        execSync(`ssh -i ${ADMIN_SSH_KEY} -o StrictHostKeyChecking=no ubuntu@${ADMIN_SERVER_IP} "
+        execSync(`ssh -i ${getAdminSSHKey()} -o StrictHostKeyChecking=no ubuntu@${getAdminServerIP()} "
             docker stop ${containerName} 2>/dev/null || true && \
             docker rm ${containerName} 2>/dev/null || true && \
             rm -rf /tmp/admin-demos/${containerName} 2>/dev/null || true

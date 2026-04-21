@@ -14,6 +14,7 @@ const githubService = require('./github');
 const websocketService = require('./websocket');
 const logger = require('../utils/logger');
 const notify = require('./notificationService');
+const { resolveHost } = require('../utils/serverResolver');
 
 const BUILD_DIR = process.env.BUILD_DIR || '/tmp/builds';
 const MAX_BUILD_TIME = parseInt(process.env.MAX_BUILD_TIME) || 15 * 60 * 1000; // 15 minutes
@@ -200,7 +201,7 @@ async function executeBuild(deploymentId, callbacks = {}) {
                 const ssh = new NodeSSH();
 
                 const remoteBuild = require('./remoteBuild');
-                const serverHost = deploymentInfo.host || (deploymentInfo.serverKey === 'EC2' ? '129.154.255.90' : '152.67.11.146');
+                const serverHost = deploymentInfo.host || resolveHost(deploymentInfo.serverKey);
                 const sshConfig = remoteBuild.getSSHConfig(deploymentInfo.serverKey, serverHost);
 
                 if (sshConfig) {
@@ -422,7 +423,7 @@ async function executeBuild(deploymentId, callbacks = {}) {
 
             if (user?.assignedServer) {
                 const remoteBuild = require('./remoteBuild');
-                const serverHost = process.env[`${user.assignedServer}_SERVER_IP`] || '129.154.255.90';
+                const serverHost = resolveHost(user.assignedServer);
                 const sshConfig = remoteBuild.getSSHConfig(user.assignedServer, serverHost);
                 if (sshConfig) {
                     const { NodeSSH } = require('node-ssh');
@@ -1110,7 +1111,7 @@ async function buildProject(buildPath, framework, deployment, project, onLog) {
         }
 
         // Determine Node.js version for Docker build
-        const nodeVersion = project.buildConfig?.nodeVersion || template?.buildConfig?.nodeVersion || '20';
+        const nodeVersion = project.buildConfig?.nodeVersion || '20';
         await onLog('info', `Using Node.js version: ${nodeVersion} (in Docker)`);
 
         // Use slim instead of alpine for better compatibility (Next.js SWC on ARM64, OpenSSL)
@@ -1752,7 +1753,7 @@ async function deployToContainer(buildPath, buildOutput, deployment, project, us
 
         return {
             url: deploymentUrl,
-            containerId: containerName,
+            containerId: newContainerId || containerName,
             containerName,
             port,
             serverKey,

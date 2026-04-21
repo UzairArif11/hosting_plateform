@@ -4,6 +4,7 @@ const path = require('path');
 const os = require('os');
 const logger = require('../utils/logger');
 const Settings = require('../models/Settings');
+const { resolveSSHKey } = require('../utils/serverResolver');
 
 /**
  * Get the deployment config file name for a server
@@ -112,19 +113,13 @@ async function updateNginxRouting(projectName, port, serverHost, serverKey, depl
     try {
         logger.info(`Updating Nginx routing for ${projectName} on port ${port} on server ${serverKey}`);
 
-        // Get SSH key based on server
-        const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
-            : serverKey === 'EC3' ? process.env.SSH_EC3_KEY
-                : serverKey === 'EC4' ? process.env.SSH_EC4_KEY
-                    : serverKey === 'EC5' ? process.env.SSH_EC5_KEY
-                        : process.env.SSH_EC3_KEY;
-
-        const keyContent = fs.readFileSync(keyPath, 'utf8');
+        const keyPath = resolveSSHKey(serverKey);
+        if (!keyPath) throw new Error(`No SSH key for server ${serverKey}`);
 
         await ssh.connect({
             host: serverHost,
             username: process.env.SSH_USERNAME || 'ubuntu',
-            privateKey: keyContent
+            privateKey: fs.readFileSync(keyPath, 'utf8')
         });
 
         // Generate Vercel-style unique URL path
@@ -272,24 +267,17 @@ async function removeNginxRouting(deploymentId, serverHost, serverKey) {
     try {
         logger.info(`Removing Nginx routing for deployment ${deploymentId} from server ${serverKey}`);
 
-        // Get SSH key based on server
-        const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
-            : serverKey === 'EC3' ? process.env.SSH_EC3_KEY
-                : serverKey === 'EC4' ? process.env.SSH_EC4_KEY
-                    : serverKey === 'EC5' ? process.env.SSH_EC5_KEY
-                        : process.env.SSH_EC3_KEY;
-
-        const keyContent = fs.readFileSync(keyPath, 'utf8');
+        const keyPath = resolveSSHKey(serverKey);
+        if (!keyPath) throw new Error(`No SSH key for server ${serverKey}`);
 
         await ssh.connect({
             host: serverHost,
             username: process.env.SSH_USERNAME || 'ubuntu',
-            privateKey: keyContent
+            privateKey: fs.readFileSync(keyPath, 'utf8')
         });
 
         const configPath = `/etc/nginx/sites-available/${getDeploymentConfigFile(serverKey)}`;
 
-        // Read existing deployment config (NOT default)
         const readResult = await ssh.execCommand(`sudo cat ${configPath}`);
         if (readResult.code !== 0) {
             logger.warn(`Deployment config file ${configPath} not found, assuming already removed`);
@@ -384,14 +372,9 @@ async function provisionCustomDomainNginx(customDomain, port, serverHost, server
     try {
         logger.info(`Provisioning custom domain Nginx for ${customDomain} → localhost:${port}`);
 
-        const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY
-            : serverKey === 'EC3' ? process.env.SSH_EC3_KEY
-                : serverKey === 'EC4' ? process.env.SSH_EC4_KEY
-                    : serverKey === 'EC5' ? process.env.SSH_EC5_KEY
-                        : process.env.SSH_EC3_KEY;
-
-        const keyContent = fs.readFileSync(keyPath, 'utf8');
-        await ssh.connect({ host: serverHost, username: process.env.SSH_USERNAME || 'ubuntu', privateKey: keyContent });
+        const keyPath = resolveSSHKey(serverKey);
+        if (!keyPath) throw new Error(`No SSH key for server ${serverKey}`);
+        await ssh.connect({ host: serverHost, username: process.env.SSH_USERNAME || 'ubuntu', privateKey: fs.readFileSync(keyPath, 'utf8') });
 
         // Check if SSL cert exists (provisioned by certbot / sslManager)
         const certCheck = await ssh.execCommand(
@@ -486,7 +469,8 @@ async function provisionCustomDomainNginx(customDomain, port, serverHost, server
 async function removeCustomDomainNginx(customDomain, serverHost, serverKey) {
     const ssh = new NodeSSH();
     try {
-        const keyPath = serverKey === 'EC2' ? process.env.SSH_EC2_KEY : process.env.SSH_EC3_KEY;
+        const keyPath = resolveSSHKey(serverKey);
+        if (!keyPath) throw new Error(`No SSH key for server ${serverKey}`);
         await ssh.connect({ host: serverHost, username: process.env.SSH_USERNAME || 'ubuntu', privateKey: fs.readFileSync(keyPath, 'utf8') });
 
         const safeDomain = customDomain.replace(/[^a-z0-9.-]/gi, '');

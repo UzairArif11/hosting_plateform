@@ -23,8 +23,12 @@ const extractTokenFromRequest = (req) => {
 };
 
 const verifyJWTToken = (token) => {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SECRET environment variable is not configured');
+  }
   try {
-    return jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    return jwt.verify(token, secret);
   } catch (error) {
     throw error;
   }

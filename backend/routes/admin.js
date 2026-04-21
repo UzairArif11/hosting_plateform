@@ -12,7 +12,8 @@ const containerUpgrade = require('../services/containerUpgrade');
 const logger = require('../utils/logger');
 const notify = require('../services/notificationService');
 const rateLimit = require('express-rate-limit');
-const { getRemoteSystemStats, getServerUtilization, getRemoteDockerStats, getRemoteContainerLogs, ORACLE_SERVERS } = require('../services/containerOrchestrator');
+const { getRemoteSystemStats, getServerUtilization, getRemoteDockerStats, getRemoteContainerLogs, ORACLE_SERVERS, refreshServerCache, getOracleServers } = require('../services/containerOrchestrator');
+const { resolveHost } = require('../utils/serverResolver');
 const buildQueue = require('../services/buildQueue');
 
 
@@ -303,19 +304,37 @@ router.post('/users/delete-all-soft-deleted', requireAuth, requireAdmin, async (
     res.status(500).json({ success: false, error: 'Failed to delete soft-deleted users' });
   }
 });
-// Get system-wide stats (Host CPU, RAM, Disk)
+// Get system-wide stats (Host CPU, RAM, Disk) for ALL worker servers
 router.get('/system-stats', requireAuth, requireAdmin, async (req, res) => {
   try {
-    // Currently hardcoded to check EC3, but could check all servers
-    const stats = await getRemoteSystemStats('EC3');
+    // Dynamically query all worker servers
+    await getOracleServers(); // ensure cache is fresh
+    const workerKeys = Object.keys(ORACLE_SERVERS).filter(
+      k => ORACLE_SERVERS[k].type !== 'api_main' && ORACLE_SERVERS[k].host
+    );
 
-    if (!stats) {
-      return res.status(500).json({ success: false, error: 'Failed to retrieve system stats' });
+    if (workerKeys.length === 0) {
+      return res.status(404).json({ success: false, error: 'No worker servers registered' });
     }
 
+    const allStats = {};
+    for (const key of workerKeys) {
+      const stats = await getRemoteSystemStats(key);
+      if (stats && stats.success) {
+        allStats[key] = stats;
+      }
+    }
+
+    if (Object.keys(allStats).length === 0) {
+      return res.status(500).json({ success: false, error: 'Failed to retrieve system stats from any server' });
+    }
+
+    // Return first server as `system` for backward-compat, plus full map
+    const firstKey = Object.keys(allStats)[0];
     res.json({
       success: true,
-      system: stats,
+      system: allStats[firstKey],
+      servers: allStats,
       timestamp: new Date()
     });
   } catch (error) {
@@ -641,7 +660,7 @@ router.put('/users/:userId/plan', requireAuth, requireAdmin, async (req, res) =>
     if (user.containerName && user.assignedServer) {
       try {
         const docker = require('../services/docker');
-        const host = process.env[`${user.assignedServer}_SERVER_IP`] || process.env.EC3_SERVER_IP;
+        const host = resolveHost(user.assignedServer);
         const ramGB = newPlan.actualResources?.ram || newPlan.resources?.ram || 0.5;
         const cpu = newPlan.actualResources?.cpu || newPlan.resources?.cpu || 0.5;
         const memoryMB = ramGB * 1024; // GB to MB
@@ -726,19 +745,6 @@ router.delete('/users/:userId', requireAuth, requireAdmin, async (req, res) => {
     user.deletedAt = new Date();
     user.recoveryDeadline = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000); // 15 days
     await user.save();
-
-    // Force-logout the deleted user's active browser session via WebSocket
-    try {
-      const websocketService = require('../services/websocket');
-      const io = websocketService.getIO();
-      if (io) {
-        io.to(`user-${user._id}`).emit('force-logout', {
-          reason: 'Your account has been deleted by an administrator.'
-        });
-      }
-    } catch (wsErr) {
-      logger.warn(`Failed to emit force-logout for ${user.email}: ${wsErr.message}`);
-    }
 
     // Force-logout the deleted user's active browser session via WebSocket
     try {
@@ -897,79 +903,9 @@ router.delete('/users/:userId/permanent', requireAuth, requireAdmin, async (req,
   }
 });
 
-// --- Plan Management Routes ---
+// NOTE: Plan CRUD routes (GET/POST/PUT/DELETE /plans) are defined below
+// in the "PLAN MANAGEMENT ROUTES" section (~L1400) with richer validation and user counts.
 
-// Get all plans
-router.get('/plans', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const plans = await Plan.find().sort({ sortOrder: 1 });
-    res.json({ success: true, plans });
-  } catch (error) {
-    logger.error('Error fetching plans:', error);
-    res.status(500).json({ error: 'Failed to fetch plans' });
-  }
-});
-
-// Get single plan
-router.get('/plans/:id', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const plan = await Plan.findById(req.params.id);
-    if (!plan) return res.status(404).json({ error: 'Plan not found' });
-    res.json({ success: true, plan });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch plan' });
-  }
-});
-
-// Create Plan
-router.post('/plans', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const planData = req.body;
-    logger.info('Attempting to create plan:', { ...planData, features: planData.features?.length }); // Log data
-    const plan = new Plan(planData);
-    await plan.save();
-    res.json({ success: true, plan });
-  } catch (error) {
-    logger.error('Create plan error:', error);
-    // Be verbose about validation errors
-    if (error.name === 'ValidationError') {
-      const messages = Object.values(error.errors).map(val => val.message);
-      logger.error('Validation Messages:', messages);
-      return res.status(400).json({ error: 'Validation Error', details: messages });
-    }
-    res.status(500).json({ error: 'Failed to create plan', details: error.message });
-  }
-});
-
-// Update Plan
-router.put('/plans/:id', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const plan = await Plan.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    if (!plan) return res.status(404).json({ error: 'Plan not found' });
-    res.json({ success: true, plan });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to update plan' });
-  }
-});
-
-// Delete Plan
-router.delete('/plans/:id', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const plan = await Plan.findById(req.params.id);
-    if (!plan) return res.status(404).json({ error: 'Plan not found' });
-
-    // Check if any users are on this plan
-    const userCount = await User.countDocuments({ plan: plan._id });
-    if (userCount > 0) {
-      return res.status(400).json({ error: `Cannot delete plan. ${userCount} users are still assigned to it.` });
-    }
-
-    await Plan.findByIdAndDelete(req.params.id);
-    res.json({ success: true, message: 'Plan deleted' });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to delete plan' });
-  }
-});
 
 // Sync all users on a plan to updated resources
 router.post('/plans/:id/sync', requireAuth, requireAdmin, async (req, res) => {
@@ -1016,7 +952,8 @@ router.post('/plans/:id/sync', requireAuth, requireAdmin, async (req, res) => {
 // Scan for Orphans and Zombies
 router.get('/infra/scan', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const servers = ['EC2', 'EC3']; // Could dynamic list from ORACLE_SERVERS keys
+    await getOracleServers();
+    const servers = Object.keys(ORACLE_SERVERS).filter(k => ORACLE_SERVERS[k].type !== 'api_main');
     const infraData = {
       orphans: [],
       zombies: [],
@@ -1030,16 +967,19 @@ router.get('/infra/scan', requireAuth, requireAdmin, async (req, res) => {
     };
 
     // 1. Get all containers from all servers
+    // docker.listContainers returns { success, containers: [{id,names,image,status,state,created}] }
     const serverContainers = {};
     for (const sKey of servers) {
       try {
         const host = ORACLE_SERVERS[sKey]?.host;
         if (!host) continue;
 
-        const containers = await docker.listContainers(host, true);
-        serverContainers[sKey] = containers;
-        infraData.stats.totalContainers += containers.length;
-        infraData.stats.serverUsage[sKey] = containers.length;
+        const result = await docker.listContainers(host, true);
+        if (!result.success) continue;
+
+        serverContainers[sKey] = result.containers || [];
+        infraData.stats.totalContainers += serverContainers[sKey].length;
+        infraData.stats.serverUsage[sKey] = serverContainers[sKey].length;
       } catch (err) {
         logger.error(`Failed to scan server ${sKey}:`, err.message);
       }
@@ -1054,24 +994,26 @@ router.get('/infra/scan', requireAuth, requireAdmin, async (req, res) => {
     users.forEach(u => dbContainerMap.set(u.containerName, u));
 
     // 3. Find Orphans (On server but not in DB)
-    for (const [sKey, containers] of Object.entries(serverContainers)) {
-      for (const c of containers) {
-        const name = c.Names[0].replace(/^\//, '');
+    for (const [sKey, containerList] of Object.entries(serverContainers)) {
+      for (const c of containerList) {
+        // docker.js returns lowercase fields: names, image, status, state, created
+        const rawName = (c.names && c.names[0]) || '';
+        const name = rawName.replace(/^\//, '');
 
-        // We only care about user containers or our system containers
-        if (!name.startsWith('EC2-') && !name.startsWith('EC3-')) continue;
+        // Match any server-prefixed user container (EC2-, EC3-, EC4-, …)
+        if (!/^EC\d+-/i.test(name)) continue;
 
         if (!dbContainerMap.has(name)) {
           infraData.orphans.push({
             name,
             server: sKey,
-            image: c.Image,
-            status: c.Status,
-            state: c.State,
-            created: new Date(c.Created * 1000)
+            image: c.image,
+            status: c.status,
+            state: c.state,
+            created: typeof c.created === 'number' ? new Date(c.created * 1000) : c.created
           });
         } else {
-          dbContainerMap.delete(name); // Remove found containers from map
+          dbContainerMap.delete(name);
           infraData.active.push({
             name,
             server: sKey,
@@ -1607,17 +1549,16 @@ router.delete('/plans/:id', requireAuth, requireAdmin, async (req, res) => {
 
 // ==================== SERVER MANAGEMENT ROUTES ====================
 
-// Get all servers with real-time stats
+// Get all servers with real-time stats (uses dynamic server list from DB cache)
 router.get('/servers', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const servers = ['EC2', 'EC3'];
+    await getOracleServers(); // ensure cache is fresh
+    const serverKeys = Object.keys(ORACLE_SERVERS).filter(k => ORACLE_SERVERS[k].type !== 'api_main');
 
     const serverStats = await Promise.all(
-      servers.map(async (serverKey) => {
+      serverKeys.map(async (serverKey) => {
         const stats = await getRemoteSystemStats(serverKey);
         const utilization = await getServerUtilization(serverKey);
-
-        // Count containers on this server
         const containerCount = await User.countDocuments({ assignedServer: serverKey });
 
         return {
@@ -1639,6 +1580,44 @@ router.get('/servers', requireAuth, requireAdmin, async (req, res) => {
   } catch (error) {
     logger.error('Get servers error:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch server stats' });
+  }
+});
+
+// ─── IMPORTANT: /servers/health MUST be registered BEFORE /servers/:serverKey ──
+// Otherwise Express matches "health" as a serverKey parameter.
+router.get('/servers/health', requireAuth, requireAdmin, serverLogsLimiter, async (req, res) => {
+  try {
+    await getOracleServers(); // ensure cache is fresh
+    const { testSSHConnection } = require('../services/remoteBuild');
+    const sshTunnelManager = require('../services/sshTunnelManager');
+
+    const healthStatus = {};
+
+    for (const [key, server] of Object.entries(ORACLE_SERVERS)) {
+      if (server.type === 'api_main') {
+        healthStatus[key] = { status: 'active', ssh: true, docker: true, type: server.type };
+        continue;
+      }
+
+      const sshResult = await testSSHConnection(server.host, key);
+      const tunnelActive = sshTunnelManager.isTunnelActive(key);
+
+      healthStatus[key] = {
+        status: sshResult.success ? 'active' : 'offline',
+        ssh: sshResult.success,
+        tunnelActive,
+        dockerVersion: sshResult.dockerVersion,
+        diskSpace: sshResult.diskSpace,
+        error: sshResult.error,
+        type: server.type,
+        host: server.host
+      };
+    }
+
+    res.json({ success: true, servers: healthStatus });
+  } catch (err) {
+    logger.error('Error fetching server health:', err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -1677,6 +1656,216 @@ router.get('/servers/:serverKey', requireAuth, requireAdmin, async (req, res) =>
   } catch (error) {
     logger.error('Get server details error:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch server details' });
+  }
+});
+
+// ─── Server CRUD ─────────────────────────────────────────────────────────────
+
+// Create a new server (admin can add EC4, EC5, … dynamically)
+router.post('/servers', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const {
+      key, name, host, domain, type, description,
+      totalCPU, totalRAM, maxContainers,
+      sharedPool, dedicatedPool,
+      sshKey, sshKeyEnvVar, region, priority,
+      acceptNewUsers, notes
+    } = req.body;
+
+    if (!key || !host) {
+      return res.status(400).json({ success: false, error: 'key and host are required' });
+    }
+
+    const Server = require('../models/Server');
+    const existing = await Server.findOne({ key: key.toUpperCase() });
+    if (existing) {
+      return res.status(409).json({ success: false, error: `Server key '${key}' already exists` });
+    }
+
+    const serverDoc = await Server.create({
+      key: key.toUpperCase(),
+      name: name || `${key.toUpperCase()}-Server`,
+      host,
+      domain: domain || '',
+      type: type || 'mixed_users',
+      description: description || '',
+      totalCPU: totalCPU || 4,
+      totalRAM: totalRAM || 24,
+      maxContainers: maxContainers || 200,
+      sharedPool: sharedPool || { maxUsers: 150, cpuLimit: 2, ramLimit: 12 },
+      dedicatedPool: dedicatedPool || { maxUsers: 50, cpuLimit: 2, ramLimit: 12 },
+      sshKey: sshKey || '',
+      sshKeyEnvVar: sshKeyEnvVar || `SSH_${key.toUpperCase()}_KEY`,
+      region: region || '',
+      priority: priority || 10,
+      isActive: true,
+      acceptNewUsers: acceptNewUsers !== false,
+      notes: notes || ''
+    });
+
+    await refreshServerCache();
+    logger.info(`Admin created new server ${serverDoc.key}`, { adminId: req.user._id });
+
+    res.status(201).json({ success: true, server: serverDoc });
+  } catch (error) {
+    logger.error('Create server error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to create server' });
+  }
+});
+
+// Update an existing server's full configuration
+router.put('/servers/:serverKey/config', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { serverKey } = req.params;
+    const Server = require('../models/Server');
+
+    const allowed = [
+      'name', 'host', 'domain', 'type', 'description',
+      'totalCPU', 'totalRAM', 'maxContainers',
+      'sharedPool', 'dedicatedPool',
+      'sshKey', 'sshKeyEnvVar', 'region', 'priority',
+      'isActive', 'acceptNewUsers', 'notes'
+    ];
+    const updates = {};
+    allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
+
+    const serverDoc = await Server.findOneAndUpdate(
+      { key: serverKey.toUpperCase() },
+      { $set: updates },
+      { new: true }
+    );
+    if (!serverDoc) {
+      return res.status(404).json({ success: false, error: `Server '${serverKey}' not found` });
+    }
+
+    await refreshServerCache();
+    logger.info(`Admin updated server ${serverKey} config`, { adminId: req.user._id, updates });
+
+    res.json({ success: true, server: serverDoc });
+  } catch (error) {
+    logger.error('Update server config error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to update server' });
+  }
+});
+
+// Delete a server (only if no users are assigned)
+router.delete('/servers/:serverKey', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { serverKey } = req.params;
+    const key = serverKey.toUpperCase();
+
+    const userCount = await User.countDocuments({ assignedServer: key });
+    if (userCount > 0) {
+      return res.status(409).json({
+        success: false,
+        error: `Cannot delete server '${key}' — ${userCount} user(s) are still assigned to it. Migrate or remove them first.`
+      });
+    }
+
+    const Server = require('../models/Server');
+    const deleted = await Server.findOneAndDelete({ key });
+    if (!deleted) {
+      return res.status(404).json({ success: false, error: `Server '${key}' not found` });
+    }
+
+    await refreshServerCache();
+    logger.info(`Admin deleted server ${key}`, { adminId: req.user._id });
+
+    res.json({ success: true, message: `Server '${key}' deleted` });
+  } catch (error) {
+    logger.error('Delete server error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to delete server' });
+  }
+});
+
+// ─── Toggle / notes ──────────────────────────────────────────────────────────
+
+// Toggle server accepting new users (writes to Server model, refreshes cache)
+router.put('/servers/:serverKey/toggle', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { serverKey } = req.params;
+    const { acceptNewUsers, notes } = req.body;
+
+    const Server = require('../models/Server');
+    const serverDoc = await Server.findOne({ key: serverKey.toUpperCase() });
+    if (!serverDoc) {
+      return res.status(404).json({ success: false, error: `Server '${serverKey}' not found` });
+    }
+
+    if (acceptNewUsers !== undefined) serverDoc.acceptNewUsers = acceptNewUsers;
+    if (notes !== undefined) serverDoc.notes = notes;
+    await serverDoc.save();
+
+    // Refresh in-memory cache immediately
+    await refreshServerCache();
+
+    const userCount = await User.countDocuments({ assignedServer: serverKey.toUpperCase() });
+    logger.info(`Server ${serverKey} registration toggled by admin`, {
+      adminId: req.user._id, serverKey, acceptNewUsers: serverDoc.acceptNewUsers
+    });
+
+    res.json({
+      success: true,
+      serverKey,
+      acceptNewUsers: serverDoc.acceptNewUsers,
+      notes: serverDoc.notes,
+      currentUsers: userCount,
+      message: `${serverKey} ${serverDoc.acceptNewUsers ? 'now accepts' : 'no longer accepts'} new user registrations`
+    });
+  } catch (error) {
+    logger.error('Toggle server error:', error);
+    res.status(500).json({ success: false, error: 'Failed to toggle server' });
+  }
+});
+
+// Migrate user container to different server
+router.post('/users/:userId/migrate', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { targetServer } = req.body;
+
+    await getOracleServers();
+    if (!ORACLE_SERVERS[targetServer] || ORACLE_SERVERS[targetServer].type === 'api_main') {
+      return res.status(400).json({ success: false, error: `Invalid target server '${targetServer}'. Must be a worker node.` });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const currentServer = user.assignedServer || user.oracleAccountId;
+    if (currentServer === targetServer) {
+      return res.status(400).json({ success: false, error: `User is already on ${targetServer}` });
+    }
+
+    logger.info('Admin initiated user migration', {
+      adminId: req.user._id,
+      userId,
+      username: user.username,
+      from: currentServer,
+      to: targetServer
+    });
+
+    const { migrateUserToServer } = require('../services/containerOrchestrator');
+    const result = await migrateUserToServer(userId, targetServer);
+
+    if (result.success) {
+      res.json({
+        success: true,
+        message: `User ${user.username} migrated from ${currentServer} to ${targetServer}`,
+        migration: result.migration
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: result.error,
+        message: `Migration failed for user ${user.username}`
+      });
+    }
+  } catch (error) {
+    logger.error('User migration error:', error);
+    res.status(500).json({ success: false, error: 'Failed to migrate user' });
   }
 });
 
@@ -1831,30 +2020,28 @@ router.get('/servers/:serverKey/docker-stats', requireAuth, requireAdmin, async 
 router.get('/servers/:serverKey/capacity', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { serverKey } = req.params;
+    const key = serverKey.toUpperCase();
 
-    if (!['EC2', 'EC3'].includes(serverKey)) {
-      return res.status(400).json({ success: false, error: 'Invalid server key' });
+    await getOracleServers();
+    if (!ORACLE_SERVERS[key]) {
+      return res.status(404).json({ success: false, error: `Server '${key}' not found` });
     }
 
-    let capacity = await ServerCapacity.findOne({ serverName: serverKey });
+    let capacity = await ServerCapacity.findOne({ serverName: key });
 
-    // Create if doesn't exist
+    // Create capacity record from Server model defaults if it doesn't exist yet
     if (!capacity) {
-      const defaults = {
-        EC2: { cpu: 4, ram: 24, storage: 200, bandwidth: 5000 },
-        EC3: { cpu: 8, ram: 48, storage: 400, bandwidth: 10000 }
-      };
-
+      const srv = ORACLE_SERVERS[key];
       capacity = new ServerCapacity({
-        serverName: serverKey,
-        totalResources: defaults[serverKey]
+        serverName: key,
+        totalResources: { cpu: srv.totalCPU || 4, ram: srv.totalRAM || 24, storage: 200, bandwidth: 5000 }
       });
       await capacity.save();
     }
 
     // Get current user counts per plan
     const planCounts = await User.aggregate([
-      { $match: { assignedServer: serverKey } },
+      { $match: { assignedServer: key } },
       {
         $lookup: {
           from: 'plans',
@@ -1892,9 +2079,10 @@ router.get('/servers/:serverKey/capacity', requireAuth, requireAdmin, async (req
 router.put('/servers/:serverKey/capacity/resources', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { serverKey } = req.params;
+    const key = serverKey.toUpperCase();
     const { totalResources, reservedResources, warningThresholds, overselling } = req.body;
 
-    let capacity = await ServerCapacity.findOne({ serverName: serverKey });
+    let capacity = await ServerCapacity.findOne({ serverName: key });
     if (!capacity) {
       return res.status(404).json({ success: false, error: 'Server capacity not found' });
     }
@@ -1946,13 +2134,14 @@ router.put('/servers/:serverKey/capacity/resources', requireAuth, requireAdmin, 
 router.put('/servers/:serverKey/capacity/plan-limits', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { serverKey } = req.params;
+    const key = serverKey.toUpperCase();
     const { planName, maxUsers, priority } = req.body;
 
     if (!planName) {
       return res.status(400).json({ success: false, error: 'planName is required' });
     }
 
-    let capacity = await ServerCapacity.findOne({ serverName: serverKey });
+    let capacity = await ServerCapacity.findOne({ serverName: key });
     if (!capacity) {
       return res.status(404).json({ success: false, error: 'Server capacity not found' });
     }
@@ -1978,7 +2167,7 @@ router.put('/servers/:serverKey/capacity/plan-limits', requireAuth, requireAdmin
 
     // Get current user count for this plan
     const currentCount = await User.countDocuments({
-      assignedServer: serverKey,
+      assignedServer: key,
       planType: planName
     });
 
@@ -2015,7 +2204,7 @@ router.post('/servers/:serverKey/capacity/calculate', requireAuth, requireAdmin,
       });
     }
 
-    const result = await ServerCapacity.calculatePlanCapacity(serverKey, planResources);
+    const result = await ServerCapacity.calculatePlanCapacity(serverKey.toUpperCase(), planResources);
 
     res.json(result);
   } catch (error) {
@@ -2024,121 +2213,8 @@ router.post('/servers/:serverKey/capacity/calculate', requireAuth, requireAdmin,
   }
 });
 
-// Get detailed Docker stats for a server
-router.get('/servers/:serverKey/docker-stats', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const { serverKey } = req.params;
-
-    if (!ORACLE_SERVERS[serverKey]) {
-      return res.status(404).json({ success: false, error: 'Server not found' });
-    }
-
-    const host = ORACLE_SERVERS[serverKey].host;
-    const dockerClient = docker.getDockerClient(host);
-
-    // Get all containers
-    const containers = await dockerClient.listContainers({ all: true });
-
-    // Get detailed stats for each container
-    const containerStats = await Promise.all(
-      containers.map(async (containerInfo) => {
-        try {
-          const container = dockerClient.getContainer(containerInfo.Id);
-
-          // Get stats (1 second sample)
-          const stats = await container.stats({ stream: false });
-
-          // Calculate CPU %
-          const cpuDelta = stats.cpu_stats.cpu_usage.total_usage -
-            (stats.precpu_stats.cpu_usage?.total_usage || 0);
-          const systemDelta = stats.cpu_stats.system_cpu_usage -
-            (stats.precpu_stats.system_cpu_usage || 0);
-          const cpuPercent = systemDelta > 0
-            ? (cpuDelta / systemDelta) * stats.cpu_stats.online_cpus * 100
-            : 0;
-
-          // Calculate Memory %
-          const memUsage = stats.memory_stats.usage || 0;
-          const memLimit = stats.memory_stats.limit || 1;
-          const memPercent = (memUsage / memLimit) * 100;
-
-          // Network I/O
-          const networks = stats.networks || {};
-          const networkIO = Object.values(networks).reduce((acc, net) => ({
-            rx_bytes: acc.rx_bytes + (net.rx_bytes || 0),
-            tx_bytes: acc.tx_bytes + (net.tx_bytes || 0)
-          }), { rx_bytes: 0, tx_bytes: 0 });
-
-          return {
-            id: containerInfo.Id.substring(0, 12),
-            name: containerInfo.Names[0]?.replace(/^\//, ''),
-            image: containerInfo.Image,
-            state: containerInfo.State,
-            status: containerInfo.Status,
-            created: new Date(containerInfo.Created * 1000),
-            stats: {
-              cpu: cpuPercent.toFixed(2) + '%',
-              memory: {
-                usage: (memUsage / 1024 / 1024).toFixed(2) + ' MB',
-                limit: (memLimit / 1024 / 1024).toFixed(2) + ' MB',
-                percent: memPercent.toFixed(2) + '%'
-              },
-              network: {
-                rx: (networkIO.rx_bytes / 1024 / 1024).toFixed(2) + ' MB',
-                tx: (networkIO.tx_bytes / 1024 / 1024).toFixed(2) + ' MB'
-              },
-              pids: stats.pids_stats?.current || 0
-            }
-          };
-        } catch (statsError) {
-          // If stats fail, return basic info
-          return {
-            id: containerInfo.Id.substring(0, 12),
-            name: containerInfo.Names[0]?.replace(/^\//, ''),
-            image: containerInfo.Image,
-            state: containerInfo.State,
-            status: containerInfo.Status,
-            stats: { error: 'Stats unavailable (container may be stopped)' }
-          };
-        }
-      })
-    );
-
-    // Get Docker system info
-    const systemInfo = await dockerClient.info();
-
-    res.json({
-      success: true,
-      server: serverKey,
-      docker: {
-        containers: {
-          total: containerStats.length,
-          running: containerStats.filter(c => c.state === 'running').length,
-          stopped: containerStats.filter(c => c.state === 'exited').length,
-          list: containerStats
-        },
-        system: {
-          version: systemInfo.ServerVersion,
-          kernelVersion: systemInfo.KernelVersion,
-          operatingSystem: systemInfo.OperatingSystem,
-          architecture: systemInfo.Architecture,
-          cpus: systemInfo.NCPU,
-          totalMemory: (systemInfo.MemTotal / 1024 / 1024 / 1024).toFixed(2) + ' GB',
-          images: systemInfo.Images,
-          driver: systemInfo.Driver
-        }
-      },
-      timestamp: new Date()
-    });
-  } catch (error) {
-    logger.error('Get Docker stats error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch Docker stats',
-      details: error.message
-    });
-  }
-});
+// NOTE: Duplicate GET /servers/:serverKey/docker-stats was removed.
+// The primary handler is registered earlier (~line 1899) and uses SSH-based real stats.
 
 // ==================== ADMIN PROJECT REBUILD ====================
 
@@ -2359,7 +2435,7 @@ router.post('/manual-payments/:id/verify', requireAuth, requireAdmin, async (req
       if (user.containerName && user.assignedServer) {
         try {
           const docker = require('../services/docker');
-          const host = process.env[`${user.assignedServer}_SERVER_IP`] || process.env.EC3_SERVER_IP;
+          const host = resolveHost(user.assignedServer);
           const ramGB = plan.actualResources?.ram || plan.resources?.ram || 0.5;
           const cpu = plan.actualResources?.cpu || plan.resources?.cpu || 0.5;
           await docker.updateContainerResources(user.containerName, { memory: ramGB * 1024, cpu }, host);
@@ -2481,50 +2557,7 @@ router.post('/manual-payments/:id/reject', requireAuth, requireAdmin, async (req
   }
 });
 
-// Get system health for all servers
-router.get('/servers/health', requireAuth, requireAdmin, serverLogsLimiter, async (req, res) => {
-  try {
-    const { ORACLE_SERVERS } = require('../services/containerOrchestrator');
-    const { testSSHConnection } = require('../services/remoteBuild');
-    const sshTunnelManager = require('../services/sshTunnelManager');
-
-    const healthStatus = {};
-
-    for (const [key, server] of Object.entries(ORACLE_SERVERS)) {
-      if (key === 'EC1') {
-        healthStatus[key] = {
-          status: 'active',
-          ssh: true,
-          docker: true,
-          type: server.type
-        };
-        continue;
-      }
-
-      // Test SSH
-      const sshResult = await testSSHConnection(server.host, key);
-      
-      // Check Tunnel
-      const tunnelActive = sshTunnelManager.isTunnelActive(key);
-
-      healthStatus[key] = {
-        status: sshResult.success ? 'active' : 'offline',
-        ssh: sshResult.success,
-        tunnelActive,
-        dockerVersion: sshResult.dockerVersion,
-        diskSpace: sshResult.diskSpace,
-        error: sshResult.error,
-        type: server.type,
-        host: server.host
-      };
-    }
-
-    res.json({ success: true, servers: healthStatus });
-  } catch (err) {
-    logger.error('Error fetching server health:', err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+// NOTE: GET /servers/health is registered earlier (before /servers/:serverKey) for correct Express routing.
 
 // Run a manual test deployment on a specific server
 router.post('/servers/:serverKey/test-deploy', requireAuth, requireAdmin, testDeployLimiter, async (req, res) => {

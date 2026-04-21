@@ -7,6 +7,7 @@ const { requireAdmin } = require('../middleware/admin');
 const logger = require('../utils/logger');
 const templateDeployer = require('../services/templateDeployer');
 const websocketService = require('../services/websocket');
+const { resolveHost } = require('../utils/serverResolver');
 
 // Timeout: 10 minutes
 const DEPLOYMENT_TIMEOUT_MS = 10 * 60 * 1000;
@@ -356,8 +357,7 @@ router.delete('/:id/remove-demo', requireAuth, requireAdmin, async (req, res) =>
                 if (deployment.deploymentUrl && deployment.serverKey) {
                     try {
                         const serverKey = deployment.serverKey;
-                        const serverHost = process.env[`${serverKey}_SERVER_IP`] ||
-                            (serverKey === 'EC2' ? process.env.EC2_SERVER_IP : process.env.EC3_SERVER_IP);
+                        const serverHost = resolveHost(serverKey);
 
                         if (serverHost) {
                             await nginxRouter.removeNginxRouting(
