@@ -13,6 +13,9 @@
 
 ## BTCPay Server (Bitcoin Payments)
 
+> **Storage:** Uses pruned Bitcoin node (`opt-save-storage-s`) — only ~5-10GB instead of 500GB+.  
+> **Payments work identically** — pruning only removes old block data, not the UTXO set.
+
 ### Quick Setup
 
 ```bash
@@ -79,6 +82,24 @@ docker ps | grep btcpay                        # Status
 docker logs -f generated_btcpayserver_1         # Logs
 docker restart generated_btcpayserver_1         # Restart
 cd /opt/btcpayserver-docker && btcpay-update.sh # Update
+docker system df                                # Check disk usage
+```
+
+### Storage Emergency (if blockchain fills disk)
+
+```bash
+# 1. Stop BTCPay
+cd /opt/btcpayserver-docker
+docker compose -f Generated/docker-compose.generated.yml down
+
+# 2. Delete the bloated Bitcoin data volume
+docker volume rm generated_bitcoin_datadir
+
+# 3. Clean dangling volumes
+docker volume prune -f
+
+# 4. Re-run setup with pruning enabled (already in updated script)
+./setup-btcpay.sh pay.yourdomain.com testnet
 ```
 
 ### Testnet Faucets

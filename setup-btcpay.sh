@@ -16,7 +16,7 @@
 #   ./setup-btcpay.sh pay.yourdomain.com regtest    # Local testing (instant blocks)
 #
 # Prerequisites:
-#   - Ubuntu/Debian VPS (minimum: 1 CPU, 2GB RAM, 80GB SSD for mainnet)
+#   - Ubuntu/Debian VPS (minimum: 1 CPU, 2GB RAM, 20GB SSD — pruned node)
 #   - Root or sudo access
 #   - Domain DNS A record pointing to this server's IP
 #
@@ -152,6 +152,12 @@ export BTCPAY_ENABLE_SSH=true
 
 BTCPAY_INTERNAL_PORT=49392
 
+# ── CRITICAL: Enable pruned Bitcoin node to save storage ──
+# Without this, Bitcoin downloads the FULL blockchain (500GB+ mainnet, 50GB+ testnet)
+# opt-save-storage-s = aggressive pruning, keeps blockchain under ~5GB
+# This does NOT affect payment functionality — BTCPay/NBXplorer only needs the UTXO set
+STORAGE_FRAGMENTS="opt-save-storage-s"
+
 # Add Lightning for mainnet (optional but recommended)
 if [ "$NETWORK_MODE" == "mainnet" ]; then
     export BTCPAYGEN_LIGHTNING="clightning"
@@ -160,15 +166,21 @@ fi
 
 # Add regtest configurator
 if [ "$NETWORK_MODE" == "regtest" ]; then
-    export BTCPAYGEN_ADDITIONAL_FRAGMENTS="opt-add-configurator"
+    STORAGE_FRAGMENTS="${STORAGE_FRAGMENTS};opt-add-configurator"
     echo -e "${GREEN}Regtest configurator: enabled${NC}"
 fi
+
+# Apply storage optimization fragments
+export BTCPAYGEN_ADDITIONAL_FRAGMENTS="$STORAGE_FRAGMENTS"
+echo -e "${GREEN}Storage mode: PRUNED (opt-save-storage-s) — max ~5GB blockchain data${NC}"
 
 echo -e "${GREEN}Host:        $BTCPAY_HOST${NC}"
 echo -e "${GREEN}Network:     $NBITCOIN_NETWORK${NC}"
 echo -e "${GREEN}Crypto:      $BTCPAYGEN_CRYPTO1${NC}"
 echo -e "${GREEN}Proxy:       none (uses existing nginx)${NC}"
 echo -e "${GREEN}Internal:    port $BTCPAY_INTERNAL_PORT${NC}"
+echo -e "${GREEN}Fragments:   $BTCPAYGEN_ADDITIONAL_FRAGMENTS${NC}"
+echo -e "${GREEN}Max Storage: ~5-10GB (pruned)${NC}"
 
 # ─────────────────────────────────────────────────────────────
 # Step 4: Run BTCPay Setup
