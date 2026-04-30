@@ -52,17 +52,20 @@ function rebuildSharedResourceCaps() {
 /**
  * ORACLE_SERVERS — mutable in-memory cache populated from the Server DB model.
  *
- * All existing consumers use this object synchronously (e.g. ORACLE_SERVERS['EC2']).
- * We mutate the object **in-place** on every cache refresh so that all existing
- * module-level imports (`const { ORACLE_SERVERS } = require(...)`) see live data
- * without needing to be converted to async calls.
+ * Sole source of truth at runtime. All consumers use this object synchronously
+ * (e.g. `ORACLE_SERVERS['EC2']`). We mutate the object **in-place** on every
+ * cache refresh so that all existing module-level imports
+ * (`const { ORACLE_SERVERS } = require(...)`) see live data without being
+ * converted to async calls.
  *
- * The cache is seeded from .env on startup (before the DB is ready) and then
- * overwritten from MongoDB once the DB is connected.  Admin writes call
- * refreshServerCache() immediately so changes take effect within the same request.
+ * Lifecycle:
+ *   • Starts empty.
+ *   • `refreshServerCache()` populates it from MongoDB after DB connect.
+ *   • Every admin CRUD on `/admin/servers/*` calls `refreshServerCache()`
+ *     so changes take effect within the same request, no restart needed.
+ *   • If the DB has zero servers (fresh install or admin deleted everything),
+ *     the cache is cleared too — never holds stale data.
  */
-// Starts empty — populated from MongoDB by refreshServerCache() during startup.
-// If the DB has no servers yet (fresh install), the admin adds them from the UI.
 const ORACLE_SERVERS = {};
 
 // Timestamp of last successful DB load
@@ -71,57 +74,65 @@ const SERVER_CACHE_TTL = 60 * 1000; // refresh from DB at most once per minute
 
 /**
  * Refresh ORACLE_SERVERS in-place from the Server collection.
- * Safe to call at any time; failures are logged but do not crash the process.
+ * Safe to call at any time; transient failures are logged but never crash the
+ * process. On a successful read we always reflect the DB exactly — including
+ * the case where the DB has no servers (cache becomes empty, not stale).
  */
 async function refreshServerCache() {
+  let dbServers;
   try {
     const Server = require('../models/Server');
-    const dbServers = await Server.find({}).lean();
-    // If DB returns nothing (first boot before seeding), keep the .env fallback intact
-    if (!dbServers || dbServers.length === 0) return;
+    dbServers = await Server.find({}).lean();
+  } catch (err) {
+    // DB unreachable — keep current cache to survive transient failures.
+    logger.warn('[ServerCache] DB read failed (keeping last known cache): ' + (err.message || err));
+    return;
+  }
 
-    // Snapshot current keys so we can restore if something goes wrong
-    const snapshot = { ...ORACLE_SERVERS };
-    try {
-      // Clear all current keys then repopulate in-place so existing references stay valid
-      Object.keys(ORACLE_SERVERS).forEach(k => delete ORACLE_SERVERS[k]);
+  // Snapshot current cache so we can restore on a partial-population failure.
+  const snapshot = { ...ORACLE_SERVERS };
+  try {
+    // Clear all current keys, then repopulate in-place so existing references stay valid.
+    Object.keys(ORACLE_SERVERS).forEach(k => delete ORACLE_SERVERS[k]);
 
-    for (const s of dbServers) {
+    for (const s of dbServers || []) {
       ORACLE_SERVERS[s.key] = {
-        name:          s.name,
-        host:          s.host,
-        domain:        s.domain || '',
-        type:          s.type,
-        description:   s.description || '',
-        isActive:      s.isActive !== false,
-        enabled:       s.enabled !== false,
+        name:           s.name,
+        host:           s.host,
+        domain:         s.domain || '',
+        type:           s.type,
+        description:    s.description || '',
+        isActive:       s.isActive !== false,
+        enabled:        s.enabled !== false,
         acceptNewUsers: s.acceptNewUsers !== false,
-        notes:         s.notes || '',
-        sshKey:        s.sshKey || '',
-        sshKeyEnvVar:  s.sshKeyEnvVar || '',
-        totalCPU:      s.totalCPU,
-        totalRAM:      s.totalRAM,
-        maxContainers: s.maxContainers,
-        sharedPool:    s.sharedPool,
-        dedicatedPool: s.dedicatedPool
+        notes:          s.notes || '',
+        sshKey:         s.sshKey || '',
+        sshKeyEnvVar:   s.sshKeyEnvVar || '',
+        totalCPU:       s.totalCPU,
+        totalRAM:       s.totalRAM,
+        maxContainers:  s.maxContainers,
+        sharedPool:     s.sharedPool,
+        dedicatedPool:  s.dedicatedPool
       };
     }
 
-      _serverCacheTime = Date.now();
-      logger.info(`[ServerCache] Loaded ${dbServers.length} servers from DB: ${Object.keys(ORACLE_SERVERS).join(', ')}`);
-      rebuildSharedResourceCaps();
-    } catch (populateErr) {
-      // Restore snapshot so ORACLE_SERVERS is never empty
-      Object.keys(ORACLE_SERVERS).forEach(k => delete ORACLE_SERVERS[k]);
-      Object.assign(ORACLE_SERVERS, snapshot);
-      throw populateErr;
-    }
-  } catch (err) {
-    logger.warn('[ServerCache] Refresh failed (DB not ready?): ' + (err.message || err));
+    _serverCacheTime = Date.now();
+    const keys = Object.keys(ORACLE_SERVERS);
+    logger.info(
+      keys.length > 0
+        ? `[ServerCache] Loaded ${keys.length} server(s) from DB: ${keys.join(', ')}`
+        : '[ServerCache] DB has no servers — cache empty. Admin can add servers via Admin Panel.'
+    );
+    rebuildSharedResourceCaps();
+  } catch (populateErr) {
+    // Restore snapshot so we never leave the cache in a partial state.
+    Object.keys(ORACLE_SERVERS).forEach(k => delete ORACLE_SERVERS[k]);
+    Object.assign(ORACLE_SERVERS, snapshot);
+    logger.error('[ServerCache] Refresh failed mid-populate; restored previous cache: ' + (populateErr.message || populateErr));
   }
 }
 
-// No auto-seeding — admin adds all servers from Admin Panel → Servers page.
+// No auto-seeding. Admin adds every server through Admin Panel → Servers.
 
 /**
  * Returns the live ORACLE_SERVERS map, refreshing from DB if the TTL has expired.

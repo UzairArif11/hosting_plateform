@@ -64,7 +64,7 @@ interface DNSInstructions {
 
 const defaultAddForm: AddServerForm = {
     key: '', name: '', host: '', domain: '', type: 'mixed_users', description: '',
-    totalCPU: 4, totalRAM: 24, maxContainers: 200,
+    totalCPU: 0, totalRAM: 0, maxContainers: 0,
     sshKey: '', sshKeyEnvVar: '', acceptNewUsers: true, notes: ''
 };
 
@@ -270,31 +270,59 @@ export default function ServerManagement() {
                 <div className="mb-8 flex items-start justify-between">
                     <div>
                         <h1 className="text-4xl font-bold text-white mb-2">🖥️ Server Management</h1>
-                        <p className="text-gray-300">Manage deployment servers and DNS configuration</p>
+                        <p className="text-gray-300">Add, edit, and remove worker servers — fully under your control</p>
                     </div>
-                    <button
-                        onClick={() => setShowAddModal(true)}
-                        className="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-lg font-semibold transition flex items-center gap-2"
-                    >
-                        ➕ Add Server
-                    </button>
-                </div>
-
-                {/* Empty State */}
-                {Object.keys(servers).length === 0 && (
-                    <div className="bg-white/5 backdrop-blur-sm border border-dashed border-white/20 rounded-xl p-12 text-center mb-8">
-                        <div className="text-6xl mb-4">🖥️</div>
-                        <h2 className="text-2xl font-bold text-white mb-2">No servers configured yet</h2>
-                        <p className="text-gray-400 mb-6 max-w-lg mx-auto">
-                            Add your first worker server to start deploying containers.
-                            You{"'"}ll need the server{"'"}s IP address, SSH key file path, and resource specs (CPU, RAM).
-                        </p>
+                    <div className="flex items-center gap-3">
                         <button
                             onClick={() => setShowAddModal(true)}
-                            className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-semibold transition text-lg"
+                            className="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-lg font-semibold transition flex items-center gap-2"
                         >
-                            ➕ Add Your First Server
+                            ➕ Add Server
                         </button>
+                    </div>
+                </div>
+
+                {/* Empty State — Getting Started */}
+                {Object.keys(servers).length === 0 && (
+                    <div className="bg-white/5 backdrop-blur-sm border border-dashed border-white/20 rounded-xl p-10 mb-8">
+                        <div className="text-center mb-8">
+                            <div className="text-6xl mb-4">🖥️</div>
+                            <h2 className="text-2xl font-bold text-white mb-2">No servers configured yet</h2>
+                            <p className="text-gray-400 max-w-2xl mx-auto">
+                                Your fleet is a clean slate. Add servers manually so you stay in full control —
+                                you can edit, disable, or remove any of them at any time without touching the codebase or restarting anything.
+                            </p>
+                        </div>
+
+                        <div className="grid md:grid-cols-3 gap-4 mb-8 max-w-4xl mx-auto">
+                            <div className="bg-black/20 border border-white/10 rounded-lg p-4">
+                                <div className="text-blue-400 text-sm font-semibold mb-1">1. Network</div>
+                                <div className="text-white font-medium mb-1">IP &amp; Domain</div>
+                                <div className="text-gray-400 text-xs">Public IP of the worker node and the subdomain that will route to it.</div>
+                            </div>
+                            <div className="bg-black/20 border border-white/10 rounded-lg p-4">
+                                <div className="text-purple-400 text-sm font-semibold mb-1">2. Access</div>
+                                <div className="text-white font-medium mb-1">SSH Key Path</div>
+                                <div className="text-gray-400 text-xs">Absolute path to the private key on this API server, or an env var name that holds it.</div>
+                            </div>
+                            <div className="bg-black/20 border border-white/10 rounded-lg p-4">
+                                <div className="text-green-400 text-sm font-semibold mb-1">3. Capacity</div>
+                                <div className="text-white font-medium mb-1">CPU, RAM, Limits</div>
+                                <div className="text-gray-400 text-xs">How many containers this node can host and the resource ceiling per pool.</div>
+                            </div>
+                        </div>
+
+                        <div className="text-center">
+                            <button
+                                onClick={() => setShowAddModal(true)}
+                                className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-semibold transition text-lg"
+                            >
+                                ➕ Add Your First Server
+                            </button>
+                            <p className="text-gray-500 text-xs mt-3">
+                                Start with one node — you can add as many more as you need later.
+                            </p>
+                        </div>
                     </div>
                 )}
 
@@ -401,7 +429,7 @@ export default function ServerManagement() {
                                     {verifying === serverKey ? 'Verifying...' : '🔍 Verify DNS'}
                                 </button>
                                 
-                                {serverKey !== 'EC1' && (
+                                {server.capacity?.serverType !== 'api_main' && (
                                     <>
                                         <button
                                             onClick={() => runTestDeployment(serverKey)}
@@ -501,7 +529,7 @@ export default function ServerManagement() {
                             )}
 
                             {/* Health Indicators */}
-                            {healthStatus[serverKey] && serverKey !== 'EC1' && (
+                            {healthStatus[serverKey] && server.capacity?.serverType !== 'api_main' && (
                                 <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
                                     <div className="bg-black/20 border border-white/5 rounded p-3 text-center">
                                         <div className="text-gray-400 text-xs mb-1">SSH Connection</div>
@@ -667,125 +695,183 @@ export default function ServerManagement() {
                 {/* Add Server Modal */}
                 {showAddModal && (
                     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                        <div className="bg-gray-900 border border-white/20 rounded-xl p-6 w-full max-w-lg max-h-screen overflow-y-auto">
-                            <h3 className="text-2xl font-bold text-white mb-5">➕ Add New Server</h3>
-                            <div className="space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="text-gray-300 text-sm block mb-1">Server Key *</label>
-                                        <input type="text" placeholder="EC4"
-                                            value={addForm.key}
-                                            onChange={e => setAddForm({...addForm, key: e.target.value.toUpperCase()})}
-                                            className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500 uppercase"
-                                        />
+                        <div className="bg-gray-900 border border-white/20 rounded-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+                            {/* Modal Header */}
+                            <div className="px-6 py-4 border-b border-white/10 flex items-start justify-between">
+                                <div>
+                                    <h3 className="text-2xl font-bold text-white">➕ Add New Server</h3>
+                                    <p className="text-gray-400 text-sm mt-1">Configure a worker node. You can edit or remove it any time.</p>
+                                </div>
+                                <button
+                                    onClick={() => { setShowAddModal(false); setAddForm(defaultAddForm); }}
+                                    className="text-gray-400 hover:text-white text-xl leading-none"
+                                    title="Close"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+
+                            {/* Modal Body (scrollable) */}
+                            <div className="px-6 py-5 overflow-y-auto space-y-6">
+                                {/* Section: Identity */}
+                                <section>
+                                    <div className="text-xs uppercase tracking-wider text-blue-400 font-semibold mb-2">1. Identity</div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-gray-300 text-sm block mb-1">Server Key <span className="text-red-400">*</span></label>
+                                            <input type="text" placeholder="e.g. EC4"
+                                                value={addForm.key}
+                                                onChange={e => setAddForm({...addForm, key: e.target.value.toUpperCase().replace(/\s+/g, '')})}
+                                                className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500 uppercase"
+                                            />
+                                            <p className="text-gray-500 text-xs mt-1">Short unique ID (auto-uppercased). Used in container names.</p>
+                                        </div>
+                                        <div>
+                                            <label className="text-gray-300 text-sm block mb-1">Display Name</label>
+                                            <input type="text" placeholder="e.g. EC4-Mixed-Server"
+                                                value={addForm.name}
+                                                onChange={e => setAddForm({...addForm, name: e.target.value})}
+                                                className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500"
+                                            />
+                                            <p className="text-gray-500 text-xs mt-1">Friendly label shown in admin UI.</p>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <label className="text-gray-300 text-sm block mb-1">Name</label>
-                                        <input type="text" placeholder="EC4-Mixed-Server"
-                                            value={addForm.name}
-                                            onChange={e => setAddForm({...addForm, name: e.target.value})}
+                                    <div className="mt-3">
+                                        <label className="text-gray-300 text-sm block mb-1">Description</label>
+                                        <input type="text" placeholder="Optional notes about this node"
+                                            value={addForm.description}
+                                            onChange={e => setAddForm({...addForm, description: e.target.value})}
                                             className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500"
                                         />
                                     </div>
-                                </div>
-                                <div>
-                                    <label className="text-gray-300 text-sm block mb-1">IP Address *</label>
-                                    <input type="text" placeholder="192.168.1.100"
-                                        value={addForm.host}
-                                        onChange={e => setAddForm({...addForm, host: e.target.value})}
-                                        className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="text-gray-300 text-sm block mb-1">Domain</label>
-                                    <input type="text" placeholder="ec4.foodpanda.site"
-                                        value={addForm.domain}
-                                        onChange={e => setAddForm({...addForm, domain: e.target.value})}
-                                        className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500"
-                                    />
-                                </div>
-                                <div className="grid grid-cols-3 gap-4">
-                                    <div>
-                                        <label className="text-gray-300 text-sm block mb-1">CPU (cores)</label>
-                                        <input type="number" step="0.5" min="1"
-                                            value={addForm.totalCPU}
-                                            onChange={e => setAddForm({...addForm, totalCPU: parseFloat(e.target.value)})}
-                                            className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white"
-                                        />
+                                </section>
+
+                                {/* Section: Network */}
+                                <section>
+                                    <div className="text-xs uppercase tracking-wider text-blue-400 font-semibold mb-2">2. Network</div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-gray-300 text-sm block mb-1">Public IP Address <span className="text-red-400">*</span></label>
+                                            <input type="text" placeholder="192.168.1.100"
+                                                value={addForm.host}
+                                                onChange={e => setAddForm({...addForm, host: e.target.value.trim()})}
+                                                className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500 font-mono text-sm"
+                                            />
+                                            <p className="text-gray-500 text-xs mt-1">IPv4 address reachable from this API server.</p>
+                                        </div>
+                                        <div>
+                                            <label className="text-gray-300 text-sm block mb-1">Domain</label>
+                                            <input type="text" placeholder="ec4.example.com"
+                                                value={addForm.domain}
+                                                onChange={e => setAddForm({...addForm, domain: e.target.value.trim().toLowerCase()})}
+                                                className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500 font-mono text-sm"
+                                            />
+                                            <p className="text-gray-500 text-xs mt-1">Subdomain pointing to this server (used by Nginx).</p>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <label className="text-gray-300 text-sm block mb-1">RAM (GB)</label>
-                                        <input type="number" min="1"
-                                            value={addForm.totalRAM}
-                                            onChange={e => setAddForm({...addForm, totalRAM: parseInt(e.target.value)})}
-                                            className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white"
-                                        />
+                                </section>
+
+                                {/* Section: SSH Access */}
+                                <section>
+                                    <div className="text-xs uppercase tracking-wider text-purple-400 font-semibold mb-2">3. SSH Access</div>
+                                    <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-3">
+                                        <p className="text-gray-400 text-xs">
+                                            Provide <strong className="text-white">either</strong> a direct file path <strong className="text-white">or</strong> an env variable name that holds the path. If both are set, env variable wins.
+                                        </p>
+                                        <div>
+                                            <label className="text-gray-300 text-xs block mb-1">SSH Private Key File Path</label>
+                                            <input type="text" placeholder="/home/ubuntu/.ssh/id_rsa_ec4"
+                                                value={addForm.sshKey}
+                                                onChange={e => setAddForm({...addForm, sshKey: e.target.value})}
+                                                className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500 text-sm font-mono"
+                                            />
+                                            <p className="text-gray-500 text-xs mt-1">Absolute path to the key on the machine running this API.</p>
+                                        </div>
+                                        <div className="flex items-center gap-3 my-1">
+                                            <div className="flex-1 h-px bg-white/10" />
+                                            <span className="text-gray-500 text-xs">OR</span>
+                                            <div className="flex-1 h-px bg-white/10" />
+                                        </div>
+                                        <div>
+                                            <label className="text-gray-300 text-xs block mb-1">Env Variable Name</label>
+                                            <input type="text" placeholder="SSH_EC4_KEY"
+                                                value={addForm.sshKeyEnvVar}
+                                                onChange={e => setAddForm({...addForm, sshKeyEnvVar: e.target.value.toUpperCase().replace(/\s+/g, '')})}
+                                                className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500 text-sm font-mono uppercase"
+                                            />
+                                            <p className="text-gray-500 text-xs mt-1">System reads the key path from this env var. Useful when you don't want paths in the database.</p>
+                                        </div>
                                     </div>
+                                </section>
+
+                                {/* Section: Capacity */}
+                                <section>
+                                    <div className="text-xs uppercase tracking-wider text-green-400 font-semibold mb-2">4. Capacity &amp; Role</div>
                                     <div>
-                                        <label className="text-gray-300 text-sm block mb-1">Max Containers</label>
-                                        <input type="number" min="1"
-                                            value={addForm.maxContainers}
-                                            onChange={e => setAddForm({...addForm, maxContainers: parseInt(e.target.value)})}
-                                            className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white"
-                                        />
+                                        <label className="text-gray-300 text-sm block mb-1">Server Type</label>
+                                        <select
+                                            value={addForm.type}
+                                            onChange={e => setAddForm({...addForm, type: e.target.value})}
+                                            className="w-full bg-gray-800 border border-white/20 rounded-lg px-3 py-2 text-white"
+                                        >
+                                            <option value="mixed_users">Mixed Users — hosts both Free + Paid containers</option>
+                                            <option value="dedicated_only">Dedicated Only — only Paid users</option>
+                                            <option value="api_main">API Main — no user containers, runs the platform itself</option>
+                                        </select>
                                     </div>
-                                </div>
-                                <div>
-                                    <label className="text-gray-300 text-sm block mb-1">Type</label>
-                                    <select
-                                        value={addForm.type}
-                                        onChange={e => setAddForm({...addForm, type: e.target.value})}
-                                        className="w-full bg-gray-800 border border-white/20 rounded-lg px-3 py-2 text-white"
-                                    >
-                                        <option value="mixed_users">Mixed Users (Free + Paid)</option>
-                                        <option value="dedicated_only">Dedicated Only (Paid)</option>
-                                        <option value="api_main">API Main (no containers)</option>
-                                    </select>
-                                </div>
-                                <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-3">
-                                    <h4 className="text-white font-medium text-sm flex items-center gap-2">🔑 SSH Access</h4>
-                                    <div>
-                                        <label className="text-gray-300 text-xs block mb-1">SSH Private Key File Path (on API server)</label>
-                                        <input type="text" placeholder="/home/ubuntu/.ssh/id_rsa_ec4"
-                                            value={addForm.sshKey}
-                                            onChange={e => setAddForm({...addForm, sshKey: e.target.value})}
-                                            className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500 text-sm"
-                                        />
-                                        <p className="text-gray-500 text-xs mt-1">Absolute path to the private key file on the machine running this API</p>
+                                    <div className="grid grid-cols-3 gap-4 mt-3">
+                                        <div>
+                                            <label className="text-gray-300 text-sm block mb-1">CPU (cores)</label>
+                                            <input type="number" step="0.5" min="0"
+                                                value={addForm.totalCPU}
+                                                onChange={e => setAddForm({...addForm, totalCPU: parseFloat(e.target.value) || 0})}
+                                                className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-gray-300 text-sm block mb-1">RAM (GB)</label>
+                                            <input type="number" min="0"
+                                                value={addForm.totalRAM}
+                                                onChange={e => setAddForm({...addForm, totalRAM: parseInt(e.target.value) || 0})}
+                                                className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-gray-300 text-sm block mb-1">Max Containers</label>
+                                            <input type="number" min="0"
+                                                value={addForm.maxContainers}
+                                                onChange={e => setAddForm({...addForm, maxContainers: parseInt(e.target.value) || 0})}
+                                                className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white"
+                                            />
+                                        </div>
                                     </div>
-                                    <div>
-                                        <label className="text-gray-300 text-xs block mb-1">OR Env Variable Name (optional)</label>
-                                        <input type="text" placeholder="SSH_EC4_KEY"
-                                            value={addForm.sshKeyEnvVar}
-                                            onChange={e => setAddForm({...addForm, sshKeyEnvVar: e.target.value})}
-                                            className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500 text-sm"
-                                        />
-                                        <p className="text-gray-500 text-xs mt-1">If set, the system reads the key path from this env var instead</p>
+                                    <p className="text-gray-500 text-xs mt-2">For <code className="bg-black/30 px-1 rounded">api_main</code>, set max containers to 0 — that node won't host user workloads.</p>
+                                </section>
+
+                                {/* Section: Registration */}
+                                <section>
+                                    <div className="text-xs uppercase tracking-wider text-yellow-400 font-semibold mb-2">5. Registration</div>
+                                    <div className="flex items-center justify-between bg-white/5 border border-white/10 rounded-lg p-3">
+                                        <div>
+                                            <div className="text-white text-sm font-medium">Accept new user signups on this server</div>
+                                            <div className="text-gray-500 text-xs mt-0.5">Disable to drain the node without removing it.</div>
+                                        </div>
+                                        <button
+                                            onClick={() => setAddForm({...addForm, acceptNewUsers: !addForm.acceptNewUsers})}
+                                            className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${
+                                                addForm.acceptNewUsers
+                                                    ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                                                    : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                                            }`}
+                                        >
+                                            {addForm.acceptNewUsers ? '✅ Accepting' : '🚫 Closed'}
+                                        </button>
                                     </div>
-                                </div>
-                                <div>
-                                    <label className="text-gray-300 text-sm block mb-1">Description</label>
-                                    <input type="text"
-                                        value={addForm.description}
-                                        onChange={e => setAddForm({...addForm, description: e.target.value})}
-                                        className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white"
-                                    />
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <label className="text-gray-300 text-sm">Accept New Users</label>
-                                    <button
-                                        onClick={() => setAddForm({...addForm, acceptNewUsers: !addForm.acceptNewUsers})}
-                                        className={`px-4 py-1 rounded-full text-sm font-medium transition ${
-                                            addForm.acceptNewUsers
-                                                ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-                                                : 'bg-red-500/20 text-red-400 border border-red-500/30'
-                                        }`}
-                                    >
-                                        {addForm.acceptNewUsers ? '✅ Yes' : '🚫 No'}
-                                    </button>
-                                </div>
+                                </section>
                             </div>
-                            <div className="flex gap-3 mt-6">
+
+                            {/* Modal Footer */}
+                            <div className="px-6 py-4 border-t border-white/10 flex gap-3">
                                 <button
                                     onClick={() => { setShowAddModal(false); setAddForm(defaultAddForm); }}
                                     className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition"
@@ -794,8 +880,9 @@ export default function ServerManagement() {
                                 </button>
                                 <button
                                     onClick={addServer}
-                                    disabled={addingSrv}
-                                    className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg transition"
+                                    disabled={addingSrv || !addForm.key || !addForm.host}
+                                    className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-semibold px-4 py-2 rounded-lg transition"
+                                    title={!addForm.key || !addForm.host ? 'Server Key and IP Address are required' : ''}
                                 >
                                     {addingSrv ? '⏳ Adding...' : '➕ Add Server'}
                                 </button>

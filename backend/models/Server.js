@@ -16,7 +16,9 @@ const serverSchema = new mongoose.Schema({
     name: {
         type: String,
         required: true,
-        unique: true
+        trim: true
+        // No unique constraint — admins are free to rename without conflicts.
+        // The `key` field is the unique identifier.
     },
     host: {
         type: String,

@@ -75,9 +75,8 @@ export default function CapacityManagementPage() {
         const fetchServers = async () => {
             try {
                 const res = await api.get('/admin/servers');
-                const serverKeys = (res.data.servers || [])
-                    .filter((s: any) => s.serverKey !== 'EC1') // Skip API-only servers
-                    .map((s: any) => s.serverKey);
+                // Backend /admin/servers already excludes api_main nodes — pull the keys directly.
+                const serverKeys = (res.data.servers || []).map((s: any) => s.serverKey);
                 setAvailableServers(serverKeys);
                 if (serverKeys.length > 0 && !selectedServer) {
                     setSelectedServer(serverKeys[0]);

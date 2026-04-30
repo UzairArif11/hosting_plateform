@@ -226,16 +226,12 @@ settingsSchema.statics.getSettings = async function () {
     let settings = await this.findOne();
 
     if (!settings) {
-        // Create default settings if none exist
+        // Create blank defaults. Per-server domains are stored on the Server
+        // model and managed entirely from the Admin Panel — never seeded here.
         settings = await this.create({
-            baseDomain: process.env.BASE_DOMAIN || 'foodpanda.site',
-            serverDomains: {
-                EC2: process.env.EC2_DOMAIN || 'ec2.foodpanda.site',
-                EC3: process.env.EC3_DOMAIN || 'ec3.foodpanda.site',
-                EC4: process.env.EC4_DOMAIN || 'ec4.foodpanda.site',
-                EC5: process.env.EC5_DOMAIN || 'ec5.foodpanda.site'
-            },
-            sslEmail: process.env.SSL_EMAIL || 'admin@foodpanda.site',
+            baseDomain: process.env.BASE_DOMAIN || '',
+            serverDomains: {},
+            sslEmail: process.env.SSL_EMAIL || '',
             protocol: process.env.PROTOCOL || 'https'
         });
     }
@@ -255,10 +251,28 @@ settingsSchema.statics.updateSettings = async function (updates, userId) {
     return settings;
 };
 
-// Get domain for specific server
+/**
+ * Get the live domain for a server key.
+ * Resolution order:
+ *   1. Server model (admin-managed, source of truth)
+ *   2. legacy Settings.serverDomains map (backward compat)
+ *   3. baseDomain
+ */
 settingsSchema.statics.getDomainForServer = async function (serverKey) {
+    if (!serverKey) return '';
+    const key = String(serverKey).toUpperCase();
+
+    try {
+        const Server = mongoose.model('Server');
+        const srv = await Server.findOne({ key }).lean();
+        if (srv?.domain) return srv.domain;
+    } catch (_) { /* model may not be registered yet */ }
+
     const settings = await this.getSettings();
-    return settings.serverDomains[serverKey] || settings.baseDomain;
+    if (settings.serverDomains && settings.serverDomains[key]) {
+        return settings.serverDomains[key];
+    }
+    return settings.baseDomain || '';
 };
 
 module.exports = mongoose.model('Settings', settingsSchema);

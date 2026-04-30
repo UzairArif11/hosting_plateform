@@ -41,7 +41,8 @@ const serverLogsLimiter = rateLimit({
 // Get container logs
 router.get('/servers/:serverKey/containers/:containerId/logs', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { serverKey, containerId } = req.params;
+    const { containerId } = req.params;
+    const serverKey = (req.params.serverKey || '').toUpperCase();
 
     // validate server key
     if (!ORACLE_SERVERS[serverKey]) {
@@ -1624,7 +1625,7 @@ router.get('/servers/health', requireAuth, requireAdmin, serverLogsLimiter, asyn
 // Get specific server details
 router.get('/servers/:serverKey', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { serverKey } = req.params;
+    const serverKey = (req.params.serverKey || '').toUpperCase();
 
     if (!ORACLE_SERVERS[serverKey]) {
       return res.status(404).json({ success: false, error: 'Server not found' });
@@ -1716,7 +1717,7 @@ router.post('/servers', requireAuth, requireAdmin, async (req, res) => {
 // Update an existing server's full configuration
 router.put('/servers/:serverKey/config', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { serverKey } = req.params;
+    const serverKey = (req.params.serverKey || '').toUpperCase();
     const Server = require('../models/Server');
 
     const allowed = [
@@ -1729,10 +1730,18 @@ router.put('/servers/:serverKey/config', requireAuth, requireAdmin, async (req, 
     const updates = {};
     allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
 
+    // Reject empty critical fields explicitly (Mongoose required-validators only run with runValidators).
+    if (updates.host !== undefined && !String(updates.host).trim()) {
+      return res.status(400).json({ success: false, error: 'host cannot be empty' });
+    }
+    if (updates.name !== undefined && !String(updates.name).trim()) {
+      return res.status(400).json({ success: false, error: 'name cannot be empty' });
+    }
+
     const serverDoc = await Server.findOneAndUpdate(
-      { key: serverKey.toUpperCase() },
+      { key: serverKey },
       { $set: updates },
-      { new: true }
+      { new: true, runValidators: true, context: 'query' }
     );
     if (!serverDoc) {
       return res.status(404).json({ success: false, error: `Server '${serverKey}' not found` });
@@ -1822,10 +1831,10 @@ router.put('/servers/:serverKey/toggle', requireAuth, requireAdmin, async (req, 
 router.post('/users/:userId/migrate', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { userId } = req.params;
-    const { targetServer } = req.body;
+    const targetServer = (req.body.targetServer || '').toUpperCase();
 
     await getOracleServers();
-    if (!ORACLE_SERVERS[targetServer] || ORACLE_SERVERS[targetServer].type === 'api_main') {
+    if (!targetServer || !ORACLE_SERVERS[targetServer] || ORACLE_SERVERS[targetServer].type === 'api_main') {
       return res.status(400).json({ success: false, error: `Invalid target server '${targetServer}'. Must be a worker node.` });
     }
 
@@ -1872,7 +1881,7 @@ router.post('/users/:userId/migrate', requireAuth, requireAdmin, async (req, res
 // Get detailed Docker stats for a server
 router.get('/servers/:serverKey/docker-stats', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { serverKey } = req.params;
+    const serverKey = (req.params.serverKey || '').toUpperCase();
     const server = ORACLE_SERVERS[serverKey];
 
     if (!server) {
@@ -2562,14 +2571,14 @@ router.post('/manual-payments/:id/reject', requireAuth, requireAdmin, async (req
 // Run a manual test deployment on a specific server
 router.post('/servers/:serverKey/test-deploy', requireAuth, requireAdmin, testDeployLimiter, async (req, res) => {
   try {
-    const { serverKey } = req.params;
+    const serverKey = (req.params.serverKey || '').toUpperCase();
     const { ORACLE_SERVERS } = require('../services/containerOrchestrator');
     const { NodeSSH } = require('node-ssh');
     const { getSSHConfig } = require('../services/remoteBuild');
 
     const server = ORACLE_SERVERS[serverKey];
-    if (!server || serverKey === 'EC1') {
-      return res.status(400).json({ success: false, error: 'Invalid server for test deployment' });
+    if (!server || server.type === 'api_main') {
+      return res.status(400).json({ success: false, error: 'Invalid server for test deployment (worker nodes only)' });
     }
 
     const logs = [];
@@ -2659,14 +2668,14 @@ rm -rf /tmp/pm2-image
 // Get recent server logs and stats
 router.get('/servers/:serverKey/logs', requireAuth, requireAdmin, serverLogsLimiter, async (req, res) => {
   try {
-    const { serverKey } = req.params;
+    const serverKey = (req.params.serverKey || '').toUpperCase();
     const { ORACLE_SERVERS } = require('../services/containerOrchestrator');
     const { NodeSSH } = require('node-ssh');
     const { getSSHConfig } = require('../services/remoteBuild');
 
     const server = ORACLE_SERVERS[serverKey];
-    if (!server || serverKey === 'EC1') {
-      return res.status(400).json({ success: false, error: 'Invalid server' });
+    if (!server || server.type === 'api_main') {
+      return res.status(400).json({ success: false, error: 'Invalid server (worker nodes only)' });
     }
 
     const ssh = new NodeSSH();
