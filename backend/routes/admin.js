@@ -1048,7 +1048,8 @@ router.get('/infra/scan', requireAuth, requireAdmin, async (req, res) => {
 // Force delete any container from any server
 router.delete('/infra/containers/:server/:name', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { server: sKey, name } = req.params;
+    const sKey = (req.params.server || '').toUpperCase();
+    const { name } = req.params;
     const host = ORACLE_SERVERS[sKey]?.host;
 
     if (!host) return res.status(400).json({ error: 'Invalid server' });
@@ -1062,6 +1063,251 @@ router.delete('/infra/containers/:server/:name', requireAuth, requireAdmin, asyn
   } catch (error) {
     logger.error('Force delete error:', error);
     res.status(500).json({ error: `Failed to delete container: ${error.message}` });
+  }
+});
+
+// ─── Container Audit (deep classification by embedded user/admin id) ─────────
+
+// Known platform infrastructure containers we should NEVER flag as foreign.
+// Anything else that doesn't match the EC*-(user|admin)-{ObjectId} pattern is
+// flagged as 'foreign' so admin can review it.
+const SYSTEM_CONTAINER_PATTERNS = [
+  /^nginx[-_]?/i,
+  /^vercel-clone-/i,
+  /^.+-mongo$/i,
+  /^.+-redis$/i,
+  /^.+-postgres(_\d+)?$/i,
+  /^.+_postgres(_\d+)?$/i,
+  /^.+_mongo(_\d+)?$/i,
+  /^btcpayserver/i,
+  /^generated_/i,
+  /^bitcoind/i,
+  /^tor[-_]?/i,
+  /^nbxplorer/i,
+  /^trading-/i,
+  /^sports[-_]/i,
+  /^node-pm2-alpine/i
+];
+const PLATFORM_CONTAINER_RE = /^(EC\d+)-(user|admin)-([0-9a-f]{24})$/i;
+
+/**
+ * Classify a single container against the User collection.
+ * Returns one of:
+ *   healthy        — embedded id matches an active user, role/server consistent
+ *   stale_user     — id matches but user is suspended/deleted
+ *   wrong_server   — id matches but user.assignedServer != prefix
+ *   wrong_role     — admin container but matched user has role=user, or vice-versa
+ *   orphaned       — id is a valid ObjectId but no user found
+ *   foreign        — name doesn't match any known pattern (potential malware)
+ *   system         — known platform infra (mongo/redis/btcpay/etc.)
+ */
+function classifyContainer(name, server, userMap) {
+  const m = name.match(PLATFORM_CONTAINER_RE);
+  if (m) {
+    const [, prefix, roleRaw, idRaw] = m;
+    // Normalize captured id/role to lowercase: Mongoose ObjectId.toString()
+    // and our role enum are both lowercase, so the regex /i flag must not leak
+    // uppercase hex into the lookup.
+    const id   = idRaw.toLowerCase();
+    const role = roleRaw.toLowerCase();
+    const user = userMap.get(id);
+    if (!user) return { status: 'orphaned', kind: role, userId: id };
+
+    const userRole = (user.role || 'user').toLowerCase();
+    const wantedRole = role;
+    if (userRole !== wantedRole) {
+      return {
+        status: 'wrong_role',
+        kind: wantedRole,
+        userId: id,
+        user: { email: user.email, username: user.username, role: userRole, status: user.status }
+      };
+    }
+
+    const assigned = (user.assignedServer || user.oracleAccountId || '').toUpperCase();
+    if (assigned && assigned !== prefix.toUpperCase()) {
+      return {
+        status: 'wrong_server',
+        kind: wantedRole,
+        userId: id,
+        user: { email: user.email, username: user.username, role: userRole, status: user.status, assignedServer: assigned }
+      };
+    }
+
+    if (user.status && !['active', 'trial'].includes(user.status)) {
+      return {
+        status: 'stale_user',
+        kind: wantedRole,
+        userId: id,
+        user: { email: user.email, username: user.username, role: userRole, status: user.status }
+      };
+    }
+
+    return {
+      status: 'healthy',
+      kind: wantedRole,
+      userId: id,
+      user: { email: user.email, username: user.username, role: userRole, status: user.status }
+    };
+  }
+
+  if (SYSTEM_CONTAINER_PATTERNS.some(rx => rx.test(name))) {
+    return { status: 'system', kind: 'infra' };
+  }
+
+  return { status: 'foreign', kind: 'unknown' };
+}
+
+/**
+ * GET /admin/containers/audit
+ * Fleet-wide container audit. For each worker server, lists every running/stopped
+ * container with live `docker stats` and classifies it against the User collection.
+ *
+ * Response:
+ *   { servers: { EC2: { containers: [...], summary: {...} }, ... }, totals: {...} }
+ */
+router.get('/containers/audit', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await getOracleServers();
+    const workerKeys = Object.keys(ORACLE_SERVERS).filter(k => ORACLE_SERVERS[k].type !== 'api_main' && ORACLE_SERVERS[k].host);
+
+    if (workerKeys.length === 0) {
+      return res.json({
+        success: true,
+        servers: {},
+        totals: { containers: 0, healthy: 0, orphaned: 0, foreign: 0, stale_user: 0, wrong_server: 0, wrong_role: 0, system: 0 }
+      });
+    }
+
+    // Build a map of users keyed by stringified _id for O(1) lookup.
+    const allUsers = await User.find({})
+      .select('_id email username role status assignedServer oracleAccountId')
+      .lean();
+    const userMap = new Map(allUsers.map(u => [String(u._id), u]));
+
+    const totals = { containers: 0, healthy: 0, orphaned: 0, foreign: 0, stale_user: 0, wrong_server: 0, wrong_role: 0, system: 0 };
+    const serversOut = {};
+
+    // Run all server scans in parallel for speed.
+    await Promise.all(workerKeys.map(async (sKey) => {
+      const host = ORACLE_SERVERS[sKey].host;
+      try {
+        // Run list + live stats in parallel for this one server.
+        const [listResult, liveStats] = await Promise.all([
+          docker.listContainers(host, true),       // includes stopped
+          getRemoteDockerStats(sKey).catch(() => []) // running only, may fail silently
+        ]);
+
+        const containers = listResult.success ? (listResult.containers || []) : [];
+        const statsByName = new Map();
+        for (const s of (liveStats || [])) {
+          if (s && s.name) statsByName.set(s.name.replace(/^\//, ''), s);
+        }
+
+        const summary = { total: 0, healthy: 0, orphaned: 0, foreign: 0, stale_user: 0, wrong_server: 0, wrong_role: 0, system: 0 };
+        const items = containers.map(c => {
+          const rawName = (c.names && c.names[0]) || '';
+          const name = rawName.replace(/^\//, '');
+          const cls = classifyContainer(name, sKey, userMap);
+          const stats = statsByName.get(name) || null;
+
+          summary.total++;
+          summary[cls.status] = (summary[cls.status] || 0) + 1;
+
+          return {
+            id: (c.id || '').substring(0, 12),
+            name,
+            image: c.image,
+            state: c.state,
+            status: c.status,
+            createdAt: typeof c.created === 'number' ? new Date(c.created * 1000) : c.created,
+            classification: cls,
+            stats: stats ? {
+              cpu: stats.cpu,
+              memUsage: stats.memUsage,
+              memPerc: stats.memPerc,
+              netIO: stats.netIO
+            } : null
+          };
+        });
+
+        for (const k of Object.keys(summary)) {
+          if (k === 'total') continue;
+          totals[k] = (totals[k] || 0) + summary[k];
+        }
+        totals.containers += summary.total;
+
+        serversOut[sKey] = {
+          host,
+          reachable: listResult.success,
+          error: listResult.success ? null : listResult.error,
+          summary,
+          containers: items
+        };
+      } catch (err) {
+        logger.error(`Container audit failed for ${sKey}:`, err);
+        serversOut[sKey] = { host, reachable: false, error: err.message, summary: {}, containers: [] };
+      }
+    }));
+
+    res.json({ success: true, servers: serversOut, totals });
+  } catch (error) {
+    logger.error('Container audit error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to audit containers' });
+  }
+});
+
+/**
+ * POST /admin/containers/bulk-delete
+ * Body: { items: [{ server: 'EC2', name: 'EC2-user-...' }, ...] }
+ * Force-stops and removes the listed containers across servers. Atomic per item.
+ */
+router.post('/containers/bulk-delete', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (items.length === 0) {
+      return res.status(400).json({ success: false, error: 'items array is required' });
+    }
+    if (items.length > 200) {
+      return res.status(400).json({ success: false, error: 'Refusing to process more than 200 items per call' });
+    }
+
+    await getOracleServers();
+    const results = [];
+
+    for (const raw of items) {
+      const server = String(raw?.server || '').toUpperCase();
+      const name   = String(raw?.name || '').trim();
+
+      if (!server || !name) {
+        results.push({ server, name, success: false, error: 'server and name required' });
+        continue;
+      }
+      const host = ORACLE_SERVERS[server]?.host;
+      if (!host) {
+        results.push({ server, name, success: false, error: 'Unknown server' });
+        continue;
+      }
+
+      try {
+        logger.warn(`[ContainerAudit] Admin ${req.user.email} bulk-deleting ${name} on ${server}`);
+        await docker.stopContainer(name, host).catch(() => {});
+        await docker.removeContainer(name, host);
+        results.push({ server, name, success: true });
+      } catch (err) {
+        results.push({ server, name, success: false, error: err.message || 'delete failed' });
+      }
+    }
+
+    const ok = results.filter(r => r.success).length;
+    res.json({
+      success: true,
+      message: `Deleted ${ok}/${results.length} container(s)`,
+      results
+    });
+  } catch (error) {
+    logger.error('Bulk delete error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Bulk delete failed' });
   }
 });
 

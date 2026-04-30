@@ -63,6 +63,7 @@ export default function AdminLayout({
         { href: '/admin/templates', label: '📑 Templates' },
         { href: '/admin/capacity', label: '📊 Capacity' },
         { href: '/admin/servers-new', label: '🐳 Docker Stats' },
+        { href: '/admin/containers', label: '🔍 Container Audit' },
         { href: '/admin/queue', label: '⏱️ Queue' },
         { href: '/admin/cleanup', label: '🧹 Cleanup' },
         { href: '/admin/settings', label: '⚙️ Settings' },
