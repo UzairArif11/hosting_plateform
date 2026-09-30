@@ -1,0 +1,8 @@
+{
+  "name": "power-dev-plugin",
+  "version": "1.0.0",
+  "description": "Full-stack power developer plugin: web research, SSH deploy, live preview, PM2 logs, test runner, MongoDB tools. Designed for complex Next.js + Node.js + MongoDB projects on Oracle Cloud.",
+  "author": {
+    "name": "INTERWARE"
+  }
+}
